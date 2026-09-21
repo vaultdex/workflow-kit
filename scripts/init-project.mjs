@@ -8,6 +8,8 @@ const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
 const existing = process.argv.includes('--existing');
 const hash = text => createHash('sha256').update(text).digest('hex');
+const fragments = group => group.hooks ? group.hooks.map(hook => ({ ...group, hooks: [hook] })) : [group];
+const fingerprint = group => hash(JSON.stringify(group));
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 assert.ok(existsSync(root), 'Initialize the target Git checkout first');
@@ -43,16 +45,30 @@ for (const file of readdirSync(join(kit, 'templates'), { recursive: true })) {
     current.hooks ??= {};
     for (const event of new Set([...Object.keys(old), ...Object.keys(incoming.hooks)])) {
       const currentGroups = current.hooks[event] ?? [];
-      for (const digest of old[event] ?? []) assert.ok(currentGroups.some(group => hash(JSON.stringify(group)) === digest),
+      for (const digest of old[event] ?? []) assert.ok(currentGroups.flatMap(fragments).some(group => fingerprint(group) === digest),
         `Managed hook edited or disabled; preserved without replacement: ${name}/${event}`);
-      const retained = currentGroups.filter(group => !(old[event] ?? []).includes(hash(JSON.stringify(group))));
-      for (const group of incoming.hooks[event] ?? [])
-        if (!retained.some(x => JSON.stringify(x) === JSON.stringify(group))) retained.push(group);
+      const retained = currentGroups.flatMap(group => {
+        if (!group.hooks) return (old[event] ?? []).includes(fingerprint(group)) ? [] : [group];
+        const remaining = group.hooks.filter(hook => !(old[event] ?? []).includes(fingerprint({ ...group, hooks: [hook] })));
+        return remaining.length ? [{ ...group, hooks: remaining }] : [];
+      });
+      for (const group of incoming.hooks[event] ?? []) {
+        for (const part of fragments(group)) {
+          if (retained.flatMap(fragments).some(x => fingerprint(x) === fingerprint(part))) continue;
+          const { hooks: handlers, ...metadata } = part;
+          const matching = handlers && retained.find(x => {
+            const { hooks: _, ...other } = x;
+            return x.hooks && JSON.stringify(other) === JSON.stringify(metadata);
+          });
+          if (matching) matching.hooks.push(...handlers);
+          else retained.push(part);
+        }
+      }
       if (retained.length) current.hooks[event] = retained;
       else delete current.hooks[event];
     }
     for (const [key, val] of Object.entries(incoming)) if (key !== 'hooks' && current[key] === undefined) current[key] = val;
-    hooks[name] = Object.fromEntries(Object.entries(incoming.hooks).map(([event, groups]) => [event, groups.map(group => hash(JSON.stringify(group)))]));
+    hooks[name] = Object.fromEntries(Object.entries(incoming.hooks).map(([event, groups]) => [event, groups.flatMap(fragments).map(fingerprint)]));
     pending[name] = JSON.stringify(current, null, 2) + '\n';
   } else {
     assert.ok(!existsSync(target) || text(target) === value || hash(text(target)) === prior.files[name], `Existing file left untouched: ${name}`);

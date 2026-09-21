@@ -26,7 +26,8 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   assert.match(refused.stderr, /left untouched/);
   assert.equal(readFileSync(edited, 'utf8'), 'user modification\n');
   const foreign = join(fixture, '.claude/settings.json');
-  const config = { permissions: { deny: ['Read(secret)'] }, hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo foreign-hook' }] }] } };
+  const shared = JSON.parse(readFileSync(join(kit, 'templates/.claude/settings.json'), 'utf8')).hooks.SessionStart[0];
+  const config = { permissions: { deny: ['Read(secret)'] }, hooks: { SessionStart: [{ ...shared, hooks: [{ type: 'command', command: 'echo foreign-hook' }, ...shared.hooks] }] } };
   mkdirSync(dirname(foreign), { recursive: true });
   writeFileSync(foreign, JSON.stringify(config));
   // init-project requires the real submodule placement for consumer entry points.
@@ -42,6 +43,8 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   const current = JSON.parse(configured);
   assert.deepEqual(current.permissions, config.permissions);
   assert.deepEqual(current.hooks.SessionStart[0], config.hooks.SessionStart[0]);
+  const sharedCommand = shared.hooks[0].command;
+  assert.equal(current.hooks.SessionStart.flatMap(g => g.hooks).filter(h => h.command === sharedCommand).length, 1);
   const second = init();
   assert.equal(second.status, 0, second.stderr);
   assert.equal(readFileSync(foreign, 'utf8'), configured);
