@@ -78,7 +78,8 @@ const patterns = ['/.workflow-kit/', '/.impeccable/vendor/', '/.impeccable/setup
   '/.claude/agents/impeccable-*.md', '/.codex/agents/impeccable_*.toml', '/.opencode/commands/impeccable.md',
   '.claude/settings.local.json', '**/.impeccable/config.local.json', '**/skills/impeccable/scripts/bin/'];
 const currentIgnore = existsSync(ignore) ? text(ignore) : '';
-pending['.gitignore'] = currentIgnore.trimEnd() + '\n' + patterns.filter(p => !currentIgnore.split('\n').includes(p)).join('\n') + '\n';
+const additions = patterns.filter(p => !currentIgnore.split('\n').includes(p));
+pending['.gitignore'] = currentIgnore.trimEnd() + (additions.length ? '\n' + additions.join('\n') : '') + '\n';
 safe(receipt);
 pending[receipt] = JSON.stringify({ files: { ...prior.files, ...files }, hooks }, null, 2) + '\n';
 for (const [file, value] of Object.entries(pending)) {

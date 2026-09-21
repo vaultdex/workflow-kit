@@ -22,7 +22,8 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - run: node scripts/check-skills.mjs
       - run: node scripts/init-project.mjs . --existing
       - run: node scripts/setup-skills.mjs
       - run: node --test scripts/tests
-      - run: node scripts/check-skills.mjs
+      - run: git diff --exit-code -- .github .codex .claude .cursor
