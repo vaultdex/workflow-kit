@@ -14,15 +14,21 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 | Status | Required state |
 | --- | --- |
 | Backlog | Proposed or blocked; blockers include cause and recovery condition. |
-| Ready | Human-approved candidate; accepted scope and satisfied execution dependencies. Placement alone does not authorize a start. |
-| In progress | Taken from Ready on explicit human request; one driver and linked session, branch/PR. This is the Doing state. |
+| Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement alone does not authorize a start. |
+| In progress | Taken from Ready on explicit human request after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
 | In review | Ready PR, passed selected checks, disclosed evidence limits. |
 | Done | Acceptance satisfied; delivered repository work actually merged. |
 
 - New issues start in Backlog, including immediately actionable work. A human may
-  authorize triage of one issue or the whole Backlog: check readiness and metadata,
-  promote executable issues to Ready, and retain blocked issues with reasons.
+  authorize triage of one issue or the whole Backlog: check scope and metadata,
+  promote feasible work to Ready even with unresolved blockers, and retain only
+  work that remains infeasible after its blockers are resolved, with reasons.
   Triage authorization never authorizes implementation or moving to In progress.
+  Preserve native dependency links and explicit external blocker/recovery evidence.
+  Before selecting Ready work, recheck blockers and skip blocked items: GitHub
+  resolves dependency relationships when predecessors close, but Ready itself is
+  not an execution gate. If no Ready issue is executable, report its blockers;
+  never bypass them or treat waiting as permission.
 - Before adding work, inspect relevant open/closed issues, cards and competing PRs.
   Extend compatible unowned work; coordinate foreign active scope. Plans specify
   outcome, files/contracts, non-goals, steps, acceptance, checks, real dependencies,
@@ -36,8 +42,8 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   decision. If none is executable, report the concrete blockers instead of starting
   unrelated work. Analysis permission is not implementation permission.
 - A human request to implement a Backlog issue authorizes preparing/checking Ready:
-  record the instruction and satisfied readiness conditions, move through Ready,
-  then start In progress. Do not skip unresolved dependencies or required approval.
+  record the instruction and accepted scope, move through Ready,
+  then start In progress only after resolving execution blockers. Do not skip unresolved dependencies or required approval.
   Existing authorization covers verification/review fixes within the same active
   scope; starting another issue needs a new human request. Native automations must
   not promote work to Ready/In progress just because a PR was linked or a bot acted.

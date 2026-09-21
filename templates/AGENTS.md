@@ -9,8 +9,9 @@ Assign every issue a milestone, an explicit Project Priority and matching labels
 including Backlog and follow-ups; retain metadata after closure.
 See .vendor/workflow-kit/docs/CONTRIBUTING.md#milestones for scope and the ongoing hotfix milestone.
 
-New issues start in Backlog. Human-authorized triage may promote executable issues
-to Ready; this alone never authorizes implementation or Doing.
+New issues start in Backlog. Human-authorized triage may promote feasible issues
+to Ready even while dependencies or external blockers remain. Ready alone never
+authorizes implementation: resolve blockers before a human-requested start.
 
 Start implementation only from Ready and on an explicit human request for that
 work. If Ready is empty, analyze Backlog and propose the next executable issue
