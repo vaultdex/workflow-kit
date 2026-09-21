@@ -48,8 +48,10 @@ test('Rejected supplied boards do not poison retries; copied boards survive fail
     const args = process.argv.slice(2), number = Number(args[1]);
     if (args[0] === 'view' || args[0] === 'copy')
       console.log(JSON.stringify({number: args[0] === 'copy' ? 3 : number, id: 'fixture', url: 'https://example.invalid/board'}));
-    if (args[0] === 'field-list') console.log(JSON.stringify({fields: number === 2 ? [
-      {name:'Status',options:['Backlog','Ready','In progress','In review','Done'].map(name=>({name}))},
+    if (args[0] === 'field-list') console.log(JSON.stringify({fields: [2,4,5].includes(number) ? [
+      {name:'Status',options:['Backlog','Ready','In progress',
+        ...(number === 4 ? ['In review'] : number === 5 ? ['Automated review'] : ['Automated review','Human review']),
+        'Done'].map(name=>({name}))},
       {name:'Priority',options:[{name:'High'},{name:'Low'}]}
     ] : []}));
   `);
@@ -64,4 +66,10 @@ test('Rejected supplied boards do not poison retries; copied boards survive fail
   const corrected = run('2');
   assert.equal(corrected.status, 0, corrected.stderr);
   assert.equal(JSON.parse(readFileSync(marker)).number, 2, 'Explicit corrected board replaces rejected saved selection');
+  for (const [number, missing] of [['4', 'Automated review'], ['5', 'Human review']]) {
+    const legacy = run(number);
+    assert.notEqual(legacy.status, 0);
+    assert.ok(legacy.stderr.includes(`Existing board lacks ${missing}`), legacy.stderr);
+    assert.equal(JSON.parse(readFileSync(marker)).number, 2, 'Rejected review schema preserves the saved board');
+  }
 });

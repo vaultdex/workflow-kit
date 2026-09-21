@@ -37,7 +37,7 @@ for (const [label, color] of [['ci', '1d76db'], ['documentation', '0075ca'], ['t
   if (!labels.has(label)) gh('label', 'create', label, '--repo', repo, '--color', color);
 const fields = JSON.parse(gh('project', 'field-list', String(project.number), '--owner', owner, '--format', 'json', '--limit', '100'));
 const status = fields.fields.find(f => f.name === 'Status');
-for (const required of ['Backlog', 'Ready', 'In progress', 'In review', 'Done'])
+for (const required of ['Backlog', 'Ready', 'In progress', 'Automated review', 'Human review', 'Done'])
   assert.ok(status?.options?.some(o => o.name === required), `Existing board lacks ${required}; configure it explicitly without deleting foreign fields`);
 const priority = fields.fields.find(f => f.name === 'Priority');
 assert.ok(priority, 'Existing board lacks Priority; add a usable priority scale without replacing foreign fields');

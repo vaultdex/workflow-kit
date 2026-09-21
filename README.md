@@ -80,7 +80,7 @@ node .vendor/workflow-kit/scripts/setup-github.mjs OWNER/REPO
 ```
 
 Uses authenticated `gh` with repo/project permissions. Creates or reuses the project
-recorded in `.github/workflow-project.json`, verifies the five workflow states
+recorded in `.github/workflow-project.json`, verifies the six workflow states
 and links the repo. New projects inherit the template's fields and views;
 existing projects are preserved. No issue data
 is copied from Vaultdex. See [integration limits](docs/github.md) for native

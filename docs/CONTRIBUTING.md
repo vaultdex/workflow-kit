@@ -16,7 +16,8 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 | Backlog | Newly proposed, awaiting human triage, or still infeasible after blockers resolve; record reasons. |
 | Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement alone does not authorize a start. |
 | In progress | Taken from Ready on explicit human request after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
-| In review | Ready PR, passed selected checks, disclosed evidence limits. |
+| Automated review | Ready PR, passed selected checks, disclosed evidence limits; automatic reviews of the delivered revision are running or awaiting disposition. |
+| Human review | Ready for human acceptance: selected checks passed, automatic reviews finished and every finding fixed or linked to an actionable follow-up; disclose confirmed unavailable reviews under the exception below. |
 | Done | Acceptance satisfied; delivered repository work actually merged. |
 
 - New issues start in Backlog, including immediately actionable work. A human may
@@ -104,7 +105,7 @@ foreign active work without coordination. If impact is uncertain, document the
 basis of a provisional priority and the investigation needed; do not leave it blank.
 Reuse labels that describe affected areas and work type; create new labels only
 for a missing meaningful category. Priority never grants approval or waives checks.
-Verify all three fields before handing off or moving an issue to Ready/In review.
+Verify all three fields before handing off or moving an issue to Ready, Automated review or Human review.
 This is a contributor obligation, not a server-enforced required-field check.
 
 ## Labels
@@ -156,7 +157,7 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    failed checks are not success. Keep Draft while work/gates remain. Refresh unknown
    metadata boundedly, then report blocker; otherwise refresh only meaningful changes.
 4. Once implementation and selected checks are complete, mark PR Ready for Review
-   and set In review; this triggers automatic code reviews. Await all configured
+   and set Automated review; this triggers automatic code reviews. Await all configured
    automatic reviews for the delivered revision before reporting agent work complete;
    green CI alone is insufficient. Link all delivered issues; `Closes #N` only for
    full acceptance. Record local proof against tested revision in issue; CI owns
@@ -167,16 +168,20 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    remaining counts/dispositions. Missing or stale analysis is not a clean result;
    apply step 6 only for confirmed service limitations.
 5. Further work, including review fixes, returns PR to Draft and issue to In progress
-   before edits. Finish changes and affected checks, then mark Ready for Review / In
-   review again and await the new review cycle. Before agent completion, fix every
+   before edits, including corrections requested during Human review. Finish changes
+   and affected checks, then mark Ready for Review / Automated review again and await
+   the new review cycle. Before agent completion, fix every
    finding with verification or link an actionable follow-up issue under
    [findings disposition](#recovery-scope-and-findings). Record dispositions in PR;
    creating follow-ups does not waive this PR's acceptance or required checks.
+   Once these gates are satisfied, move the issue to Human review and hand off for
+   human acceptance. Ready for Review alone never means Human review.
 6. If automatic reviews cannot run because of exhausted tokens/quota, service failure
    or another confirmed blocker, record affected reviewer, cause and evidence in PR
    and explicitly disclose the missing review in the final report. After other work,
-   checks and received findings are handled, agent work may finish with that review
-   limitation. Pending, queued or unknown review state is not this exception; inspect
+   checks and received findings are handled, move to Human review with the missing
+   review prominently disclosed; agent work may finish with that limitation.
+   Pending, queued or unknown review state remains Automated review and is not this exception; inspect
    PR reviews, comments and checks, not only CI. This exception grants no merge
    authority, check bypass or pre-merge Done status.
 7. After actual merge, verify acceptance/delivered work before closure and Done.

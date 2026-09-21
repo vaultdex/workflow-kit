@@ -88,7 +88,10 @@ another repo is a conflict to investigate, not permission to change that board.
 Complete account settings through supported GitHub/App APIs or their UI; the
 script's success alone is not full setup. Follow [GitHub integration](docs/github.md):
 
-- Verify Backlog, Ready, In progress (Doing), In review and Done; preserve existing
+- Verify Backlog, Ready, In progress (Doing), Automated review, Human review and Done;
+  rename existing In review in place, insert Human review before Done and preserve
+  option IDs/card assignments. Follow the review gates in the contribution workflow;
+  PR readiness starts Automated review, not Human review. Preserve existing
   fields/views. Provide Priority and show Labels/Milestone. Reuse scoped milestones,
   including the ongoing hotfix milestone where applicable, and appropriate labels.
 - Configure native Auto-add for this exact repository and Item added → Backlog.
