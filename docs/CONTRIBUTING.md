@@ -88,8 +88,12 @@ GitHub Projects can link organization issue fields: an empty Project `options`
 array does not prove an empty scale. Read the linked `issueField.options` and the
 issue's `issueFieldValues` first. Set the underlying issue field for linked
 Priority fields; do not create a duplicate Project field or replace its scale.
-If the Priority field has no selectable options at all, the driver may initialize
-Urgent, High, Medium, Low without requesting additional approval. Preserve existing
+For a project-local Priority field with no selectable options, completing its
+scale is routine setup within authorized project work: initialize Urgent, High,
+Medium, Low without requesting additional approval. Changing a linked organization
+scale requires authorization covering that shared schema; reuse existing authority.
+Filling a missing issue priority from an existing scale within authorized work
+needs no additional approval and does not change its schema. Preserve existing
 options and priorities of foreign active work; coordinate any changes to those.
 Complete this preflight early so missing metadata does not first become a blocker
 at review handoff.
