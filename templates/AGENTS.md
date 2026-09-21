@@ -5,7 +5,8 @@ Refresh changed rules/state; reuse valid evidence. The GitHub Project recorded i
 `.github/workflow-project.json` owns order/status; issues own scope,
 acceptance, dependencies and evidence; PRs own review. No second task ledger,
 claim PRs or central steering issue.
-Assign every task a milestone, including follow-ups; retain it after closure.
+Assign every task a milestone, an explicit Project Priority and matching labels,
+including Backlog and follow-ups; retain metadata after closure.
 See .vendor/workflow-kit/docs/CONTRIBUTING.md#milestones for scope and the ongoing hotfix milestone.
 
 Before work, check issue, dependencies, current main and competing PRs. Use

@@ -50,6 +50,23 @@ without a due date. Close hotfix issues individually; normal bug fixes and plann
 work use their scoped milestone. Hotfix urgency never bypasses acceptance, review
 or merge rules. This is a contributor obligation, not automatic server enforcement.
 
+## Priority and issue metadata
+
+Every issue needs a matching repository milestone, an explicit `Priority` in the
+GitHub Project and appropriate area/type labels when created or added to the board.
+This includes Backlog, investigations, hotfixes and follow-ups; retain metadata
+when closing. Set the actual fields: an issue-body mention or a `priority` label
+does not replace Project Priority. Convert draft cards to issues first.
+
+Use the project's existing priority scale (template: Urgent, High, Medium, Low),
+assessing impact and urgency. Do not default everything to High or reprioritize
+foreign active work without coordination. If impact is uncertain, document the
+basis of a provisional priority and the investigation needed; do not leave it blank.
+Reuse labels that describe affected areas and work type; create new labels only
+for a missing meaningful category. Priority never grants approval or waives checks.
+Verify all three fields before handing off or moving an issue to Ready/In review.
+This is a contributor obligation, not a server-enforced required-field check.
+
 ## Labels
 
 Use native issue forms and explicit labels on CLI-created issues/PRs. Labels describe
