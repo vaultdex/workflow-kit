@@ -1,0 +1,65 @@
+{
+  "files": {},
+  "hooks": {
+    ".claude/settings.json": {
+      "PostToolUse": [
+        "3aa7fbde02d4a37ea21965620f7945252f2d60d7e2e11800dcc2a10354472dd6"
+      ],
+      "Stop": [
+        "4a9d539f6c72f3943d443bb912d991b45b6408de3cfbcd5514fe4070da78fdb1"
+      ],
+      "SessionStart": [
+        "3be23f10c024a58ef59f2bba1552dcdeacb06321e78ea9e2a7c9d70d0beee71a",
+        "b8556f3608b0c0444e43b84987b1eea87e25221f51caa42012487f7dee41ae53"
+      ],
+      "SubagentStart": [
+        "ccbfca5bdbc034bf4eabe48244cda8e3d7de5323e40d2180a97aa061beda0ff7"
+      ],
+      "UserPromptSubmit": [
+        "378242162dedf1ccf8942d669798f50da926440a6b029d837c24d98e5bacdc25"
+      ]
+    },
+    ".codex/hooks.json": {
+      "SessionStart": [
+        "0ce61e920455ff12509528c3c69595a9cd0860d48b387a53a137deaad828c76a",
+        "198d6e02fd85075700af83a396c0bd92203b53b8c89adfdb57cd73275efddb8b"
+      ],
+      "SubagentStart": [
+        "eb3b95ada48a7ef11cb4d660ad023bad91ab4f1d599736113079001bdde4a8f4"
+      ],
+      "UserPromptSubmit": [
+        "6c4b92fa9180dca625ca7c3360657a4d606106f1694cabf4412c048cc33fb27c"
+      ],
+      "PostToolUse": [
+        "5a05b4c4c53b01b91db4ad723b185f3159dca5c87d9ee6b771da31251da9a006"
+      ],
+      "Stop": [
+        "b2f12ba484c9167770d246b947847ea20576bb05894e69824d69936cef4a2f17"
+      ]
+    },
+    ".cursor/hooks.json": {
+      "sessionStart": [
+        "976263778154fe60e3e777f49697156344279ca17ab4031bdfb361f8b6b59c66"
+      ],
+      "beforeSubmitPrompt": [
+        "f2d146f04d6667ddf36d39941a18bc07dcba6f0a3e34450c151bfbfdd3030759"
+      ]
+    },
+    ".github/hooks/impeccable.json": {
+      "postToolUse": [
+        "97cef358cd56931e56364336b3abe9f25533f4d1f06560910527dd3191a5666f"
+      ]
+    },
+    ".github/hooks/ponytail.json": {
+      "sessionStart": [
+        "cca615119543a23b4ac534c1a98b61c5f2f28dddcf39d1f0ea95ce77a7d09a2b"
+      ],
+      "userPromptSubmitted": [
+        "e33279c72f9ee0fa99525d5bc4a479d24e1bd4adcee266b96d47e069a4c4a41a"
+      ],
+      "subagentStart": [
+        "42d633d40b784ce0fdffbf35d63902bd862c968b174196500bc8529e4128a1ca"
+      ]
+    }
+  }
+}

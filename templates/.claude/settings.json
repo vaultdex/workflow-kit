@@ -1,0 +1,74 @@
+{
+  "description": "Impeccable design detector: immediate-tier checks after Edit/Write on UI files, full-rule deep pass on Stop.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then echo 'Impeccable hook setup required: run node scripts/install-impeccable-hooks.mjs from a reviewed checkout.' >&2; exit 1; fi; \"$engine\" hook",
+            "timeout": 120,
+            "statusMessage": "Impeccable UI check (verified user installation)"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then echo 'Impeccable hook setup required: run node scripts/install-impeccable-hooks.mjs from a reviewed checkout.' >&2; exit 1; fi; \"$engine\" hook",
+            "timeout": 120,
+            "statusMessage": "Impeccable UI check (verified user installation)"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-activate.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}else{console.log(JSON.stringify({systemMessage:'Ponytail hooks fehlen: Nach Checkout-Pruefung node scripts/install-ponytail-hooks.mjs ausfuehren; danach Hooks freigeben.',hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:'Ponytail hooks fehlen: Nach Checkout-Pruefung node scripts/install-ponytail-hooks.mjs ausfuehren; danach Hooks freigeben.'}}))}\" -- claude \"$(git rev-parse --show-toplevel)\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "resume|compact|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-activate.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}else{console.log(JSON.stringify({systemMessage:'Ponytail hooks fehlen: Nach Checkout-Pruefung node scripts/install-ponytail-hooks.mjs ausfuehren; danach Hooks freigeben.',hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:'Ponytail hooks fehlen: Nach Checkout-Pruefung node scripts/install-ponytail-hooks.mjs ausfuehren; danach Hooks freigeben.'}}))}\" -- claude \"$(git rev-parse --show-toplevel)\" continue",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-subagent.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- claude \"$(git rev-parse --show-toplevel)\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-mode-tracker.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- claude \"$(git rev-parse --show-toplevel)\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
