@@ -31,14 +31,11 @@ const saveProject = () => {
 };
 // Retain newly copied boards on failure so retry cannot create duplicates.
 if (!number) saveProject();
-gh('project', 'link', String(project.number), '--owner', owner, '--repo', repo);
-const labels = new Set(JSON.parse(gh('api', `repos/${repo}/labels?per_page=100`, '--paginate', '--slurp')).flat().map(l => l.name));
-for (const [label, color] of [['ci', '1d76db'], ['documentation', '0075ca'], ['testing', '5319e7'], ['security', 'b60205'], ['dependencies', '0366d6']])
-  if (!labels.has(label)) gh('label', 'create', label, '--repo', repo, '--color', color);
 const fields = JSON.parse(gh('project', 'field-list', String(project.number), '--owner', owner, '--format', 'json', '--limit', '100'));
 const status = fields.fields.find(f => f.name === 'Status');
-for (const required of ['Backlog', 'Ready', 'In progress', 'In review', 'Done'])
-  assert.ok(status?.options?.some(o => o.name === required), `Existing board lacks ${required}; configure it explicitly without deleting foreign fields`);
+assert.deepEqual(status?.options?.map(o => o.name),
+  ['Backlog', 'Ready', 'In progress', 'Automated review', 'Human review', 'Done'],
+  'Existing board must have exactly the six workflow states in order; migrate explicitly, preserving option IDs and cards');
 const priority = fields.fields.find(f => f.name === 'Priority');
 assert.ok(priority, 'Existing board lacks Priority; add a usable priority scale without replacing foreign fields');
 // Organization issue fields expose their choices on issueField rather than Project options.
@@ -46,6 +43,10 @@ const priorityOptions = priority.options?.length ? priority.options : JSON.parse
   '-f', 'query=query($id:ID!) { node(id:$id) { ... on ProjectV2SingleSelectField { issueField { ... on IssueFieldSingleSelect { options { name } } } } } }',
   '-f', `id=${priority.id}`)).data?.node?.issueField?.options;
 assert.ok(priorityOptions?.length >= 2, 'Priority needs a usable explicit scale; configure/verify its choices before completing setup');
+gh('project', 'link', String(project.number), '--owner', owner, '--repo', repo);
+const labels = new Set(JSON.parse(gh('api', `repos/${repo}/labels?per_page=100`, '--paginate', '--slurp')).flat().map(l => l.name));
+for (const [label, color] of [['ci', '1d76db'], ['documentation', '0075ca'], ['testing', '5319e7'], ['security', 'b60205'], ['dependencies', '0366d6']])
+  if (!labels.has(label)) gh('label', 'create', label, '--repo', repo, '--color', color);
 saveProject();
 console.log(`Project linked: ${project.url}\nLabels configured; existing labels preserved.\n`
   + `Remaining account settings: authorize CodeRabbit; enable Codex automatic review; configure Project Auto-add for repo:${repo} is:issue.\n`

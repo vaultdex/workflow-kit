@@ -27,8 +27,10 @@ delegation grants no ownership, scope expansion or approval authority.
 
 Finish authorized scope through verification and PR delivery, not the entire
 board. Before reporting agent work complete, await automatic reviews triggered by
-Ready for Review and fix or link actionable follow-ups for every finding. Return
-PR to Draft for further work, then Ready for Review and await reviews again.
+Ready for Review in Automated review; fix or link actionable follow-ups for every
+finding, then move to Human review for human acceptance. Return
+PR to Draft/In progress for further work, then Ready for Review/Automated review
+and await reviews again.
 Confirmed review unavailability (e.g. exhausted tokens/quota) permits agent
 completion only with the missing review and cause disclosed; pending/unknown is
 not unavailable. See .vendor/workflow-kit/docs/CONTRIBUTING.md#publication-and-review. Prepare concrete
@@ -43,7 +45,8 @@ authorization, privacy, integrity and attribution; keep secrets out of clients/l
 Follow Watchdog's smallest-complete-change rule. Run focused behavior and required
 issue/CI checks; never weaken acceptance or equate mocks with live proof. Keep private artifacts and local generated bundles out of commits; commit only
 required cloud discovery files verified against the pinned sources. Record blocker/recovery and preserve
-branch/PR. In review requires passed checks and disclosed limits; Done requires
+branch/PR. Human review requires completed automatic reviews (or a disclosed
+confirmed outage), dispositioned findings and passed checks; Done requires
 acceptance and merge. Disposition concrete findings with a fix or actionable linked
 follow-up. Update durable docs; report results and uncertainty concisely.
 

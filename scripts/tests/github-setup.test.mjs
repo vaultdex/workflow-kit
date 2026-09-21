@@ -43,25 +43,43 @@ test('Rejected supplied boards do not poison retries; copied boards survive fail
   // Node acts as the fixture CLI; command names select disposable response scripts.
   writeFileSync(join(checkout, 'repo'), 'console.log(JSON.stringify({viewerPermission:"ADMIN"}));');
   writeFileSync(join(checkout, 'api'), 'console.log("[[]]");');
-  writeFileSync(join(checkout, 'label'), '');
+  writeFileSync(join(checkout, 'label'), "require('node:fs').appendFileSync('mutations', 'label;');");
   writeFileSync(join(checkout, 'project'), `
     const args = process.argv.slice(2), number = Number(args[1]);
+    if (args[0] === 'link') require('node:fs').appendFileSync('mutations', 'link;');
     if (args[0] === 'view' || args[0] === 'copy')
       console.log(JSON.stringify({number: args[0] === 'copy' ? 3 : number, id: 'fixture', url: 'https://example.invalid/board'}));
-    if (args[0] === 'field-list') console.log(JSON.stringify({fields: number === 2 ? [
-      {name:'Status',options:['Backlog','Ready','In progress','In review','Done'].map(name=>({name}))},
+    const statuses = ['Backlog','Ready','In progress','Automated review','Human review','Done'];
+    if (number === 4) statuses.splice(3, 2, 'In review');
+    if (number === 5) statuses.splice(4, 1);
+    if (number === 6) statuses.push('In review');
+    if (number === 7) statuses.splice(3, 2, 'Human review', 'Automated review');
+    if (args[0] === 'field-list') console.log(JSON.stringify({fields: [2,4,5,6,7].includes(number) ? [
+      {name:'Status',options:statuses.map(name=>({name}))},
       {name:'Priority',options:[{name:'High'},{name:'Low'}]}
     ] : []}));
   `);
   const marker = join(checkout, '.github/workflow-project.json');
+  const mutations = join(checkout, 'mutations');
   const run = (...args) => spawnSync(process.execPath,
     [fileURLToPath(new URL('../setup-github.mjs', import.meta.url)), 'test/example', ...args],
     {cwd: checkout, encoding: 'utf8', env: {...process.env, PATH: bin}});
   assert.notEqual(run('1').status, 0);
   assert.equal(existsSync(marker), false);
+  assert.equal(existsSync(mutations), false, 'Rejected supplied board has no remote writes');
   assert.notEqual(run().status, 0);
   assert.equal(JSON.parse(readFileSync(marker)).number, 3, 'New copied board retained for retry');
+  assert.equal(existsSync(mutations), false, 'Invalid copied board is not linked and creates no labels');
   const corrected = run('2');
   assert.equal(corrected.status, 0, corrected.stderr);
   assert.equal(JSON.parse(readFileSync(marker)).number, 2, 'Explicit corrected board replaces rejected saved selection');
+  const acceptedWrites = readFileSync(mutations, 'utf8');
+  assert.equal(acceptedWrites, 'link;label;label;label;label;label;');
+  for (const number of ['4', '5', '6', '7']) {
+    const legacy = run(number);
+    assert.notEqual(legacy.status, 0);
+    assert.match(legacy.stderr, /exactly the six workflow states in order/);
+    assert.equal(JSON.parse(readFileSync(marker)).number, 2, 'Rejected review schema preserves the saved board');
+    assert.equal(readFileSync(mutations, 'utf8'), acceptedWrites, 'Rejected review schema has no remote writes');
+  }
 });
