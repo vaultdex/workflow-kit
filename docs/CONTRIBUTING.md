@@ -82,6 +82,14 @@ This includes Backlog, investigations, hotfixes and follow-ups; retain metadata
 when closing. Set the actual fields: an issue-body mention or a `priority` label
 does not replace Project Priority. Convert draft cards to issues first.
 
+When taking an authorized Ready issue, the driver checks its milestone, labels and
+Project Priority before implementation and independently fills missing metadata.
+If the Priority field has no selectable options at all, the driver may initialize
+Urgent, High, Medium, Low without requesting additional approval. Preserve existing
+options and priorities of foreign active work; coordinate any changes to those.
+Complete this preflight early so missing metadata does not first become a blocker
+at review handoff.
+
 Use the project's existing priority scale (template: Urgent, High, Medium, Low),
 assessing impact and urgency. Do not default everything to High or reprioritize
 foreign active work without coordination. If impact is uncertain, document the
