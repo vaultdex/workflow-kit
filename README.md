@@ -30,7 +30,7 @@ Use Node 26 and Git. Start in a Git repository (paths with spaces are supported)
 ```sh
 git submodule add https://github.com/vaultdex/workflow-kit.git .vendor/workflow-kit
 git submodule update --init --recursive
-node .vendor/workflow-kit/scripts/init-project.mjs .
+node .vendor/workflow-kit/scripts/init-project.mjs . --existing
 node scripts/setup-skills.mjs
 node scripts/check-skills.mjs
 ```
