@@ -6,6 +6,16 @@ uses links; Copilot cloud gets generated committed files. MIT; upstream licenses
 and adaptation notices remain with each package. No private Vaultdex history or
 product code is included.
 
+## Let your agent set it up
+
+Give your agent [SETUP.md](SETUP.md) with this request:
+
+> Read https://github.com/vaultdex/workflow-kit/blob/main/SETUP.md, ask me the
+> missing setup questions, then configure my repository and deliver a verified PR.
+
+The entry covers new/existing repos, board, rules, skills, updates and reviews.
+It reuses existing choices and asks only for missing information or account steps.
+
 ## New project
 
 Use [vaultdex/project-template](https://github.com/vaultdex/project-template) on GitHub.

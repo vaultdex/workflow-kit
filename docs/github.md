@@ -2,6 +2,9 @@
 
 The setup uses native Projects and existing Apps, not an all-board agent loop.
 Backlog → Ready → In progress → In review → Done; cancellation is not Done.
+New issues start Backlog. Human triage may move feasible work to Ready with unresolved
+dependencies; preserve links and external blockers. Start only after blockers resolve
+and a human requests implementation. Disable PR-linked/bot promotion to In progress.
 Native Project automation has no public creation/update mutation in the inspected
 GitHub GraphQL schema. Configure Auto-add for `repo:OWNER/REPO is:issue` and review
 native workflow settings in the Project UI. Do not mark every closed issue Done:
