@@ -21,6 +21,9 @@ Existing authorization covers review fixes within the same scope, not new tasks.
 
 Before work, check issue, dependencies, current main and competing PRs. Use
 codex/<issue>-<topic>, one driver and linked branch/PR. Assignment is not a lock.
+Create issue-linked branches natively; verify PR/issue links after creation and
+before review under docs/CONTRIBUTING.md#issue-branch-and-pr-links.
+Branch names or mentions alone do not prove linkage; partial work must not close issues.
 Preserve foreign work/ownership; no force-push or admin bypass. Human review/merge
 remain default. Driver owns coordination, integration, proof and delivery;
 delegation grants no ownership, scope expansion or approval authority.

@@ -61,6 +61,70 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   evidence. Old R0–R4 labels and agent-merge exceptions are retired. Human review
   and merge remain default; green checks, labels or board edits grant no authority.
 
+## Issue, branch and PR links
+
+After the Ready/authorization/ownership checks above, create new branches through
+the issue's native **Development → Create a branch** action or its CLI equivalent.
+On GitHub, use explicit repository, issue, branch name and current base:
+
+```sh
+gh issue develop ISSUE --repo OWNER/REPO --list
+gh issue develop ISSUE --repo OWNER/REPO --name codex/ISSUE-topic --base main
+gh issue develop ISSUE --repo OWNER/REPO --list
+```
+
+Replace placeholders and use the repository's actual approved base. Fetch the
+created remote branch into the intended checkout/worktree; add `--checkout` only
+when switching the current checkout is safe. Verify the expected branch/repository
+in the returned list before editing. Reuse compatible owned branches/PRs instead
+of creating duplicates. Link an existing branch through the issue's Development
+control. After an error, inspect remote refs and issue links before retrying;
+branch creation may have succeeded even when the command reported failure.
+
+Every PR description must identify all delivered issues from its first publication,
+including Drafts. For complete issue scope targeting the default branch, put
+`Closes #N` in the PR body (`Closes OWNER/REPO#N` across repositories), repeating
+the keyword for each issue. A branch name, title, comment or commit-only closing
+keyword does not establish the required PR relationship. GitHub normally converts
+an issue-linked branch into a linked PR when that PR is created; verify the result.
+
+Partial deliveries use `Refs OWNER/REPO#N` plus remaining acceptance, without
+closing keywords. Check and remove any inherited/manual closing relationship:
+GitHub's Development links can close issues on merge even without `Closes` text.
+Use an accepted delivery sub-issue when a separately closing unit is needed; never
+split scope merely to satisfy linking. For PRs targeting a non-default branch,
+closing keywords are ignored: retain explicit references and remaining delivery
+steps, then recheck closure intent when the base or scope changes.
+
+Immediately after PR creation/body or base changes, and before Ready for Review
+or Human review, read back the saved description and actual GitHub relationships:
+
+```sh
+gh pr view PR --repo OWNER/REPO --json url,body,baseRefName,closingIssuesReferences
+```
+
+For complete default-branch deliveries, verify every intended issue appears in
+`closingIssuesReferences` (or the Development UI) and no unrelated/partial issue
+will close. For partial/non-default deliveries, verify references in the saved
+body and the issue's cross-reference activity, plus absence of unintended closing
+links. A `Refs` mention is traceability, not a closing link. GitHub may replace the
+branch link with the PR link, so an empty branch list after PR creation is not
+itself a failure. Repair missing/wrong links on the same PR before review handoff;
+missing access or unverifiable linkage stays an explicit blocker, never claimed
+as linked. Record verification in the owning issue; no separate ledger or job.
+
+For GitLab repositories, use the issue's native **Create branch / Create merge
+request** flow and `ISSUE-topic` instead of the GitHub `codex/ISSUE-topic` convention.
+Automatic cross-linking requires the issue number followed by a hyphen at the
+start of the branch name. Verify the generated MR
+description, related issue and closure behavior; remove closing patterns for
+partial deliveries. These are contributor checks, not server enforcement.
+
+References: [GitHub CLI](https://cli.github.com/manual/gh_issue_develop),
+[GitHub branch links](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/creating-a-branch-for-an-issue),
+[GitHub PR links](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue),
+[GitLab cross-links](https://docs.gitlab.com/user/project/issues/crosslinking_issues/).
+
 ## Milestones
 
 Every task issue needs one repository milestone when created or added to the project,
@@ -159,8 +223,9 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
 4. Once implementation and selected checks are complete, mark PR Ready for Review
    and set Automated review; this triggers automatic code reviews. Await all configured
    automatic reviews for the delivered revision before reporting agent work complete;
-   green CI alone is insufficient. Link all delivered issues; `Closes #N` only for
-   full acceptance. Record local proof against tested revision in issue; CI owns
+   green CI alone is insufficient. Verify all delivered issue links and closure
+   intent under [issue, branch and PR links](#issue-branch-and-pr-links) before
+   entering review. Record local proof against tested revision in issue; CI owns
    check state.
    Query analyzer findings directly (Sonar issues/security hotspots and review-body
    comments), including every page; verify analysis covers delivered HEAD. A green
