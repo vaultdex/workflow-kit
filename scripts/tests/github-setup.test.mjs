@@ -22,6 +22,15 @@ test('GitHub setup refuses checkout-controlled CLI before authentication', t => 
   assert.match(result.stderr, /Install GitHub CLI in an absolute PATH directory outside/);
   assert.equal(existsSync(join(root, 'executed')), false);
   assert.equal(existsSync(join(root, '.github/workflow-project.json')), false);
+  const localGit = join(localTools, process.platform === 'win32' ? 'git.exe' : 'git');
+  copyFileSync(process.execPath, localGit); chmodSync(localGit, 0o755);
+  for (const script of ['check-skills.mjs', 'check-impeccable.mjs', 'tests/impeccable-installation.test.mjs']) {
+    const check = spawnSync(process.execPath, [fileURLToPath(new URL('../' + script, import.meta.url)), root], {
+      cwd: root, encoding: 'utf8', env: {...process.env, PATH: ['.', localTools].join(delimiter)},
+    });
+    assert.notEqual(check.status, 0, script);
+    assert.match(check.stdout + check.stderr, /Install Git outside the checkout/, script);
+  }
 });
 
 test('Rejected supplied boards do not poison retries; copied boards survive failures', t => {

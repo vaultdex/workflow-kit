@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
-const git = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
-  .map(p => join(p, process.platform === 'win32' ? 'git.exe' : 'git')).find(existsSync);
-assert.ok(git, 'Git is required');
+const checkouts = [root, kit, process.cwd()].map(p => realpathSync(p));
+const outside = p => checkouts.every(base => p !== base && !p.startsWith(base + sep));
+const binary = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
+  .filter(p => existsSync(p) && outside(realpathSync(p)))
+  .map(p => join(p, process.platform === 'win32' ? 'git.exe' : 'git'))
+  .find(p => existsSync(p) && outside(realpathSync(p)));
+assert.ok(binary, 'Install Git outside the checkout on an absolute PATH');
+const git = realpathSync(binary);
 // Compare regenerated files with real pinned blobs, not a self-asserted receipt.
 for (const name of ['ponytail', 'impeccable']) {
   const pin = execFileSync(git, ['-C', kit, 'rev-parse', `HEAD:.vendor/${name}`], { encoding: 'utf8' }).trim();

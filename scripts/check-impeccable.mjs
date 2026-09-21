@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // Real first-use proof: no npm install, vendored binary, or existing engine cache.
@@ -19,9 +19,14 @@ const windows = process.platform === "win32";
 const shell = windows ? join(process.env.SystemRoot, "System32/cmd.exe") : "/bin/sh";
 const powershell = windows ? join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe") : null;
 // Resolve developer-installed Git once; never search the checkout/current directory.
-const git = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
-  .map((directory) => join(directory, windows ? "git.exe" : "git")).find(existsSync);
-assert.ok(git, "Git must be installed in an absolute PATH directory");
+const sourceRoot = realpathSync(resolve("."));
+const outside = p => p !== sourceRoot && !p.startsWith(sourceRoot + sep);
+const binary = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
+  .filter(p => existsSync(p) && outside(realpathSync(p)))
+  .map(directory => join(directory, windows ? "git.exe" : "git"))
+  .find(p => existsSync(p) && outside(realpathSync(p)));
+assert.ok(binary, "Install Git outside the checkout on an absolute PATH");
+const git = realpathSync(binary);
 const bash = windows ? resolve(dirname(git), "../bin/bash.exe") : null;
 const json = (path) => JSON.parse(readFileSync(join(checkout, path), "utf8"));
 let server;

@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { delimiter, isAbsolute, join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { delimiter, isAbsolute, join, sep } from "node:path";
 import test from "node:test";
 
 test("Copilot discovery assets were generated for the pinned submodule and setup", () => {
-  const git = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
-    .map((path) => join(path, process.platform === "win32" ? "git.exe" : "git")).find(existsSync);
-  assert.ok(git, "Git required for submodule provenance check");
+  const root = realpathSync(process.cwd());
+  const outside = p => p !== root && !p.startsWith(root + sep);
+  const binary = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
+    .filter(p => existsSync(p) && outside(realpathSync(p)))
+    .map(path => join(path, process.platform === "win32" ? "git.exe" : "git"))
+    .find(p => existsSync(p) && outside(realpathSync(p)));
+  assert.ok(binary, "Install Git outside the checkout on an absolute PATH");
+  const git = realpathSync(binary);
   const revision = execFileSync(git, ["rev-parse", "HEAD:.vendor/impeccable"], { encoding: "utf8" }).trim();
   const files = ["scripts/setup-impeccable.mjs", "scripts/impeccable/launchers.patch",
     "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
