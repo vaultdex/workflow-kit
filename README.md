@@ -6,7 +6,14 @@ uses links; Copilot cloud gets generated committed files. MIT; upstream licenses
 and adaptation notices remain with each package. No private Vaultdex history or
 product code is included.
 
-## Existing or new project
+## New project
+
+Use [vaultdex/project-template](https://github.com/vaultdex/project-template) on GitHub.
+It contains this kit as a pinned submodule, so future kit changes arrive as update PRs.
+Clone recursively, then run `node scripts/setup-skills.mjs`. Follow the starter README
+for board setup and the one-time reviewer/hook authorizations.
+
+## Existing project
 
 Use Node 26 and Git. Start in a Git repository (paths with spaces are supported):
 
@@ -24,10 +31,9 @@ rules, issue forms, update bots and product CI remain yours. Add links to the sh
 [contribution workflow](docs/CONTRIBUTING.md) and [Watchdog](WATCHDOG.md) in your root
 AGENTS.md. Existing conflicting files are refused, never force-overwritten.
 
-The repository is also a GitHub template. `Use this template` copies a working
-standalone kit; run `node scripts/init-project.mjs . --existing` and
-`node scripts/setup-skills.mjs`. For centrally maintained updates in a product repo,
-prefer the submodule installation above; template copies do not track this repository.
+This repository owns implementation and source pins. The separate thin starter
+owns the initial product-repository layout; no source implementation is copied
+into each new project. Both paths use the same init/setup/check commands.
 
 Commit `.gitmodules`, the kit gitlink, `.github` generated discovery, hook manifests
 and entry points. Local links/bundles and personal settings stay ignored. Agents
