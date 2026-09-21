@@ -7,6 +7,8 @@ acceptance, dependencies and evidence; PRs own review. No second task ledger,
 claim PRs or central steering issue.
 Assign every issue a milestone, an explicit Project Priority and matching labels,
 including Backlog and follow-ups; retain metadata after closure.
+Within authorized work, fill missing metadata yourself without another approval;
+use a reasoned provisional priority when uncertain. Priority is not start/merge permission.
 See docs/CONTRIBUTING.md#milestones for scope and the ongoing hotfix milestone.
 
 New issues start in Backlog. Human-authorized triage may promote feasible issues
