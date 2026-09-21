@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
+const root = process.env.WORKFLOW_KIT_TARGET || fileURLToPath(new URL('../../', import.meta.url));
 const windows = process.platform === 'win32';
 const git = (process.env.PATH || '').split(path.delimiter)
   .filter(path.isAbsolute)
@@ -23,7 +23,7 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
   cpSync(path.join(root, '.agents/hooks'), path.join(checkout, '.agents/hooks'), { recursive: true, dereference: true });
   cpSync(path.join(root, '.agents/skills/ponytail'), path.join(checkout, '.agents/skills/ponytail'), { recursive: true, dereference: true });
   mkdirSync(path.join(checkout, 'scripts'));
-  cpSync(path.join(root, 'scripts/install-ponytail-hooks.mjs'), path.join(checkout, 'scripts/install-ponytail-hooks.mjs'));
+  cpSync(fileURLToPath(new URL('../install-ponytail-hooks.mjs', import.meta.url)), path.join(checkout, 'scripts/install-ponytail-hooks.mjs'));
   mkdirSync(path.join(checkout, 'frontend'));
   const init = spawnSync(git, ['init', '--quiet', checkout], { encoding: 'utf8' });
   assert.equal(init.status, 0, init.stderr);

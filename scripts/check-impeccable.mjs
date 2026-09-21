@@ -75,6 +75,7 @@ try {
   mkdirSync(join(checkout, ".impeccable"), { recursive: true });
   writeFileSync(join(checkout, ".impeccable/config.json"), '{"hook":{"enabled":true}}');
   writeFileSync(join(checkout, "PRODUCT.md"), '# Test product\n\n<!-- impeccable:product-schema 1 -->\n\n## Platform\n\nweb\n');
+  writeFileSync(join(checkout, "frontend/PRODUCT.md"), '# Test web product\n\n<!-- impeccable:product-schema 1 -->\n\n## Platform\n\nweb\n');
   writeFileSync(join(checkout, "apps/mobile/PRODUCT.md"), '# Test mobile product\n\n<!-- impeccable:product-schema 1 -->\n\n## Platform\n\nadaptive\n');
   const setup = join(checkout, "scripts/setup-impeccable.mjs");
   const foreignSkill = join(checkout, ".agents/skills/impeccable");

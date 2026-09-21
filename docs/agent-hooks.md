@@ -35,11 +35,9 @@ reviewed checkout. These are explicit setup commands, never automatic hook bodie
 node scripts/install-ponytail-hooks.mjs
 ```
 
-Impeccable's equivalent `node scripts/install-impeccable-hooks.mjs` is delivered
-separately by [#72](https://github.com/vaultdex/Vaultdex/issues/72). Run it once it
-is present in the checkout; until then follow the existing Impeccable installation
-guide. After installation, the developer reviews/enables native hook definitions.
-Do not claim either integration is initialized merely because the other succeeded.
+Impeccable uses `node scripts/install-impeccable-hooks.mjs`. After either
+installation, review/enable native hook definitions. One integration's setup does
+not initialize the other.
 
 - **Codex CLI:** open `/hooks` to review, enable and trust the named definitions.
 - **Codex Desktop:** use the hook management view in the app's settings; `/hooks`
