@@ -28,6 +28,7 @@ assert.ok(gitBinary, "Install Git in an absolute PATH directory outside this che
 const git = (...args) => execFileSync(gitBinary, args, { cwd: root, encoding: "utf8",
   env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: "1" } });
 const present = (path) => lstatSync(path, { throwIfNoEntry: false });
+const digest = path => createHash("sha256").update(text(path)).digest("hex");
 
 // Never traverse a harness/state directory redirected outside this checkout.
 function localDirectory(path) {
@@ -111,8 +112,10 @@ try {
   const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/impeccable/launchers.patch",
     "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
   const inputs = createHash("sha256").update(inputFiles.map((file) => text(join(kit, file))).join("\0")).digest("hex");
-  writeFileSync(join(next, ".github/skills/impeccable/.vaultdex-source.json"),
-    JSON.stringify({ revision, inputs }, null, 2) + "\n");
+  const receipt = ".github/skills/impeccable/.vaultdex-source.json";
+  const recorded = existsSync(join(root, receipt)) ? JSON.parse(text(join(root, receipt))) : null;
+  const files = Object.fromEntries(companionFiles(next).sort().map(file => [file, digest(join(next, file))]));
+  writeFileSync(join(next, receipt), JSON.stringify({ revision, inputs, files }, null, 2) + "\n");
   writeFileSync(join(next, ".owner"), "vaultdex-impeccable\n");
   const oldFiles = companionFiles(bundle);
   const newFiles = companionFiles(next);
@@ -134,7 +137,12 @@ try {
     if (!present(target)) continue;
     assert.ok(lstatSync(target).isFile() && (
       (oldFiles.includes(file) && readFileSync(target).equals(readFileSync(join(bundle, file))))
-      || (trackedCopilot.has(file) && git("diff", "--name-only", "--", file).trim() === "")),
+      || (file !== receipt && recorded?.files?.[file] === digest(target))
+      || (file !== receipt && newFiles.includes(file) && digest(target) === digest(join(next, file)))
+      // Legacy receipts had only source/input pins; other assets must still match known bytes.
+      || (file === receipt && (recorded?.files || recorded?.revision === revision)
+        && /^[a-f0-9]{40}$/.test(recorded?.revision) && /^[a-f0-9]{64}$/.test(recorded.inputs)
+        && Object.keys(recorded).every(key => ["revision", "inputs", "files"].includes(key)))),
     `Existing or edited companion left untouched: ${target}`);
   }
   if (existsSync(bundle)) renameSync(bundle, previous);

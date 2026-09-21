@@ -108,6 +108,6 @@ real-engine security checks, including hostile checkout executables and download
 Tests never certify interactive agent trust dialogs or external reviewer access.
 
 The public kit has one standard Linux PR job, no schedule/cache/artifacts. Budget:
-20 updates/month Ã— at most 10 minutes = 200 estimated runner minutes, $0 standard
+20 updates/month x at most 10 minutes = 200 estimated runner minutes, $0 standard
 public-runner charges. Product CI stays project-specific. Private consumers must
 review their own Actions and reviewer budgets before adding runs.

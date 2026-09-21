@@ -13,6 +13,14 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   execFileSync('git', ['init', '--quiet', fixture]);
   const setup = name => spawnSync(process.execPath, [join(kit, 'scripts', name), fixture], { encoding: 'utf8' });
   const run = name => { const result = setup(name); assert.equal(result.status, 0, result.stderr); };
+  const collision = join(fixture, '.github/agents/impeccable-documenter.agent.md');
+  mkdirSync(dirname(collision), { recursive: true });
+  writeFileSync(collision, 'foreign tracked agent\n');
+  execFileSync('git', ['-C', fixture, 'add', '.github/agents/impeccable-documenter.agent.md']);
+  assert.notEqual(setup('setup-impeccable.mjs').status, 0);
+  assert.equal(readFileSync(collision, 'utf8'), 'foreign tracked agent\n');
+  execFileSync('git', ['-C', fixture, 'rm', '--cached', '--quiet', '.github/agents/impeccable-documenter.agent.md']);
+  rmSync(collision);
   run('setup-skills.mjs');
   run('setup-skills.mjs');
   for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi']) {
@@ -48,6 +56,13 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   const second = init();
   assert.equal(second.status, 0, second.stderr);
   assert.equal(readFileSync(foreign, 'utf8'), configured);
+  const retired = join(fixture, 'templates/CONTRIBUTING.md');
+  rmSync(retired);
+  assert.notEqual(init('--check').status, 0);
+  const retirement = init('--existing');
+  assert.equal(retirement.status, 0, retirement.stderr);
+  assert.equal(lstatSync(join(fixture, 'CONTRIBUTING.md'), { throwIfNoEntry: false }), undefined);
+  assert.ok(!JSON.parse(readFileSync(join(fixture, '.github/workflow-kit.json'), 'utf8')).files['CONTRIBUTING.md']);
   const checked = init('--check');
   assert.equal(checked.status, 0, checked.stderr);
   const previousRules = readFileSync(join(fixture, 'AGENTS.md'), 'utf8');

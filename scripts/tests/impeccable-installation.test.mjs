@@ -15,8 +15,11 @@ test("Copilot discovery assets were generated for the pinned submodule and setup
   const inputs = createHash("sha256").update(files.map((file) => readFileSync(file, "utf8")
     .replaceAll("\r\n", "\n")).join("\0")).digest("hex");
   const receipt = JSON.parse(readFileSync(".github/skills/impeccable/.vaultdex-source.json", "utf8"));
-  assert.deepEqual(receipt, { revision, inputs },
+  assert.deepEqual({ revision: receipt.revision, inputs: receipt.inputs }, { revision, inputs },
     "Run node scripts/setup-impeccable.mjs and commit refreshed .github assets with the update");
+  for (const [file, digest] of Object.entries(receipt.files))
+    assert.equal(createHash("sha256").update(readFileSync(file, "utf8").replaceAll("\r\n", "\n")).digest("hex"), digest,
+      `Generated ownership hash differs: ${file}`);
   assert.ok(existsSync(".vendor/impeccable/.git"),
     "Initialize the pinned source: git submodule update --init --depth 1 -- .vendor/impeccable");
   for (const file of [".github/skills/impeccable/SKILL.md", ...[

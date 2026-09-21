@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -103,7 +103,13 @@ const currentIgnore = existsSync(ignore) ? text(ignore) : '';
 const additions = patterns.filter(p => !currentIgnore.split('\n').includes(p));
 pending['.gitignore'] = currentIgnore.trimEnd() + (additions.length ? '\n' + additions.join('\n') : '') + '\n';
 safe(receipt);
-pending[receipt] = JSON.stringify({ files: { ...prior.files, ...files }, hooks }, null, 2) + '\n';
+const retired = Object.keys(prior.files).filter(file => !(file in files));
+for (const file of retired) {
+  const target = safe(file);
+  assert.ok(!existsSync(target) || hash(text(target)) === prior.files[file], `Retired managed file edited; preserved: ${file}`);
+  assert.ok(!check, `Retired managed file; run init-project and review removal: ${file}`);
+}
+pending[receipt] = JSON.stringify({ files, hooks }, null, 2) + '\n';
 for (const [file, value] of Object.entries(pending)) {
   const target = safe(file);
   if (check) assert.ok(existsSync(target) && text(target) === value, `Managed output is stale; run init-project and review changes: ${file}`);
@@ -112,5 +118,6 @@ for (const [file, value] of Object.entries(pending)) {
     if (!existsSync(target) || text(target) !== value) writeFileSync(target, value);
   }
 }
+for (const file of retired) if (existsSync(safe(file))) unlinkSync(safe(file));
 console.log(check ? 'Managed files and hook snapshots match the pinned kit; no files written.'
   : 'Project files configured. Review the diff, run setup-skills, then install/review hooks explicitly.');
