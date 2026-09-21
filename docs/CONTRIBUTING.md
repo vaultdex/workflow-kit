@@ -82,22 +82,10 @@ This includes Backlog, investigations, hotfixes and follow-ups; retain metadata
 when closing. Set the actual fields: an issue-body mention or a `priority` label
 does not replace Project Priority. Convert draft cards to issues first.
 
-The responsible agent fills missing metadata when taking up authorized work,
-including issues/follow-ups it creates. This needs no additional human approval:
-repair the omission yourself rather than waiting for prioritization or starting
-unrelated work. An empty Priority value is not a missing start/merge authorization.
-Actual permission failures or conflicting instructions need concrete evidence and
-a targeted request; continue unaffected authorized work.
-
 Use the project's existing priority scale (template: Urgent, High, Medium, Low),
 assessing impact and urgency. Do not default everything to High or reprioritize
 foreign active work without coordination. If impact is uncertain, document the
 basis of a provisional priority and the investigation needed; do not leave it blank.
-For linked GitHub issue fields, Project `options: []` does not mean the scale is
-missing: read `issueField.options` and the issue's `issueFieldValues`, and write the
-underlying issue field. Preserve its scale and existing choices. Within authorized
-project setup, create a genuinely missing Priority field/scale yourself using
-Urgent, High, Medium, Low; do not replace an existing field or needlessly ask again.
 Reuse labels that describe affected areas and work type; create new labels only
 for a missing meaningful category. Priority never grants approval or waives checks.
 Verify all three fields before handing off or moving an issue to Ready/In review.
