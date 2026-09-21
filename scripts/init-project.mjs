@@ -109,7 +109,8 @@ for (const file of retired) {
   assert.ok(!existsSync(target) || hash(text(target)) === prior.files[file], `Retired managed file edited; preserved: ${file}`);
   assert.ok(!check, `Retired managed file; run init-project and review removal: ${file}`);
 }
-pending[receipt] = JSON.stringify({ files, hooks }, null, 2) + '\n';
+const sorted = values => Object.fromEntries(Object.keys(values).sort().map(key => [key, values[key]]));
+pending[receipt] = JSON.stringify({ files: sorted(files), hooks: sorted(hooks) }, null, 2) + '\n';
 for (const [file, value] of Object.entries(pending)) {
   const target = safe(file);
   if (check) assert.ok(existsSync(target) && text(target) === value, `Managed output is stale; run init-project and review changes: ${file}`);
