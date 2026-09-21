@@ -13,7 +13,7 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 
 | Status | Required state |
 | --- | --- |
-| Backlog | Proposed or blocked; blockers include cause and recovery condition. |
+| Backlog | Newly proposed, awaiting human triage, or still infeasible after blockers resolve; record reasons. |
 | Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement alone does not authorize a start. |
 | In progress | Taken from Ready on explicit human request after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
 | In review | Ready PR, passed selected checks, disclosed evidence limits. |
@@ -99,8 +99,10 @@ scope, never approval, priority, checks or merge authority. Preserve existing la
 ## Recovery, scope and findings
 
 - Block only affected work: record failure, unblocking evidence needed, next action
-  and prior driver/branch/commit/PR; preserve partial work. Store handoff, set
-  Backlog, release assignment and verify. Anyone may refine unowned blockers;
+  and prior driver/branch/commit/PR; preserve partial work. Store handoff, return
+  previously triaged feasible work to Ready with explicit blockers, release
+  assignment and verify. Untriaged or inherently infeasible work stays Backlog.
+  Anyone may refine unowned blockers;
   preserve approvals. Resume after verified unblocking and fresh ownership/dependency
   checks, never merely elapsed time.
 - Inspect actual Git/GitHub state after failure; correct the cause and resume the
