@@ -1,0 +1,294 @@
+diff --git a/scripts/impeccable b/scripts/impeccable
+--- a/scripts/impeccable
++++ b/scripts/impeccable
+@@ -141,36 +141,26 @@ if [ -n "$version" ] && [ "$os" != unknown ] && [ "$arch" != unknown ]; then
+     fetched=1
+   elif [ "$os" = windows ] && [ "$arch" = arm64 ]; then
+     # Windows on ARM runs x64 binaries; fall back when no arm64 asset exists.
+-    url="$base/engine-v$version/impeccable-windows-x64.exe"
++    asset="impeccable-windows-x64.exe"
++    url="$base/engine-v$version/$asset"
+     fetch_url "$url" && fetched=1
+   fi
+   if [ "$fetched" = 1 ]; then
+     check_download
+-    # Fail closed: a freshly downloaded binary runs only after verifying
+-    # against its .sha256 sidecar. A sidecar that cannot be fetched, or a
+-    # machine with no sha256 tool, refuses the download instead of exec'ing
+-    # an unverified binary. (A binary already on PATH or in the cache that
+-    # passes engine-probe is unaffected.)
+-    sidecar_ok=0
+-    if command -v curl >/dev/null 2>&1; then
+-      curl -fsSL --retry 2 -o "$tmp.sha256" "$url.sha256" 2>/dev/null && sidecar_ok=1
+-    elif command -v wget >/dev/null 2>&1; then
+-      wget -q -O "$tmp.sha256" "$url.sha256" 2>/dev/null && sidecar_ok=1
+-    fi
+-    check_download
+-    expected=""
+-    [ "$sidecar_ok" = 1 ] && expected=$(cut -d' ' -f1 < "$tmp.sha256")
++    # Trust reviewed repository pins, never a checksum from the download server.
++    expected=$(awk -v asset="$asset" '$2 == asset {print $1}' "$dir/SHA256SUMS" 2>/dev/null || true)
+     actual=""
++    # Hash stdin so backslashes/newlines in cache paths cannot escape the digest output.
+     if command -v shasum >/dev/null 2>&1; then
+-      if digest=$(shasum -a 256 "$tmp" 2>/dev/null); then actual=${digest%% *}; fi
++      if digest=$(shasum -a 256 < "$tmp" 2>/dev/null); then actual=${digest%% *}; fi
+     elif command -v sha256sum >/dev/null 2>&1; then
+-      if digest=$(sha256sum "$tmp" 2>/dev/null); then actual=${digest%% *}; fi
++      if digest=$(sha256sum < "$tmp" 2>/dev/null); then actual=${digest%% *}; fi
+     fi
+     check_download
+     rm -f "$tmp.sha256"
+     if [ -z "$expected" ] || [ -z "$actual" ]; then
+       rm -f "$tmp"
+-      echo "impeccable: cannot verify $url against $url.sha256 (sidecar unavailable or hashing failed); refusing the unverified download" >&2
++      echo "impeccable: cannot verify $url against repository SHA256SUMS (pin unavailable or hashing failed); refusing the unverified download" >&2
+       exit 127
+     fi
+     if [ "$actual" != "$expected" ]; then
+diff --git a/scripts/impeccable.cmd b/scripts/impeccable.cmd
+--- a/scripts/impeccable.cmd
++++ b/scripts/impeccable.cmd
+@@ -1,20 +1,20 @@
+ @echo off
+ setlocal
++set "owned_stage="
+ rem Impeccable launcher (Windows). Runs bin\windows-<arch>\impeccable.exe next
+ rem to this file, else a cached or freshly downloaded engine binary.
+ rem
+-rem Structure notes (this file is exercised by dry parsing and string-level
+-rem tests, not yet on a real Windows machine):
++rem Structure notes:
+ rem - No multi-line parenthesized blocks: cmd expands %var% at block parse
+ rem   time, which made the old download path read back empty %url%/%cached%.
+ rem   Linear goto flow keeps every expansion on its own line, and avoids
+ rem   delayed expansion eating ! characters in user arguments.
+-rem - The unversioned user binary and the PATH candidate are validated with
++rem - The unversioned user binary is validated with
+ rem   the engine-probe handshake (see :probe) so the retired 3.x npm CLI,
+ rem   whose bin is also named impeccable, is never exec'd. IMPECCABLE_BIN,
+ rem   the sibling binary, and the version-pinned cache stay trusted.
+-rem - Downloads are verified against the .sha256 sidecar via certutil and
+-rem   fail closed: a missing sidecar or hash tool refuses the download. On
++rem - Downloads are verified against repository SHA256SUMS via certutil and
++rem   fail closed: a missing pin or hash tool refuses the download. On
+ rem   ARM64 the arm64 asset is tried first and the x64 asset is the
+ rem   fallback (Windows on ARM runs x64 binaries).
+ if not defined IMPECCABLE_SKILL_DIR set "IMPECCABLE_SKILL_DIR=%~dp0.."
+@@ -53,118 +53,129 @@ set "run=%cached%"
+ goto run
+ :no_cache
+ 
+-if defined IMPECCABLE_LAUNCHER_PROBE goto download
+-where impeccable >nul 2>nul
+-if errorlevel 1 goto download
+-call :probe impeccable
+-if not "%probe_ok%"=="1" goto download
+-impeccable %*
+-exit /b
+-
+ :download
+ rem Last resort: fetch this version's binary from the release channel into
+ rem the version-pinned user cache, verify it, then run it. Never inside
+ rem another launcher's probe: fail fast and quiet instead.
+-if defined IMPECCABLE_LAUNCHER_PROBE exit /b 127
++if defined IMPECCABLE_LAUNCHER_PROBE goto abort
+ if not defined version goto fail
+-where curl.exe >nul 2>nul
+-if errorlevel 1 goto curl_missing
++rem Never search the checkout or PATH for executable tools.
++if not exist "%SystemRoot%\System32\curl.exe" goto curl_missing
+ if not defined IMPECCABLE_DOWNLOAD_BASE set "IMPECCABLE_DOWNLOAD_BASE=https://github.com/pbakaus/impeccable/releases/download"
+ if exist "%IMPECCABLE_HOME%\bin\%version%\" goto cache_ready
+ mkdir "%IMPECCABLE_HOME%\bin\%version%" >nul 2>nul
+-if errorlevel 1 goto cache_directory_failed
++if errorlevel 1 if not exist "%IMPECCABLE_HOME%\bin\%version%\" goto cache_directory_failed
+ :cache_ready
++rem Atomically reserve a private directory; never share another session's staging files.
++:reserve_stage
++set "stage=%cached%.stage-%RANDOM%-%RANDOM%"
++mkdir "%stage%" >nul 2>nul
++if errorlevel 1 if exist "%stage%\" goto reserve_stage
++if errorlevel 1 goto cache_write_failed
++set "owned_stage=1"
++set "staged=%stage%\engine.part"
+ rem Check the staging file too: an existing directory may be read-only.
+ rem Redirection failures do not reliably update ERRORLEVEL in cmd.exe;
+ rem branch on the command's failure directly. Never treat a directory as a
+ rem staging file (later del cleanup would prompt to delete its contents).
+-if exist "%cached%.part\" goto cache_write_failed
+-(type nul >"%cached%.part") 2>nul || goto cache_write_failed
++if exist "%staged%\" goto cache_write_failed
++(type nul >"%staged%") 2>nul || goto cache_write_failed
+ set "asset=impeccable-windows-%arch%.exe"
+ set "url=%IMPECCABLE_DOWNLOAD_BASE%/engine-v%version%/%asset%"
+-curl.exe -fsSL -o "%cached%.part" "%url%" >nul 2>nul
++"%SystemRoot%\System32\curl.exe" -fsSL -o "%staged%" "%url%" >nul 2>nul
+ if not errorlevel 1 goto verify
+ if not "%arch%"=="arm64" goto download_failed
+ set "asset=impeccable-windows-x64.exe"
+ set "url=%IMPECCABLE_DOWNLOAD_BASE%/engine-v%version%/%asset%"
+-curl.exe -fsSL -o "%cached%.part" "%url%" >nul 2>nul
++"%SystemRoot%\System32\curl.exe" -fsSL -o "%staged%" "%url%" >nul 2>nul
+ if errorlevel 1 goto download_failed
+ 
+ :verify
+ call :check_download
+-if errorlevel 1 exit /b 127
+-rem Mirrors the sh launcher and fails closed: a freshly downloaded binary
+-rem runs only after verifying against its .sha256 sidecar. A sidecar that
+-rem cannot be fetched, or an empty certutil result, refuses the download
+-rem instead of running an unverified binary.
+-curl.exe -fsSL -o "%cached%.sha256" "%url%.sha256" >nul 2>nul
+-if errorlevel 1 goto verify_refuse
++if errorlevel 1 goto abort
++rem The expected digest is reviewed with the launcher, not fetched from its server.
+ set "expected="
+-set /p expected=<"%cached%.sha256"
+-for /f "tokens=1" %%h in ("%expected%") do set "expected=%%h"
++for /f "usebackq tokens=1,2" %%h in ("%~dp0SHA256SUMS") do if "%%i"=="%asset%" set "expected=%%h"
++if not defined expected goto verify_refuse
+ call :check_download
+-if errorlevel 1 exit /b 127
++if errorlevel 1 goto abort
+ set "actual="
+-rem Reuse the sidecar staging file after reading expected. Check certutil's
+-rem status before parsing: its error text on stdout is not a digest.
+-certutil -hashfile "%cached%.part" SHA256 >"%cached%.sha256" 2>nul
++rem Check certutil's status before parsing: its error text is not a digest.
++"%SystemRoot%\System32\certutil.exe" -hashfile "%staged%" SHA256 >"%staged%.sha256" 2>nul
+ if errorlevel 1 goto verify_refuse
+ call :check_download
+-if errorlevel 1 exit /b 127
+-for /f "usebackq skip=1 delims=" %%h in ("%cached%.sha256") do if not defined actual set "actual=%%h"
+-del "%cached%.sha256" >nul 2>nul
++if errorlevel 1 goto abort
++for /f "usebackq skip=1 delims=" %%h in ("%staged%.sha256") do if not defined actual set "actual=%%h"
++del "%staged%.sha256" >nul 2>nul
+ if not defined expected goto verify_refuse
+ if not defined actual goto verify_refuse
+ set "actual=%actual: =%"
+ if /I "%actual%"=="%expected%" goto place
+-del "%cached%.part" >nul 2>nul
++del "%staged%" >nul 2>nul
+ echo impeccable: checksum mismatch downloading %url% 1>&2
++call :cleanup
+ exit /b 127
+ 
+ :verify_refuse
+ call :check_download
+-if errorlevel 1 exit /b 127
+-del "%cached%.part" >nul 2>nul
+-del "%cached%.sha256" >nul 2>nul
+-echo impeccable: cannot verify %url% against %url%.sha256; refusing the unverified download 1>&2
++if errorlevel 1 goto abort
++del "%staged%" >nul 2>nul
++del "%staged%.sha256" >nul 2>nul
++echo impeccable: cannot verify %url% against repository SHA256SUMS; refusing the unverified download 1>&2
++call :cleanup
+ exit /b 127
+ 
+ :check_download
+ set "download_file=%~1"
+-if not defined download_file set "download_file=%cached%.part"
++if not defined download_file set "download_file=%staged%"
+ if not exist "%download_file%" goto download_missing
+ for %%f in ("%download_file%") do if %%~zf==0 goto download_empty
+ exit /b 0
+ 
+ :download_missing
+-del "%cached%.sha256" >nul 2>nul
++del "%staged%.sha256" >nul 2>nul
+ echo impeccable: download completed but the file was removed before execution: %url%; check your antivirus quarantine or logs. Refusing to continue; do not disable protection. 1>&2
++call :cleanup
+ exit /b 127
+ 
+ :download_empty
+ del "%download_file%" >nul 2>nul
+-del "%cached%.sha256" >nul 2>nul
++del "%staged%.sha256" >nul 2>nul
+ echo impeccable: downloaded file is empty: %url%; refusing the unverified download 1>&2
++call :cleanup
+ exit /b 127
+ 
+ :place
+ call :check_download
+-if errorlevel 1 exit /b 127
+-move /y "%cached%.part" "%cached%" >nul 2>nul
++if errorlevel 1 goto abort
++move /y "%staged%" "%cached%" >nul 2>nul
+ if errorlevel 1 goto place_failed
+ call :check_download "%cached%"
+-if errorlevel 1 exit /b 127
++if errorlevel 1 goto abort
+ set "run=%cached%"
+ goto run
+ 
+ :place_failed
++rem Another session may have published and started the same binary already.
++rem Reuse it only after comparing its bytes with our reviewed pin.
++set "actual="
++"%SystemRoot%\System32\certutil.exe" -hashfile "%cached%" SHA256 >"%staged%.sha256" 2>nul
++if errorlevel 1 goto place_refused
++for /f "usebackq skip=1 delims=" %%h in ("%staged%.sha256") do if not defined actual set "actual=%%h"
++set "actual=%actual: =%"
++if /I not "%actual%"=="%expected%" goto place_refused
++set "run=%cached%"
++goto run
++:place_refused
+ call :check_download
+-if errorlevel 1 exit /b 127
+-del "%cached%.part" >nul 2>nul
++if errorlevel 1 goto abort
++del "%staged%" >nul 2>nul
+ echo impeccable: could not cache the verified download: %url% 1>&2
++call :cleanup
+ exit /b 127
+ 
+ :run
++call :cleanup
+ "%run%" %*
+ exit /b
+ 
+@@ -179,7 +190,7 @@ set "IMPECCABLE_LAUNCHER_PROBE=1"
+ set "probe_err=%ERRORLEVEL%"
+ set "IMPECCABLE_LAUNCHER_PROBE="
+ if not "%probe_err%"=="0" goto probe_done
+-findstr /b /c:"impeccable-engine" "%probe_tmp%" >nul 2>nul
++"%SystemRoot%\System32\findstr.exe" /b /c:"impeccable-engine" "%probe_tmp%" >nul 2>nul
+ if not errorlevel 1 set "probe_ok=1"
+ :probe_done
+ del "%probe_tmp%" >nul 2>nul
+@@ -198,17 +209,29 @@ echo impeccable: cannot download engine %version%; curl.exe is unavailable. 1>&2
+ goto setup_failed
+ 
+ :download_failed
+-del "%cached%.part" >nul 2>nul
++del "%staged%" >nul 2>nul
+ echo impeccable: could not download engine %version% from %url%; check network access and the release URL. 1>&2
+ 
+ :setup_failed
+ echo Engine %version% setup needs network access and write permission to "%IMPECCABLE_HOME%\bin\%version%". 1>&2
+ echo Run this launcher ("%~f0") with engine-probe in a terminal that has those permissions, then retry the original command. 1>&2
+ echo Alternatively, set IMPECCABLE_HOME to a writable cache location, or IMPECCABLE_BIN to a preinstalled engine binary. 1>&2
++call :cleanup
+ exit /b 127
+ 
+ :fail
+-del "%cached%.part" >nul 2>nul
+-echo impeccable: no engine binary found (looked in %bin%, %cached%, PATH). 1>&2
++echo impeccable: no engine binary found (looked in %bin%, %cached%). 1>&2
+ echo Download impeccable-windows-%arch%.exe from https://github.com/pbakaus/impeccable/releases (tag engine-v%version%) and save it as %cached%, or set IMPECCABLE_BIN to a preinstalled engine binary. Docs: https://impeccable.style 1>&2
++call :cleanup
++exit /b 127
++
++:abort
++call :cleanup
+ exit /b 127
++
++:cleanup
++if not defined owned_stage exit /b 0
++del "%staged%" "%staged%.sha256" >nul 2>nul
++rmdir "%stage%" >nul 2>nul
++set "owned_stage="
++exit /b 0

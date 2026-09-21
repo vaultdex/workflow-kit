@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "type": "command",
+        "matcher": "edit|create|apply_patch",
+        "bash": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then echo 'Impeccable hook setup required: run node scripts/install-impeccable-hooks.mjs from a reviewed checkout.' >&2; exit 1; fi; \"$engine\" hook",
+        "timeoutSec": 120,
+        "powershell": "$engine = Join-Path $env:USERPROFILE '.impeccable/vaultdex/engine-0.1.5/impeccable.exe'; if (!(Test-Path -LiteralPath $engine)) { Write-Error 'Impeccable hook setup required: run node scripts/install-impeccable-hooks.mjs from a reviewed checkout.'; exit 1 }; & $engine hook; exit $LASTEXITCODE"
+      }
+    ]
+  }
+}

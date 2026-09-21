@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-activate.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}else{console.log(JSON.stringify({additional_context:'Ponytail hooks fehlen: Nach Checkout-Pruefung node scripts/install-ponytail-hooks.mjs ausfuehren; danach Hooks freigeben.',continue:true}))}\" -- cursor \"$(git rev-parse --show-toplevel)\"",
+        "timeout": 5
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-mode-tracker.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- cursor \"$(git rev-parse --show-toplevel)\"",
+        "timeout": 5
+      }
+    ]
+  },
+  "version": 1
+}
