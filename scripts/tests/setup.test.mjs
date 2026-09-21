@@ -36,7 +36,7 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   mkdirSync(dirname(installer), { recursive: true });
   copyFileSync(join(kit, 'scripts/init-project.mjs'), installer);
   cpSync(join(kit, 'templates'), join(fixture, 'templates'), { recursive: true });
-  const init = () => spawnSync(process.execPath, [installer, fixture], { encoding: 'utf8' });
+  const init = (...args) => spawnSync(process.execPath, [installer, fixture, ...args], { encoding: 'utf8' });
   const first = init();
   assert.equal(first.status, 0, first.stderr);
   const configured = readFileSync(foreign, 'utf8');
@@ -48,8 +48,14 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   const second = init();
   assert.equal(second.status, 0, second.stderr);
   assert.equal(readFileSync(foreign, 'utf8'), configured);
+  const nextRules = readFileSync(join(fixture, 'templates/AGENTS.md'), 'utf8').replaceAll('\r\n', '\n') + '\nUpdated shared rule.\n';
+  writeFileSync(join(fixture, 'templates/AGENTS.md'), nextRules);
+  const updated = init('--existing');
+  assert.equal(updated.status, 0, updated.stderr);
+  assert.equal(readFileSync(join(fixture, 'AGENTS.md'), 'utf8'), nextRules);
   writeFileSync(join(fixture, 'AGENTS.md'), 'project-specific rule\n');
   assert.notEqual(init().status, 0);
+  assert.notEqual(init('--existing').status, 0);
   assert.equal(readFileSync(join(fixture, 'AGENTS.md'), 'utf8'), 'project-specific rule\n');
   assert.equal(readFileSync(foreign, 'utf8'), configured);
 });

@@ -25,11 +25,15 @@ node scripts/setup-skills.mjs
 node scripts/check-skills.mjs
 ```
 
-For an existing project use `init-project.mjs . --existing`: only managed hooks,
-entry points and ignored generated paths are integrated. Existing contribution
-rules, issue forms, update bots and product CI remain yours. Add links to the shared
+For an existing project use `init-project.mjs . --existing`: managed hooks,
+entry points and ignored generated paths are integrated; previously managed template
+files are updated if unedited. Unmanaged contribution rules, issue forms, update bots
+and product CI remain yours. Add links to the shared
 [contribution workflow](docs/CONTRIBUTING.md) and [Watchdog](WATCHDOG.md) in your root
 AGENTS.md. Existing conflicting files are refused, never force-overwritten.
+
+`.github/workflow-kit.json` records hashes of generated files in the consumer
+checkout (including thin entry-point wrappers), not hashes of kit implementations.
 
 This repository owns implementation and source pins. The separate thin starter
 owns the initial product-repository layout; no source implementation is copied
@@ -66,8 +70,9 @@ node .vendor/workflow-kit/scripts/setup-github.mjs OWNER/REPO
 ```
 
 Uses authenticated `gh` with repo/project permissions. Creates or reuses the project
-recorded in `.github/workflow-project.json`, configures the five workflow states,
-adds a Board view and links the repo. Existing projects are preserved. No issue data
+recorded in `.github/workflow-project.json`, verifies the five workflow states
+and links the repo. New projects inherit the template's fields and views;
+existing projects are preserved. No issue data
 is copied from Vaultdex. See [integration limits](docs/github.md) for native
 automation and server rules. Review/merge remains human-owned.
 

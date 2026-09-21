@@ -35,7 +35,7 @@ for (const file of readdirSync(join(kit, 'templates'), { recursive: true })) {
   if (!lstatSync(source).isFile()) continue;
   const name = file.split(sep).join('/');
   const isHooks = name.endsWith('hooks.json') || name === '.claude/settings.json' || name.startsWith('.github/hooks/');
-  if (existing && !isHooks) continue;
+  if (existing && !isHooks && !prior.files[name]) continue;
   const target = safe(name);
   const value = text(source);
   if (isHooks) {

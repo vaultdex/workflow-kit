@@ -141,8 +141,8 @@
 -
 -If `/plugin` is not recognized, your Claude Code is out of date. Update it (`npm install -g @anthropic-ai/claude-code@latest`, or `brew upgrade claude-code`) and restart. Other hosts use their own update flow.
 +Updates arrive through repository changes. See
-+[checkout usage and updates](../../../docs/ponytail.md). Update all six host
-+copies together and preserve the documented adaptations and MIT attribution.
++[checkout usage and updates](https://github.com/vaultdex/workflow-kit/blob/main/README.md#updates).
++Regenerate local links and cloud files together; retain patches and MIT attribution.
  
  ## More
  

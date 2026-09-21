@@ -55,8 +55,8 @@ the skills directly. Repository workflow, validation and security rules remain a
 ## Update
 
 Updates arrive through repository changes. See
-[checkout usage and updates](../../../docs/ponytail.md). Update all six host
-copies together and preserve the documented adaptations and MIT attribution.
+[checkout usage and updates](https://github.com/vaultdex/workflow-kit/blob/main/README.md#updates).
+Regenerate local links and cloud files together; retain patches and MIT attribution.
 
 ## More
 
