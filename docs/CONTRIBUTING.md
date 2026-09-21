@@ -92,7 +92,8 @@ For a project-local Priority field with no selectable options, completing its
 scale is routine setup within authorized project work: initialize Urgent, High,
 Medium, Low without requesting additional approval. Changing a linked organization
 scale requires authorization covering that shared schema; reuse existing authority.
-Setting an issue's value from an existing scale is not a schema change. Preserve existing
+Filling a missing issue priority from an existing scale within authorized work
+needs no additional approval and does not change its schema. Preserve existing
 options and priorities of foreign active work; coordinate any changes to those.
 Complete this preflight early so missing metadata does not first become a blocker
 at review handoff.
