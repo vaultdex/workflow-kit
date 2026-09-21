@@ -42,7 +42,7 @@ without waiting for another request, a linked actionable follow-up under
 [the contribution workflow](docs/CONTRIBUTING.md#recovery-scope-and-findings).
 Check relevant open/closed issues, board items and PRs first; extend compatible
 existing work and coordinate foreign active scope instead of duplicating it.
-New follow-ups enter the configured GitHub Project as unassigned Backlog issues with area labels,
+New follow-ups enter the configured GitHub Project as unassigned Backlog issues with a milestone, area labels,
 reproduction or durable evidence, impact and urgency, bounded scope, acceptance
 and verification; include known blockers. Unconfirmed signals need a concrete
 investigation question and evidence needed, never a claim of a proven defect.

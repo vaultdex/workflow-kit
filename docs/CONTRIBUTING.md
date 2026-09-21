@@ -36,6 +36,20 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   evidence. Old R0–R4 labels and agent-merge exceptions are retired. Human review
   and merge remain default; green checks, labels or board edits grant no authority.
 
+## Milestones
+
+Every task issue needs one repository milestone when created or added to the project,
+including Backlog, investigations and follow-ups. Reuse a matching milestone; create
+a scoped one when none fits. Set the actual GitHub Milestone field, not just an issue
+body reference or label. Convert draft cards to issues before tracking them as tasks.
+Keep the assignment after closure; completeness checks include Done/closed cards.
+
+Urgent fixes for confirmed production failures, security problems or data-loss risks
+use the repository milestone `Hotfixes · laufend`, kept open
+without a due date. Close hotfix issues individually; normal bug fixes and planned
+work use their scoped milestone. Hotfix urgency never bypasses acceptance, review
+or merge rules. This is a contributor obligation, not automatic server enforcement.
+
 ## Labels
 
 Use native issue forms and explicit labels on CLI-created issues/PRs. Labels describe
