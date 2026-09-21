@@ -9,6 +9,15 @@ Assign every issue a milestone, an explicit Project Priority and matching labels
 including Backlog and follow-ups; retain metadata after closure.
 See docs/CONTRIBUTING.md#milestones for scope and the ongoing hotfix milestone.
 
+New issues start in Backlog. Human-authorized triage may promote executable issues
+to Ready; this alone never authorizes implementation or Doing.
+
+Start implementation only from Ready and on an explicit human request for that
+work. If Ready is empty, analyze Backlog and propose the next executable issue
+with rationale/blockers; do not implement or change status. A human must authorize
+promotion/start; record readiness before moving to In progress (Doing).
+Existing authorization covers review fixes within the same scope, not new tasks.
+
 Before work, check issue, dependencies, current main and competing PRs. Use
 codex/<issue>-<topic>, one driver and linked branch/PR. Assignment is not a lock.
 Preserve foreign work/ownership; no force-push or admin bypass. Human review/merge

@@ -14,15 +14,33 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 | Status | Required state |
 | --- | --- |
 | Backlog | Proposed or blocked; blockers include cause and recovery condition. |
-| Ready | Accepted scope, required authorization and satisfied execution dependencies. |
-| In progress | One driver; linked session, branch and PR when available. |
+| Ready | Human-approved candidate; accepted scope and satisfied execution dependencies. Placement alone does not authorize a start. |
+| In progress | Taken from Ready on explicit human request; one driver and linked session, branch/PR. This is the Doing state. |
 | In review | Ready PR, passed selected checks, disclosed evidence limits. |
 | Done | Acceptance satisfied; delivered repository work actually merged. |
 
+- New issues start in Backlog, including immediately actionable work. A human may
+  authorize triage of one issue or the whole Backlog: check readiness and metadata,
+  promote executable issues to Ready, and retain blocked issues with reasons.
+  Triage authorization never authorizes implementation or moving to In progress.
 - Before adding work, inspect relevant open/closed issues, cards and competing PRs.
   Extend compatible unowned work; coordinate foreign active scope. Plans specify
   outcome, files/contracts, non-goals, steps, acceptance, checks, real dependencies,
   risks and recovery. Evidence needs durable authorized links/paths, not chat alone.
+- Implementation may start only from Ready, on an explicit human request covering
+  that issue/scope. Never take implementation directly from Backlog or autonomously
+  move a candidate to Ready/In progress because it seems useful or executable.
+- If Ready is empty, inspect Backlog without implementation: assess scope, evidence,
+  dependencies, ownership and blockers; propose the next executable issue with a
+  short reason and needed preparation. Leave its status unchanged pending a human
+  decision. If none is executable, report the concrete blockers instead of starting
+  unrelated work. Analysis permission is not implementation permission.
+- A human request to implement a Backlog issue authorizes preparing/checking Ready:
+  record the instruction and satisfied readiness conditions, move through Ready,
+  then start In progress. Do not skip unresolved dependencies or required approval.
+  Existing authorization covers verification/review fixes within the same active
+  scope; starting another issue needs a new human request. Native automations must
+  not promote work to Ready/In progress just because a PR was linked or a bot acted.
 - Before taking work, refresh main, status, assignee, dependencies and linked PRs.
   Record driver/session/branch, assign and set In progress, then re-read. Shared
   GitHub logins still need distinct sessions. Edits are not atomic claims; competing
