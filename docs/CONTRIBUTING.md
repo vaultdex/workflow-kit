@@ -84,6 +84,10 @@ does not replace Project Priority. Convert draft cards to issues first.
 
 When taking an authorized Ready issue, the driver checks its milestone, labels and
 Project Priority before implementation and independently fills missing metadata.
+GitHub Projects can link organization issue fields: an empty Project `options`
+array does not prove an empty scale. Read the linked `issueField.options` and the
+issue's `issueFieldValues` first. Set the underlying issue field for linked
+Priority fields; do not create a duplicate Project field or replace its scale.
 If the Priority field has no selectable options at all, the driver may initialize
 Urgent, High, Medium, Low without requesting additional approval. Preserve existing
 options and priorities of foreign active work; coordinate any changes to those.
