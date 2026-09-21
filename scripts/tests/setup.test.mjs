@@ -48,12 +48,18 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   const second = init();
   assert.equal(second.status, 0, second.stderr);
   assert.equal(readFileSync(foreign, 'utf8'), configured);
+  const checked = init('--check');
+  assert.equal(checked.status, 0, checked.stderr);
+  const previousRules = readFileSync(join(fixture, 'AGENTS.md'), 'utf8');
   const nextRules = readFileSync(join(fixture, 'templates/AGENTS.md'), 'utf8').replaceAll('\r\n', '\n') + '\nUpdated shared rule.\n';
   writeFileSync(join(fixture, 'templates/AGENTS.md'), nextRules);
+  assert.notEqual(init('--check').status, 0);
+  assert.equal(readFileSync(join(fixture, 'AGENTS.md'), 'utf8'), previousRules);
   const updated = init('--existing');
   assert.equal(updated.status, 0, updated.stderr);
   assert.equal(readFileSync(join(fixture, 'AGENTS.md'), 'utf8'), nextRules);
   writeFileSync(join(fixture, 'AGENTS.md'), 'project-specific rule\n');
+  assert.notEqual(init('--check').status, 0);
   assert.notEqual(init().status, 0);
   assert.notEqual(init('--existing').status, 0);
   assert.equal(readFileSync(join(fixture, 'AGENTS.md'), 'utf8'), 'project-specific rule\n');

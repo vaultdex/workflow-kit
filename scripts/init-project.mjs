@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
 const existing = process.argv.includes('--existing');
+const check = process.argv.includes('--check');
 const hash = text => createHash('sha256').update(text).digest('hex');
 const fragments = group => group.hooks ? group.hooks.map(hook => ({ ...group, hooks: [hook] })) : [group];
 const fingerprint = group => hash(JSON.stringify(group));
@@ -19,6 +20,11 @@ const prior = existsSync(safe(receipt)) ? JSON.parse(text(join(root, receipt))) 
 const files = {};
 const hooks = {};
 const pending = {};
+if (check) {
+  assert.ok(existsSync(safe(receipt)), 'Initialize Workflow Kit before checking it');
+  for (const [name, digest] of Object.entries(prior.files))
+    assert.ok(existsSync(safe(name)) && hash(text(safe(name))) === digest, `Managed file edited or missing: ${name}`);
+}
 
 function safe(file) {
   const target = join(root, file);
@@ -100,7 +106,11 @@ safe(receipt);
 pending[receipt] = JSON.stringify({ files: { ...prior.files, ...files }, hooks }, null, 2) + '\n';
 for (const [file, value] of Object.entries(pending)) {
   const target = safe(file);
-  mkdirSync(dirname(target), { recursive: true });
-  if (!existsSync(target) || text(target) !== value) writeFileSync(target, value);
+  if (check) assert.ok(existsSync(target) && text(target) === value, `Managed output is stale; run init-project and review changes: ${file}`);
+  else {
+    mkdirSync(dirname(target), { recursive: true });
+    if (!existsSync(target) || text(target) !== value) writeFileSync(target, value);
+  }
 }
-console.log('Project files configured. Review the diff, run setup-skills, then install/review hooks explicitly.');
+console.log(check ? 'Managed files and hook snapshots match the pinned kit; no files written.'
+  : 'Project files configured. Review the diff, run setup-skills, then install/review hooks explicitly.');

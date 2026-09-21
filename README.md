@@ -83,6 +83,9 @@ existing Renovate or the included Dependabot configuration, never both for the s
 dependencies. A kit update PR pins a new commit; run init-project and setup-skills,
 commit regenerated `.github` files, run check-skills and review patch/engine changes
 before merging. Required workflow source checks catch stale generated output.
+`node .vendor/workflow-kit/scripts/init-project.mjs . --existing --check`
+validates every recorded managed file and hook snapshot without writing files;
+review intentional local edits before reconciling the receipt.
 Submodule proposals alone do not regenerate files or update a developer's checkout.
 Changed hook snapshots need explicit installation and renewed host trust.
 
@@ -95,6 +98,6 @@ real-engine security checks, including hostile checkout executables and download
 Tests never certify interactive agent trust dialogs or external reviewer access.
 
 The public kit has one standard Linux PR job, no schedule/cache/artifacts. Budget:
-20 updates/month × at most 10 minutes = 200 estimated runner minutes, $0 standard
+20 updates/month Ã— at most 10 minutes = 200 estimated runner minutes, $0 standard
 public-runner charges. Product CI stays project-specific. Private consumers must
 review their own Actions and reviewer budgets before adding runs.
