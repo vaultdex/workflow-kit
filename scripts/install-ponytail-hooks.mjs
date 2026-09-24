@@ -1,3 +1,6 @@
+// Zweck: Einen geprueften Ponytail-Snapshot im Benutzerverzeichnis installieren.
+// Nutzen: Automatische Hooks muessen keine veraenderlichen Checkout-Skripte ausfuehren.
+// Aufruf: Explizit aus dem Kit mit dem Projektpfad; persoenliche Hook-Freigabe bleibt getrennt.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -23,7 +26,7 @@ function matches(directory) {
 }
 
 const missing = files.filter(file => !existsSync(path.join(root, file)));
-if (missing.length) throw new Error(`Ponytail sources missing in ${root} (${missing[0]}); run node scripts/setup-skills.mjs first.`);
+if (missing.length) throw new Error(`Ponytail sources missing in ${root} (${missing[0]}); run the kit's scripts/setup-skills.mjs with this project path first.`);
 
 if (existsSync(destination)) {
   if (!matches(destination)) throw new Error('Ponytail 4.10.0-5 differs from this checkout. Review the change and publish a new runtime version; existing installation was not replaced.');

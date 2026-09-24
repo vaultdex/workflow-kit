@@ -1,8 +1,11 @@
+// Zweck: Gepinnte Ponytail-Skills erzeugen und eigene veraltete Ausgaben sicher entfernen.
+// Nutzen: Ein Bundle fuer alle lokalen Provider; keine kopierte Laufzeitlogik im Produkt.
+// Aufruf: setup-skills bei Einrichtung oder bewusstem Kit-Update, nicht pro Agenten-Turn.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync,
-  realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+  realpathSync, readdirSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,7 +40,8 @@ if (existsSync(bundle)) assert.equal(text(join(bundle, '.owner')), 'vaultdex-wor
 if (existsSync(join(source, '.git'))) assert.equal(git('-C', source, 'status', '--porcelain', '--untracked-files=all').trim(), '', 'Ponytail source has local changes');
 git('-C', kit, 'submodule', 'update', '--init', '--', '.vendor/ponytail');
 const revision = git('-C', source, 'rev-parse', 'HEAD').trim();
-const skills = ['ponytail', 'ponytail-audit', 'ponytail-debt', 'ponytail-gain', 'ponytail-help', 'ponytail-review'];
+const skills = git('-C', source, 'ls-tree', '-d', '--name-only', `${revision}:skills`).trim().split('\n');
+assert.ok(skills.includes('ponytail') && skills.every(s => /^ponytail(?:-[a-z0-9]+)*$/.test(s)), 'Invalid pinned skill names');
 const files = [...skills.map(s => `skills/${s}/SKILL.md`),
   ...['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent'].map(n => `hooks/ponytail-${n}.js`)];
 // Read committed blobs in one Git process. Parse byte lengths before decoding:
@@ -75,6 +79,11 @@ try {
   git('apply', '--whitespace=error-all', `--directory=${relative(root, join(next, '.agents')).split(sep).join('/')}`,
     join(kit, 'scripts/ponytail/adaptations.patch'));
   for (const file of files) writeFileSync(join(next, '.agents', file), text(join(next, '.agents', file)));
+  // Render the consumer entrypoint in generated help; runtime sources remain unchanged.
+  const help = join(next, '.agents/skills/ponytail-help/SKILL.md');
+  if (existsSync(help)) writeFileSync(help, text(help).replaceAll(
+    '`node scripts/install-ponytail-hooks.mjs`',
+    '`node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` (inside the kit: `node scripts/install-ponytail-hooks.mjs .`)'));
   const license = contents.get('LICENSE');
   writeFileSync(join(next, '.agents/hooks/LICENSE.md'), license);
   writeFileSync(join(next, '.agents/skills/ponytail/LICENSE.md'), license);
@@ -95,6 +104,45 @@ try {
   directory(dirname(receiptPath));
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   const old = existsSync(receiptPath) ? JSON.parse(text(receiptPath)).files : {};
+  // Receipts authorize only these generated outputs, never arbitrary checkout paths.
+  const retired = [], retiredLinks = [], retiredDirectories = new Set();
+  for (const [file, digest] of Object.entries(old)) {
+    assert.match(file, /^\.github\/skills\/ponytail(?:-[a-z0-9]+)*\/(?:SKILL\.md|LICENSE\.md|NOTICE\.md)$/, 'Invalid Ponytail receipt path');
+    assert.match(digest, /^[a-f0-9]{64}$/, 'Invalid Ponytail receipt hash');
+    if (Object.hasOwn(outputs, file)) continue;
+    const target = join(root, file);
+    directory(dirname(target));
+    assert.ok(!present(target) || (present(target).isFile() && hash(text(target)) === digest), `Retired skill edited; preserved: ${file}`);
+    retired.push(target);
+    const skill = file.split('/')[2];
+    if (!skills.includes(skill)) retiredDirectories.add(skill);
+  }
+  for (const skill of retiredDirectories) {
+    const cloud = join(root, '.github/skills', skill);
+    assert.ok(present(cloud).isDirectory() && !present(cloud).isSymbolicLink(), `Foreign retired skill directory: ${skill}`);
+    // No recursive deletion of user-owned directories or unseen support files.
+    for (const entry of readdirSync(cloud)) {
+      const name = `.github/skills/${skill}/${entry}`;
+      assert.ok(Object.hasOwn(old, name) && !Object.hasOwn(outputs, name), `Foreign file in retired skill; preserved: ${name}`);
+    }
+    const local = join(bundle, '.agents/skills', skill);
+    if (present(local)) {
+      directory(local);
+      assert.ok(present(local).isDirectory() && !present(local).isSymbolicLink(), `Foreign retired bundle entry: ${skill}`);
+      for (const entry of readdirSync(local)) {
+        const expected = old[`.github/skills/${skill}/${entry}`];
+        const path = join(local, entry);
+        assert.ok(expected && present(path).isFile() && hash(text(path)) === expected, `Retired local skill edited; preserved: ${skill}/${entry}`);
+      }
+    }
+    for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi']) {
+      const link = join(root, provider, 'skills', skill);
+      directory(dirname(link));
+      if (!present(link)) continue;
+      assert.ok(present(link).isSymbolicLink() && resolve(dirname(link), readlinkSync(link)) === local, `Foreign retired provider link; preserved: ${link}`);
+      retiredLinks.push(link);
+    }
+  }
   for (const [file, bytes] of Object.entries(outputs)) {
     const target = join(root, file);
     directory(dirname(target));
@@ -111,6 +159,12 @@ try {
       target, process.platform === 'win32' ? 'junction' : 'dir');
   }
   for (const [file, bytes] of Object.entries(outputs)) writeFileSync(join(root, file), bytes);
+  for (const path of retiredLinks) unlinkSync(path);
+  for (const path of retired) if (present(path)) unlinkSync(path);
+  for (const skill of retiredDirectories) {
+    const path = join(root, '.github/skills', skill);
+    if (readdirSync(path).length === 0) rmdirSync(path);
+  }
   writeFileSync(receiptPath, JSON.stringify({ revision, files: Object.fromEntries(Object.entries(outputs).map(([p, bytes]) => [p, hash(bytes)])) }, null, 2) + '\n');
   published = true;
   console.log(`Ponytail ${revision.slice(0, 7)}: shared source, five local providers linked, Copilot refreshed.`);

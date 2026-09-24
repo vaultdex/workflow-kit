@@ -3,14 +3,15 @@
   "hooks": {
     ".claude/settings.json": {
       "PostToolUse": [
-        "3aa7fbde02d4a37ea21965620f7945252f2d60d7e2e11800dcc2a10354472dd6"
+        "25af46da439c2b8a1caf02f7b1f3ad24d17cd03fd99dad82c78dc5d68b9edeb6"
       ],
       "Stop": [
-        "4a9d539f6c72f3943d443bb912d991b45b6408de3cfbcd5514fe4070da78fdb1"
+        "70924d8fb14ae3a262e85fae05e94d3aea021c5ed17934cbc3b34fdcc4b18dbb"
       ],
       "SessionStart": [
-        "3be23f10c024a58ef59f2bba1552dcdeacb06321e78ea9e2a7c9d70d0beee71a",
-        "b8556f3608b0c0444e43b84987b1eea87e25221f51caa42012487f7dee41ae53"
+        "86468cbf7778b8cc51e5958f0eafb575f69bbc0c2903a5cea4f60bfd7e677289",
+        "ee43960515d92d515ca130acbb1588de1816d603599c7dee6dae13e11b6193f0",
+        "38c0f44e5cb540713cc91d578bdebfe615db47ee0c9fdcf540f5fb4e42bd0011"
       ],
       "SubagentStart": [
         "ccbfca5bdbc034bf4eabe48244cda8e3d7de5323e40d2180a97aa061beda0ff7"
@@ -21,8 +22,9 @@
     },
     ".codex/hooks.json": {
       "SessionStart": [
-        "0ce61e920455ff12509528c3c69595a9cd0860d48b387a53a137deaad828c76a",
-        "198d6e02fd85075700af83a396c0bd92203b53b8c89adfdb57cd73275efddb8b"
+        "147ecca3f737bf2d77b8e16b2ba07e7dbf55ec2a4e2ac81ea1e6917c7dbd25d3",
+        "7b76a6bd04dd853e1b4630962c0df51d65a4dbfa25d8a767af6ed46e2c222939",
+        "d6eb54841dbe6c2920ab1ab9c1e0528ea29ef7bb421e1e9ba6c4c3f6b2038354"
       ],
       "SubagentStart": [
         "eb3b95ada48a7ef11cb4d660ad023bad91ab4f1d599736113079001bdde4a8f4"
@@ -31,15 +33,15 @@
         "6c4b92fa9180dca625ca7c3360657a4d606106f1694cabf4412c048cc33fb27c"
       ],
       "PostToolUse": [
-        "5a05b4c4c53b01b91db4ad723b185f3159dca5c87d9ee6b771da31251da9a006"
+        "1145dbc08e12a2fa41f6d02fee1c06a3594ee2f2005680c9a940a6cc44ae7faa"
       ],
       "Stop": [
-        "b2f12ba484c9167770d246b947847ea20576bb05894e69824d69936cef4a2f17"
+        "438f722891c819da1f34bd40b301969cc8337bb4ae18586d4dcd9dc8a6a852fd"
       ]
     },
     ".cursor/hooks.json": {
       "sessionStart": [
-        "976263778154fe60e3e777f49697156344279ca17ab4031bdfb361f8b6b59c66"
+        "a1457194257abb99a70e4c43c93355fb0ecc57c9198a6a2dd1f5e6431b0d9308"
       ],
       "beforeSubmitPrompt": [
         "f2d146f04d6667ddf36d39941a18bc07dcba6f0a3e34450c151bfbfdd3030759"
@@ -47,12 +49,15 @@
     },
     ".github/hooks/impeccable.json": {
       "postToolUse": [
-        "97cef358cd56931e56364336b3abe9f25533f4d1f06560910527dd3191a5666f"
+        "17059ce7b186625fdfd3d94d0442e925ea88fb451a83d1926d4408e73ead40e6"
+      ],
+      "sessionStart": [
+        "2b6e1dd73d74fab62937465089f3f3c8474b24ccf21b65b046e4cb9ac7a73bc3"
       ]
     },
     ".github/hooks/ponytail.json": {
       "sessionStart": [
-        "cca615119543a23b4ac534c1a98b61c5f2f28dddcf39d1f0ea95ce77a7d09a2b"
+        "6b1b1550fa895395bb6f203bae1e6bf1d9353630746704bebb48215e2dd922ea"
       ],
       "userPromptSubmitted": [
         "e33279c72f9ee0fa99525d5bc4a479d24e1bd4adcee266b96d47e069a4c4a41a"
@@ -60,6 +65,21 @@
       "subagentStart": [
         "42d633d40b784ce0fdffbf35d63902bd862c968b174196500bc8529e4128a1ca"
       ]
+    }
+  },
+  "hookMetadata": {
+    ".claude/settings.json": {
+      "description": "Impeccable design detector: immediate-tier checks after Edit/Write on UI files, full-rule deep pass on Stop."
+    },
+    ".codex/hooks.json": {},
+    ".cursor/hooks.json": {
+      "version": 1
+    },
+    ".github/hooks/impeccable.json": {
+      "version": 1
+    },
+    ".github/hooks/ponytail.json": {
+      "version": 1
     }
   }
 }

@@ -29,15 +29,18 @@ definitions; duplicate installations may be enabled at the same time.
 ## Activation messages
 
 When the user requests initial setup, the agent can run the installers from the
-reviewed checkout. These are explicit setup commands, never automatic hook bodies:
+reviewed product root. These are explicit setup commands, never automatic hook bodies:
 
 ```sh
-node scripts/install-ponytail-hooks.mjs
+node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .
+node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .
 ```
 
-Impeccable uses `node scripts/install-impeccable-hooks.mjs`. After either
-installation, review/enable native hook definitions. One integration's setup does
-not initialize the other.
+The final `.` selects this project. Inside the kit itself use `node scripts/... .`
+instead. No consumer forwarding scripts are needed. After installation,
+review/enable native hook definitions. One integration's setup does not initialize
+the other. Impeccable's missing-engine hint belongs at SessionStart; quiet missing
+edit/Stop hooks do not certify successful analysis. Existing engine failures remain errors.
 
 - **Codex CLI:** open `/hooks` to review, enable and trust the named definitions.
 - **Codex Desktop:** use the hook management view in the app's settings; `/hooks`
@@ -47,6 +50,12 @@ not initialize the other.
   definitions and restart the session. Preserve other hooks and personal settings.
 - **Copilot:** inspect native hook loading and `.github/hooks/*.json`; cloud hooks
   require the definitions on the default branch. Report unsupported events explicitly.
+  Copilot CLI 1.0.56 is affected by [upstream issue 3589](https://github.com/github/copilot-cli/issues/3589):
+  multiple SessionStart hooks execute, but only the last `additionalContext` reaches
+  the model. With both integrations missing, one setup warning may therefore be
+  hidden. Inspect both hook results during preflight; a missing warning does not
+  prove installation. The upstream issue remains open as of 2026-09-24; no fixed
+  CLI version has been verified here.
 - **Cursor:** inspect Settings → Hooks and enable supported local hooks. The
   bundled Ponytail rule, if separately installed, overrides its mode-switching hooks.
 - **Other hosts:** state that these manifests do not supply native hooks there;

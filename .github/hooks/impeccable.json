@@ -1,14 +1,22 @@
 {
+  "version": 1,
   "hooks": {
     "postToolUse": [
       {
         "type": "command",
         "matcher": "edit|create|apply_patch",
-        "bash": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then echo 'Impeccable hook setup required: run node scripts/install-impeccable-hooks.mjs from a reviewed checkout.' >&2; exit 1; fi; \"$engine\" hook",
+        "bash": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ -x \"$engine\" ]; then \"$engine\" hook; fi",
         "timeoutSec": 120,
-        "powershell": "$engine = Join-Path $env:USERPROFILE '.impeccable/vaultdex/engine-0.1.5/impeccable.exe'; if (!(Test-Path -LiteralPath $engine)) { Write-Error 'Impeccable hook setup required: run node scripts/install-impeccable-hooks.mjs from a reviewed checkout.'; exit 1 }; & $engine hook; exit $LASTEXITCODE"
+        "powershell": "$engine = Join-Path $env:USERPROFILE '.impeccable/vaultdex/engine-0.1.5/impeccable.exe'; if (Test-Path -LiteralPath $engine -PathType Leaf) { & $engine hook; exit $LASTEXITCODE }; exit 0"
+      }
+    ],
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then printf '%s\\n' '{\"additionalContext\":\"Impeccable fehlt: automatische UI-Pruefung nicht aktiv. Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs . ausfuehren; im Kit selbst: node scripts/install-impeccable-hooks.mjs . Danach Hooks freigeben.\"}'; fi",
+        "powershell": "$engine = Join-Path $env:USERPROFILE '.impeccable/vaultdex/engine-0.1.5/impeccable.exe'; if (!(Test-Path -LiteralPath $engine -PathType Leaf)) { Write-Output '{\"additionalContext\":\"Impeccable fehlt: automatische UI-Pruefung nicht aktiv. Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs . ausfuehren; im Kit selbst: node scripts/install-impeccable-hooks.mjs . Danach Hooks freigeben.\"}' }; exit 0",
+        "timeoutSec": 5
       }
     ]
-  },
-  "version": 1
+  }
 }
