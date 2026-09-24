@@ -77,11 +77,10 @@ function migrateEvents(name, current, old, incoming) {
     });
     for (const part of (incoming?.hooks[event] ?? []).flatMap(fragments)) {
         if (retained.flatMap(fragments).some(x => fingerprint(x) === fingerprint(part))) continue;
-        const { hooks: handlers, ...metadata } = part;
-        const matching = handlers && retained.find(x => {
-          const { hooks: _, ...other } = x;
-          return x.hooks && same(other, metadata);
-        });
+        const { hooks: handlers } = part;
+        // Preserve the exact serialized fragment used by existing receipts.
+        const matching = handlers && retained.find(x => x.hooks
+          && fingerprint({ ...x, hooks: handlers }) === fingerprint(part));
         if (matching) matching.hooks.push(...handlers);
         else retained.push(part);
     }
