@@ -95,11 +95,14 @@ if (root !== kit) {
   }
 }
 const ignore = safe('.gitignore');
-const patterns = ['/.workflow-kit/', '/.impeccable/vendor/', '/.impeccable/setup-*/', '/.agents/hooks/',
-  ...['.agent', '.agents', '.claude', '.opencode', '.pi'].flatMap(p => [`/${p}/skills/ponytail*/`, `/${p}/skills/impeccable`]),
+// Generated provider entries are symlinks: a trailing slash would match directories only.
+const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
+const legacy = ['/.agents/hooks/', ...providers.map(p => `/${p}/skills/ponytail*/`)];
+const patterns = ['/.workflow-kit/', '/.impeccable/vendor/', '/.impeccable/setup-*/', '/.agents/hooks',
+  ...providers.flatMap(p => [`/${p}/skills/ponytail*`, `/${p}/skills/impeccable`]),
   '/.claude/agents/impeccable-*.md', '/.codex/agents/impeccable_*.toml', '/.opencode/commands/impeccable.md',
   '.claude/settings.local.json', '**/.impeccable/config.local.json', '**/skills/impeccable/scripts/bin/'];
-const currentIgnore = existsSync(ignore) ? text(ignore) : '';
+const currentIgnore = (existsSync(ignore) ? text(ignore) : '').split('\n').filter(line => !legacy.includes(line)).join('\n');
 const additions = patterns.filter(p => !currentIgnore.split('\n').includes(p));
 pending['.gitignore'] = currentIgnore.trimEnd() + (additions.length ? '\n' + additions.join('\n') : '') + '\n';
 safe(receipt);

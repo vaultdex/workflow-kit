@@ -16,8 +16,9 @@ saved filters and native workflows after migration: any review-entry automation
 must target Automated review, never Human review based only on PR readiness or CI.
 The setup script validates the six required statuses; it does not migrate boards.
 New issues start Backlog. Human triage may move feasible work to Ready with unresolved
-dependencies; preserve links and external blockers. Start only after blockers resolve
-and a human requests implementation. Disable PR-linked/bot promotion to In progress.
+dependencies; preserve links and external blockers. Start only after blockers resolve,
+under the consumer's start policy (default: a human requests implementation).
+Disable PR-linked/bot promotion to In progress.
 Native Project automation has no public creation/update mutation in the inspected
 GitHub GraphQL schema. Configure Auto-add for `repo:OWNER/REPO is:issue` and review
 native workflow settings in the Project UI. Do not mark every closed issue Done:

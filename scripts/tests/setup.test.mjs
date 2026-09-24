@@ -47,6 +47,10 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   const init = (...args) => spawnSync(process.execPath, [installer, fixture, ...args], { encoding: 'utf8' });
   const first = init();
   assert.equal(first.status, 0, first.stderr);
+  for (const link of ['.agents/hooks', ...['.agent', '.agents', '.claude', '.opencode', '.pi'].map(p => `${p}/skills/ponytail`)]) {
+    assert.ok(lstatSync(join(fixture, link)).isSymbolicLink(), link);
+    assert.equal(spawnSync('git', ['-C', fixture, 'check-ignore', '-q', link]).status, 0, `${link} must be ignored`);
+  }
   const configured = readFileSync(foreign, 'utf8');
   const current = JSON.parse(configured);
   assert.deepEqual(current.permissions, config.permissions);

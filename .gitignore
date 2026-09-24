@@ -42,9 +42,9 @@ gha-creds-*.json
 
 # Generated source bundles and local skill discovery
 /.workflow-kit/
-/.agents/hooks/
-/.agent/skills/ponytail*/
-/.agents/skills/ponytail*/
-/.claude/skills/ponytail*/
-/.opencode/skills/ponytail*/
-/.pi/skills/ponytail*/
+/.agents/hooks
+/.agent/skills/ponytail*
+/.agents/skills/ponytail*
+/.claude/skills/ponytail*
+/.opencode/skills/ponytail*
+/.pi/skills/ponytail*

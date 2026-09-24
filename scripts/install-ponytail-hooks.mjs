@@ -22,6 +22,9 @@ function matches(directory) {
     readFileSync(path.join(directory, file)).equals(readFileSync(path.join(root, file))));
 }
 
+const missing = files.filter(file => !existsSync(path.join(root, file)));
+if (missing.length) throw new Error(`Ponytail sources missing in ${root} (${missing[0]}); run node scripts/setup-skills.mjs first.`);
+
 if (existsSync(destination)) {
   if (!matches(destination)) throw new Error('Ponytail 4.10.0-5 differs from this checkout. Review the change and publish a new runtime version; existing installation was not replaced.');
 } else {
