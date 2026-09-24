@@ -89,8 +89,11 @@ branch creation may have succeeded even when the command reported failure.
 
 Decide the delivery boundary **before creating the PR, including a Draft**. When
 an acceptance item cannot be performed within this delivery (for example a live
-provider check requiring unavailable credentials), split that separately executable
-acceptance into a follow-up under [scope and findings](#recovery-scope-and-findings).
+provider check requiring unavailable credentials), obtain explicit human
+authorization for the changed acceptance/scope before applying a split into a
+follow-up under [scope and findings](#recovery-scope-and-findings). An existing
+explicit human instruction covering that split is sufficient; cite it instead
+of asking again. Without that authorization, preserve the accepted scope and blocker.
 Record the split and remaining limits in the original issue first. The delivery PR
 uses `Closes #N` for the original issue's resulting, fully delivered scope; it does
 not close the follow-up or claim its missing acceptance passed.
@@ -216,13 +219,16 @@ scope, never approval, priority, checks or merge authority. Preserve existing la
   dependencies, risk, product/architecture or protected-data changes need separately
   scoped work/authorization. Preserve foreign work; retain out-of-scope findings.
   Independent follow-ups need planning, not implementation before this delivery.
-- Before PR creation, move separately executable unavailable acceptance into a
+- Before PR creation, and only with explicit human authorization of the resulting
+  acceptance/scope, move separately executable unavailable acceptance into a
   follow-up issue: record exact acceptance, missing access/evidence, recovery and
   checks; assign milestone, Project Priority, labels and Backlog; set its native
   `blocked by` dependency to the original issue. Record the split, follow-up link
   and resulting deliverable scope in the original issue. Preserve historical
-  acceptance text with an explicit superseding decision, not silent deletion.
-  This policy permits that bounded split, not a waiver of security/integrity or
+  acceptance text and link the human authorization as the superseding decision,
+  not silent deletion. Existing explicit authorization covering this split remains
+  valid; this policy or a driver's own decision alone does not authorize it.
+  An authorized split is not a waiver of security/integrity or
   mandatory pre-merge checks. If safe delivery depends on the missing proof,
   retain the blocker. Changed outcomes, risk or ownership still need the separately
   scoped authorization above. Creating the follow-up grants no implementation

@@ -30,7 +30,8 @@ Create issue-linked branches natively; verify PR/issue links after creation and
 before review under .vendor/workflow-kit/docs/CONTRIBUTING.md#issue-branch-and-pr-links.
 Branch names or mentions alone do not prove linkage; partial work must not close issues.
 Resolve separately executable unavailable acceptance before PR creation using
-that guide's follow-up rule; close only the resulting fully delivered scope.
+that guide's follow-up rule, with explicit human authorization of the changed
+acceptance/scope; close only the resulting fully delivered scope.
 Follow-ups remain Backlog, not permission to start them or waive merge gates.
 Preserve foreign work/ownership; no force-push or admin bypass. Human review/merge
 remain default. Driver owns coordination, integration, proof and delivery;
