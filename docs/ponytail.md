@@ -13,8 +13,8 @@ Personal plugin installations remain independent; choose one injection source in
 your agent's settings if duplicate skill names/hooks are enabled.
 
 Run `node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` separately to
-install the immutable `~/.ponytail/vaultdex/4.10.0-5/` snapshot. Runtime bytes remain
-identical to the previous reviewed integration. Identical snapshots are reused;
+install the immutable `~/.ponytail/vaultdex/4.10.0-6/` snapshot. It adds native
+launchers before the unchanged JavaScript hooks. Identical snapshots are reused;
 changed bytes at the same version are refused. `vaultdex` is the publisher namespace;
 runtime state is isolated by checkout hash and host. Personal defaults are retained.
 
@@ -23,8 +23,52 @@ subagentStart and userPromptSubmitted (prompt stdout is not injected). Cursor:
 sessionStart/beforeSubmitPrompt; an existing always-on Ponytail rule takes precedence.
 Other providers get skills only. Hook manifests differ because host protocols differ.
 Never run installation from an automatic hook or silently change native trust.
-The inherited PATH issue [#3](https://github.com/vaultdex/workflow-kit/issues/3)
-remains a separate activation blocker until its runtime fix and platform proofs are accepted.
+The launchers locate the checkout by walking to `.git`, without executing Git.
+Before starting Node they skip relative/checkout-local PATH entries and resolve
+executable symlinks/junctions, rejecting targets inside the checkout. External
+Native fnm/nvm installations remain supported. POSIX requires an ELF or Mach-O
+Node executable (including universal Mach-O); the OS `od` utility next to
+`readlink` checks its magic bytes before execution. Script shims are skipped:
+their absolute shebang or body can execute checkout code regardless of PATH.
+Managed native executables outside the checkout remain the user's trust boundary.
+Windows requires the resolved target to retain `.exe` and an MZ header; scripts
+behind `node.exe` links are rejected before PowerShell's call operator runs.
+Windows' native loader validates the executable format itself.
+After selecting Node by its actual path,
+the exported PATH contains only fixed OS directories: `/usr/bin`, `/bin`,
+`/usr/sbin`, `/sbin`, NixOS's system profile, or Windows' native system directory.
+No inherited PATH directory reaches the
+hook: even external directories can expose file links into the checkout.
+Node preload environment variables are removed for this hook
+process. POSIX uses `cd -P` and absolute system `readlink` without GNU-only flags.
+When `/usr/bin/readlink` and `/bin/readlink` are absent, it uses NixOS's root-owned
+`/run/current-system/sw/bin/readlink`, including system-profile file symlinks.
+These fixed OS paths are the bootstrap trust anchor; `readlink` is never selected
+from inherited PATH. Other layouts without these utilities fail closed. Windows
+uses native final-path handles through PowerShell. No additional dependency or
+checkout JavaScript runs during bootstrap.
+
+Claude explicitly selects Bash (Git Bash on Windows). Codex uses its native cmd
+override on Windows; Copilot supplies Bash and PowerShell commands. Cursor's
+single command uses an installed cmd/sh launcher via `~`, preserving spaces in
+the home path. Install before enabling Cursor hooks: an absent launcher produces
+the shell's missing-command error and never installs itself. Other hosts retain
+their SessionStart setup hint and silent uninstalled prompt/subagent hooks.
+Review the changed hook definitions and trust the new snapshot explicitly; the
+old `4.10.0-5` installation is left untouched. An existing enabled old definition
+remains vulnerable until replaced and reviewed.
+
+Windows execution policy remains enforced: `Restricted` blocks the installed
+PowerShell script. An operator must authorize reviewed local scripts under their
+own policy before enabling hooks; installers and launchers never use Bypass or
+change personal/managed policy. The installer rejects snapshot destinations inside
+any Git checkout, resolving existing directory links/junctions before writing.
+This includes `$HOME` being a Git checkout or `.ponytail` linking into one: the
+launcher itself must be trusted code outside the checkout, not just Node.
+Keep the personal snapshot outside Git roots throughout its lifetime. If moving
+it or turning a parent directory into a checkout, disable hooks and provision a
+personal home outside that checkout before installing and enabling them again.
+No HOME exception or automatic relocation weakens this trust boundary.
 
 The generator reads skill names from the pinned tree. On an upgrade it removes only
 unchanged owned files of retired skills and provider links pointing exactly to those

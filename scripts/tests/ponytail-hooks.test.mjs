@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,7 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
   cpSync(path.join(root, '.agents/skills/ponytail'), path.join(checkout, '.agents/skills/ponytail'), { recursive: true, dereference: true });
   mkdirSync(path.join(checkout, 'scripts'));
   cpSync(fileURLToPath(new URL('../install-ponytail-hooks.mjs', import.meta.url)), path.join(checkout, 'scripts/install-ponytail-hooks.mjs'));
+  cpSync(fileURLToPath(new URL('../ponytail', import.meta.url)), path.join(checkout, 'scripts/ponytail'), { recursive: true });
   mkdirSync(path.join(checkout, 'frontend'));
   const init = spawnSync(git, ['init', '--quiet', checkout], { encoding: 'utf8' });
   assert.equal(init.status, 0, init.stderr);
@@ -55,6 +56,19 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
   const installation = install();
   assert.equal(installation.status, 0, installation.stderr);
   assert.equal(install().status, 0, 'Identical installation must be reusable');
+  // Refuse snapshots inside Git roots, including a personal-directory junction.
+  const linkedHome = path.join(temp, 'linked-home');
+  mkdirSync(linkedHome);
+  symlinkSync(checkout, path.join(linkedHome, '.ponytail'), windows ? 'junction' : 'dir');
+  for (const unsafeHome of [checkout, path.join(checkout, 'new-home'), linkedHome]) {
+    const refused = spawnSync(process.execPath, [path.join(checkout, 'scripts/install-ponytail-hooks.mjs')], {
+      env: { ...env, HOME: unsafeHome, USERPROFILE: unsafeHome }, encoding: 'utf8',
+    });
+    assert.notEqual(refused.status, 0, 'Checkout-local snapshots must not be installed');
+    assert.match(refused.stderr, /snapshot must be outside Git checkouts/);
+  }
+  for (const untouched of ['.ponytail', 'new-home', 'vaultdex'])
+    assert.equal(existsSync(path.join(checkout, untouched)), false, 'Refusal must precede writes');
 
   for (const host of ['codex', 'claude', 'copilot', 'cursor']) {
     const output = run('ponytail-activate.js', host);
@@ -146,6 +160,85 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
     : [{ executable: '/bin/sh', args: ['-c'] }];
   const gitBash = windows && path.resolve(path.dirname(git), '../bin/bash.exe');
   if (gitBash && existsSync(gitBash)) shells.push({ executable: gitBash, args: ['--noprofile', '--norc', '-c'] });
+  // Executable markers, including a PATH directory outside the checkout whose
+  // real junction/symlink target is inside it. No malicious program is executed.
+  const marker = path.join(temp, 'hijacked'), bin = path.join(checkout, 'tools');
+  mkdirSync(bin);
+  if (windows) {
+    const shim = path.join(bin, 'node.exe');
+    const compiled = spawnSync(shells[0].executable, [...shells[0].args, `Add-Type -OutputType ConsoleApplication -OutputAssembly $env:PONYTAIL_SHIM -TypeDefinition '
+public class Shim { public static void Main() { System.IO.File.WriteAllText(System.Environment.GetEnvironmentVariable("PONYTAIL_MARKER"), "executed"); } }'`],
+    { env: { ...env, PONYTAIL_SHIM: shim }, encoding: 'utf8' });
+    assert.equal(compiled.status, 0, compiled.stderr);
+    cpSync(shim, path.join(bin, 'git.exe'));
+    for (const directory of [checkout, path.join(checkout, 'frontend')])
+      for (const tool of ['node.exe', 'git.exe']) cpSync(path.join(bin, tool), path.join(directory, tool));
+  } else {
+    for (const directory of [checkout, bin]) for (const tool of ['node', 'git', 'bash', 'readlink'])
+      writeFileSync(path.join(directory, tool), '#!/bin/sh\nprintf executed > "$PONYTAIL_MARKER"\n', { mode: 0o755 });
+  }
+  const linked = path.join(temp, 'external-link');
+  symlinkSync(bin, linked, windows ? 'junction' : 'dir');
+  const fileLinked = path.join(temp, 'external-file-link');
+  if (!windows) {
+    mkdirSync(fileLinked);
+    symlinkSync(path.join(bin, 'node'), path.join(fileLinked, 'node'));
+    symlinkSync(path.join(bin, 'bash'), path.join(fileLinked, 'bash'));
+  }
+  const externalNode = path.join(temp, 'external-node');
+  mkdirSync(externalNode);
+  if (windows) {
+    // Native loading must skip a script named node.exe and reject resolved
+    // script extensions even if their first bytes happen to look like MZ.
+    writeFileSync(path.join(externalNode, 'node.exe'), '@echo unsafe\r\n');
+    const scriptTarget = path.join(temp, 'script.cmd');
+    writeFileSync(scriptTarget, 'MZ\r\n');
+    const checked = spawnSync(shells[0].executable, [...shells[0].args, `
+$source = Get-Content -Raw -LiteralPath $env:PONYTAIL_BOOTSTRAP
+$native = [regex]::Match($source, "(?s)Add-Type -TypeDefinition @'\\r?\\n(.*?)\\r?\\n'@").Groups[1].Value
+Add-Type -TypeDefinition $native
+if ([PonytailNativePath]::IsNativeNode($env:PONYTAIL_SCRIPT_TARGET)) { throw 'Script target accepted' }
+if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'Native Node rejected' }
+`], { env: { ...env, PONYTAIL_BOOTSTRAP: path.join(checkout, 'scripts/ponytail/launch.ps1'),
+      PONYTAIL_SCRIPT_TARGET: scriptTarget, PONYTAIL_NATIVE_NODE: process.execPath }, encoding: 'utf8' });
+    assert.equal(checked.status, 0, checked.stderr);
+  }
+  if (!windows) {
+    // Script shims are not native Node, even with an external OS interpreter.
+    const systemEnv = ['/usr/bin/env', '/bin/env', '/run/current-system/sw/bin/env'].find(existsSync);
+    assert.ok(systemEnv, 'System env is required for the external shim fixture');
+    writeFileSync(path.join(externalNode, 'node'), '#!' + systemEnv + ' bash\nprintf executed > "$PONYTAIL_MARKER"\nexec '
+      + "'" + process.execPath.replaceAll("'", "'\\''") + "' \"$@\"\n", { mode: 0o755 });
+  }
+  const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
+    PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked] : []), externalNode, process.env.PATH].join(path.delimiter) };
+  if (!windows) {
+    // Emulate NixOS's trusted OS path without changing system files. Both
+    // profile directories and individual commands are symlinks into its store.
+    const launcher = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-6/launch.sh');
+    const source = readFileSync(launcher, 'utf8');
+    const systemReadlink = ['/usr/bin/readlink', '/bin/readlink', '/run/current-system/sw/bin/readlink'].find(existsSync);
+    assert.ok(systemReadlink, 'System readlink is required for the NixOS fixture');
+    const store = path.join(temp, 'store');
+    mkdirSync(store);
+    cpSync(systemReadlink, path.join(store, 'readlink'), { dereference: true });
+    cpSync(path.join(path.dirname(systemReadlink), 'od'), path.join(externalNode, 'od'), { dereference: true });
+    symlinkSync(path.join(store, 'readlink'), path.join(externalNode, 'readlink'));
+    symlinkSync(path.join(bin, 'readlink'), path.join(fileLinked, 'readlink'));
+    const profile = path.join(temp, 'profile');
+    symlinkSync(externalNode, profile, 'dir');
+    writeFileSync(launcher, source.replaceAll('canonical=/usr/bin/readlink', 'canonical=/missing-ponytail-readlink')
+      .replaceAll('canonical=/bin/readlink', 'canonical=/missing-ponytail-readlink')
+      .replaceAll('canonical=/run/current-system/sw/bin/readlink', 'canonical=' + "'" + profile.replaceAll("'", "'\\''") + "/readlink'"));
+    const result = spawnSync('/bin/sh', [launcher, 'activate', 'codex'], {
+      cwd: checkout, env: { ...hostileEnv, PATH: [checkout, linked, fileLinked, profile, process.env.PATH].join(':') },
+      input: '{}', encoding: 'utf8', timeout: 5000,
+    });
+    writeFileSync(launcher, source);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /PONYTAIL MODE ACTIVE/);
+    assert.equal(existsSync(marker), false, 'Non-FHS discovery executed checkout readlink');
+  }
   for (const manifest of manifests) {
     const hooks = JSON.parse(readFileSync(path.join(root, manifest), 'utf8')).hooks;
     if (manifest === '.codex/hooks.json' || manifest === '.claude/settings.json') {
@@ -155,36 +248,72 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
     const handlers = Object.values(hooks).flat().flatMap(group => group.hooks || [group]);
     for (const handler of handlers.filter(hook => /ponytail/.test(hook.command || hook.bash || ''))) {
       for (const shell of shells) {
-        const command = handler.command || (shell.executable.endsWith('powershell.exe') ? handler.powershell : handler.bash);
+        const powershell = shell.executable.endsWith('powershell.exe');
+        if (powershell && !handler.powershell && manifest !== '.cursor/hooks.json') continue;
+        const command = powershell ? handler.powershell ?? handler.command : handler.command ?? handler.bash;
         const continuedHost = manifest === '.codex/hooks.json' ? 'codex' : 'claude';
-        if (command.endsWith(' continue')) writeFileSync(state(continuedHost), 'lite');
+        if (command.includes(' continue')) writeFileSync(state(continuedHost), 'lite');
         const result = spawnSync(shell.executable, [...shell.args, command], {
-          cwd: path.join(checkout, 'frontend'), env,
+          cwd: path.join(checkout, 'frontend'), env: hostileEnv,
           input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: 5000,
         });
         assert.equal(result.status, 0, `${manifest}: ${result.stderr || result.error?.message}`);
+        assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed`);
         assert.ok(result.stdout.trim(), `${manifest}: no hook output`);
-        if (command.endsWith(' continue')) {
+        if (manifest !== '.claude/settings.json') assert.doesNotThrow(() => JSON.parse(result.stdout),
+          `${manifest}: native launcher must preserve the host JSON protocol`);
+        if (command.includes(' continue')) {
           assert.match(result.stdout, /level: lite/);
           assert.equal(readFileSync(state(continuedHost), 'utf8'), 'lite');
         }
       }
       if (windows && handler.commandWindows) {
-        if (handler.commandWindows.endsWith(' continue')) writeFileSync(state('codex'), 'lite');
+        if (handler.commandWindows.includes(' continue')) writeFileSync(state('codex'), 'lite');
         const result = spawnSync(path.join(process.env.SystemRoot, 'System32/cmd.exe'), ['/d', '/s', '/c', handler.commandWindows], {
-          cwd: path.join(checkout, 'frontend'), env, windowsVerbatimArguments: true,
+          cwd: path.join(checkout, 'frontend'), env: hostileEnv, windowsVerbatimArguments: true,
           input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: 5000,
         });
         assert.equal(result.status, 0, result.stderr || result.error?.message);
+        assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed in cmd`);
         assert.ok(result.stdout.trim(), `${manifest}: no Windows override output`);
-        if (handler.commandWindows.endsWith(' continue')) assert.match(result.stdout, /level: lite/);
+        assert.doesNotThrow(() => JSON.parse(result.stdout), 'cmd must preserve the Codex JSON protocol');
+        if (handler.commandWindows.includes(' continue')) assert.match(result.stdout, /level: lite/);
       }
     }
   }
 
   const codexStart = JSON.parse(readFileSync(path.join(root, '.codex/hooks.json'), 'utf8'))
-    .hooks.SessionStart.flatMap(group => group.hooks).find(hook => hook.command.includes('ponytail-activate.js'));
-  const missing = spawnSync(shells[0].executable, [...shells[0].args, codexStart.command], {
+    .hooks.SessionStart.flatMap(group => group.hooks).find(hook => hook.command.includes(' activate codex'));
+  const missingShell = windows ? shells.at(-1) : shells[0];
+  const noExternalNode = spawnSync(missingShell.executable, [...missingShell.args, codexStart.command], {
+    cwd: checkout, env: { ...hostileEnv, PATH: [checkout, bin, '.', linked].join(path.delimiter) },
+    input: '{}', encoding: 'utf8', timeout: 5000,
+  });
+  assert.notEqual(noExternalNode.status, 0, 'Untrusted-only PATH must not start Node');
+  assert.match(noExternalNode.stderr, /install Node outside the checkout/);
+  assert.equal(existsSync(marker), false);
+  if (windows) {
+    const restricted = spawnSync(shells[0].executable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted',
+      '-File', path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-6/launch.ps1'), 'activate', 'codex'],
+    { cwd: checkout, env: hostileEnv, encoding: 'utf8', timeout: 5000 });
+    assert.notEqual(restricted.status, 0, 'Native script policy must not be bypassed');
+    assert.equal(existsSync(marker), false);
+  }
+  // A nested/fake .git marker must not shrink the executable trust boundary.
+  writeFileSync(path.join(checkout, 'frontend/.git'), 'not a Git repository');
+  for (const shell of shells) {
+    const command = shell.executable.endsWith('powershell.exe')
+      ? JSON.parse(readFileSync(path.join(root, '.github/hooks/ponytail.json'))).hooks.sessionStart[0].powershell
+      : codexStart.command;
+    const nested = spawnSync(shell.executable, [...shell.args, command], {
+      cwd: path.join(checkout, 'frontend'), env: hostileEnv, input: '{}', encoding: 'utf8', timeout: 5000,
+    });
+    assert.equal(nested.status, 0, nested.stderr);
+    assert.match(nested.stdout, /PONYTAIL MODE ACTIVE/);
+    assert.equal(existsSync(marker), false, 'Nested marker admitted an outer-checkout executable');
+  }
+  rmSync(path.join(checkout, 'frontend/.git'));
+  const missing = spawnSync(missingShell.executable, [...missingShell.args, codexStart.command], {
     cwd: checkout, env: { ...env, HOME: path.join(temp, 'missing'), USERPROFILE: path.join(temp, 'missing') },
     input: '{}', encoding: 'utf8', timeout: 5000,
   });
@@ -198,12 +327,16 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
     for (const [event, groups] of Object.entries(hooks)) {
       if (event.toLowerCase() === 'sessionstart') continue;
       for (const handler of groups.flatMap(group => group.hooks || [group])) {
-        const command = handler.command || (windows ? handler.powershell : handler.bash);
+        const command = handler.command ?? handler.bash;
         if (!command?.includes('.ponytail')) continue;
-        const result = spawnSync(shells[0].executable, [...shells[0].args, command], {
+        const result = spawnSync(missingShell.executable, [...missingShell.args, command], {
           cwd: checkout, env: { ...env, HOME: path.join(temp, 'missing'), USERPROFILE: path.join(temp, 'missing') },
           input: '{}', encoding: 'utf8', timeout: 5000,
         });
+        if (manifest === '.cursor/hooks.json') {
+          assert.notEqual(result.status, 0, 'Missing native Cursor launcher must fail closed');
+          continue;
+        }
         assert.equal(result.status, 0, result.stderr);
         assert.equal(result.stdout, '', `${manifest}/${event}: repeated activation warning`);
       }
