@@ -59,13 +59,21 @@ git submodule update --init --recursive
 node .vendor/workflow-kit/scripts/init-project.mjs . --existing
 node scripts/setup-skills.mjs
 node .vendor/workflow-kit/scripts/init-project.mjs . --existing --check
-node scripts/check-skills.mjs
+node .vendor/workflow-kit/scripts/check-skills.mjs .
 ```
 
 Use the init/setup/check sequence for a new template checkout too, omitting the
 already-present submodule add. Read scripts from the pinned kit, not an unrelated
 download. If a file was intentionally edited, reconcile it with the user/project
 contract; never delete or rewrite the receipt merely to silence a conflict.
+
+The consumer keeps only three documented entrypoints: `setup-skills.mjs` for
+workspace bootstrap and the two hook installers named by recovery messages.
+All implementation stays in the kit. Run the checker directly as shown above;
+the final `.` selects the consumer, not the kit. During a kit update, `init-project`
+retires an unedited, kit-managed `scripts/check-skills.mjs`; update the consumer's
+CI and documentation in the same PR. Edited or unmanaged files are not removed.
+Do not copy product-specific database, API or runtime proofs into this generic kit.
 
 Existing-project mode preserves unmanaged files. Integrate links to the shared
 CONTRIBUTING.md and WATCHDOG.md into its root AGENTS.md, retaining project-specific
