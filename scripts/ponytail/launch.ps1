@@ -29,13 +29,19 @@ public static class PonytailNativePath {
 }
 '@
 }
-$root = [PonytailNativePath]::Resolve((Get-Location).Path)
-while (-not (Test-Path -LiteralPath (Join-Path $root '.git'))) {
-  $parent = [IO.Directory]::GetParent($root)
-  if ($null -eq $parent) { throw 'Ponytail: no checkout root found' }
-  $root = $parent.FullName
+$directory = [PonytailNativePath]::Resolve((Get-Location).Path)
+$root = $null
+$boundary = $null
+while ($directory) {
+  if (Test-Path -LiteralPath (Join-Path $directory '.git')) {
+    if (-not $root) { $root = $directory }
+    $boundary = $directory
+  }
+  $parent = [IO.Directory]::GetParent($directory)
+  $directory = if ($parent) { $parent.FullName } else { $null }
 }
-$prefix = $root.TrimEnd('\') + '\'
+if (-not $root) { throw 'Ponytail: no checkout root found' }
+$prefix = $boundary.TrimEnd('\') + '\'
 $node = $null
 foreach ($directory in ($env:PATH -split ';')) {
   if ($directory -notmatch '^(?:[A-Za-z]:[\\/]|\\\\)') { continue }

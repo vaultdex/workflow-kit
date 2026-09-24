@@ -1,13 +1,24 @@
 #!/bin/sh
 # Installed immutable bootstrap: no checkout code or PATH executable runs first.
 set -eu
+# Git Bash shares Windows' case-insensitive filesystem and junction semantics.
+case "${OSTYPE:-}" in
+  msys*|cygwin*) exec "${SYSTEMROOT:-${SystemRoot:-C:/Windows}}/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -File "${0%/*}/launch.ps1" "$@";;
+esac
 action=$1 host=$2
 case "$action" in activate|subagent|mode-tracker) ;; *) exit 1;; esac
-root=$(pwd -P)
-while [ ! -e "$root/.git" ]; do
-  [ "$root" != / ] || { printf '%s\n' 'Ponytail: no checkout root found' >&2; exit 1; }
-  root=${root%/*}; root=${root:-/}
+directory=$(pwd -P)
+root= boundary=
+while :; do
+  if [ -e "$directory/.git" ]; then
+    [ -n "$root" ] || root=$directory
+    boundary=$directory
+  fi
+  [ "$directory" != / ] || break
+  directory=${directory%/*}; directory=${directory:-/}
 done
+[ -n "$root" ] || { printf '%s\n' 'Ponytail: no checkout root found' >&2; exit 1; }
+prefix=${boundary%/}/
 # Use the OS utility by absolute path, never a checkout-supplied readlink.
 canonical=/usr/bin/readlink
 [ -x "$canonical" ] || canonical=/bin/readlink
@@ -18,11 +29,11 @@ while [ -n "$remaining" ]; do
   directory=${remaining%%:*}
   case "$remaining" in *:*) remaining=${remaining#*:};; *) remaining=;; esac
   case "$directory" in /*) ;; *) continue;; esac
-  case "$directory/" in "$root/"*) continue;; esac
+  case "$directory/" in "$prefix"*) continue;; esac
   candidate=$directory/node
   [ -x "$candidate" ] || continue
   actual=$("$canonical" -f -- "$candidate") || continue
-  case "$actual" in "$root"|"$root/"*) continue;; esac
+  case "$actual" in "$boundary"|"$prefix"*) continue;; esac
   node=$actual
   break
 done

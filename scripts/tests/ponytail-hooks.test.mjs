@@ -226,6 +226,20 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   assert.notEqual(noExternalNode.status, 0, 'Untrusted-only PATH must not start Node');
   assert.match(noExternalNode.stderr, /install Node outside the checkout/);
   assert.equal(existsSync(marker), false);
+  // A nested/fake .git marker must not shrink the executable trust boundary.
+  writeFileSync(path.join(checkout, 'frontend/.git'), 'not a Git repository');
+  for (const shell of shells) {
+    const command = shell.executable.endsWith('powershell.exe')
+      ? JSON.parse(readFileSync(path.join(root, '.github/hooks/ponytail.json'))).hooks.sessionStart[0].powershell
+      : codexStart.command;
+    const nested = spawnSync(shell.executable, [...shell.args, command], {
+      cwd: path.join(checkout, 'frontend'), env: hostileEnv, input: '{}', encoding: 'utf8', timeout: 5000,
+    });
+    assert.equal(nested.status, 0, nested.stderr);
+    assert.match(nested.stdout, /PONYTAIL MODE ACTIVE/);
+    assert.equal(existsSync(marker), false, 'Nested marker admitted an outer-checkout executable');
+  }
+  rmSync(path.join(checkout, 'frontend/.git'));
   const missing = spawnSync(missingShell.executable, [...missingShell.args, codexStart.command], {
     cwd: checkout, env: { ...env, HOME: path.join(temp, 'missing'), USERPROFILE: path.join(temp, 'missing') },
     input: '{}', encoding: 'utf8', timeout: 5000,
