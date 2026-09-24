@@ -26,8 +26,10 @@ Never run installation from an automatic hook or silently change native trust.
 The launchers locate the checkout by walking to `.git`, without executing Git.
 Before starting Node they skip relative/checkout-local PATH entries and resolve
 executable symlinks/junctions, rejecting targets inside the checkout. External
-fnm/nvm installations remain supported. Node preload environment variables are
-removed for this hook process. POSIX uses the absolute system `readlink`; Windows
+fnm/nvm installations remain supported. The exported PATH contains only canonical
+absolute directories outside that boundary, protecting external shims and child
+processes too. Node preload environment variables are removed for this hook
+process. POSIX uses `cd -P` and absolute system `readlink` without GNU-only flags; Windows
 uses native final-path handles through PowerShell. No additional dependency or
 checkout JavaScript runs during bootstrap.
 
@@ -40,6 +42,13 @@ their SessionStart setup hint and silent uninstalled prompt/subagent hooks.
 Review the changed hook definitions and trust the new snapshot explicitly; the
 old `4.10.0-5` installation is left untouched. An existing enabled old definition
 remains vulnerable until replaced and reviewed.
+
+Windows execution policy remains enforced: `Restricted` blocks the installed
+PowerShell script. An operator must authorize reviewed local scripts under their
+own policy before enabling hooks; installers and launchers never use Bypass or
+change personal/managed policy. If `$HOME` itself is a Git checkout, runtimes
+under it are checkout-local, including nvm/fnm. Use Node outside that checkout;
+do not whitelist the home directory and reopen the executable trust boundary.
 
 The generator reads skill names from the pinned tree. On an upgrade it removes only
 unchanged owned files of retired skills and provider links pointing exactly to those

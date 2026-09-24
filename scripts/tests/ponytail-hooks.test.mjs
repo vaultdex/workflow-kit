@@ -161,7 +161,7 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     for (const directory of [checkout, path.join(checkout, 'frontend')])
       for (const tool of ['node.exe', 'git.exe']) cpSync(path.join(bin, tool), path.join(directory, tool));
   } else {
-    for (const directory of [checkout, bin]) for (const tool of ['node', 'git'])
+    for (const directory of [checkout, bin]) for (const tool of ['node', 'git', 'bash'])
       writeFileSync(path.join(directory, tool), '#!/bin/sh\nprintf executed > "$PONYTAIL_MARKER"\n', { mode: 0o755 });
   }
   const linked = path.join(temp, 'external-link');
@@ -171,8 +171,15 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     mkdirSync(fileLinked);
     symlinkSync(path.join(bin, 'node'), path.join(fileLinked, 'node'));
   }
+  const externalNode = path.join(temp, 'external-node');
+  if (!windows) {
+    mkdirSync(externalNode);
+    // The trusted external shim must not inherit a checkout-controlled Bash.
+    writeFileSync(path.join(externalNode, 'node'), '#!/usr/bin/env bash\nexec '
+      + "'" + process.execPath.replaceAll("'", "'\\''") + "' \"$@\"\n", { mode: 0o755 });
+  }
   const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
-    PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked] : []), process.env.PATH].join(path.delimiter) };
+    PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked, externalNode] : []), process.env.PATH].join(path.delimiter) };
   for (const manifest of manifests) {
     const hooks = JSON.parse(readFileSync(path.join(root, manifest), 'utf8')).hooks;
     if (manifest === '.codex/hooks.json' || manifest === '.claude/settings.json') {
@@ -226,6 +233,13 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   assert.notEqual(noExternalNode.status, 0, 'Untrusted-only PATH must not start Node');
   assert.match(noExternalNode.stderr, /install Node outside the checkout/);
   assert.equal(existsSync(marker), false);
+  if (windows) {
+    const restricted = spawnSync(shells[0].executable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted',
+      '-File', path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-6/launch.ps1'), 'activate', 'codex'],
+    { cwd: checkout, env: hostileEnv, encoding: 'utf8', timeout: 5000 });
+    assert.notEqual(restricted.status, 0, 'Native script policy must not be bypassed');
+    assert.equal(existsSync(marker), false);
+  }
   // A nested/fake .git marker must not shrink the executable trust boundary.
   writeFileSync(path.join(checkout, 'frontend/.git'), 'not a Git repository');
   for (const shell of shells) {
