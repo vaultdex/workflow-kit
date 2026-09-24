@@ -14,7 +14,7 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 | Status | Required state |
 | --- | --- |
 | Backlog | Newly proposed, awaiting human triage, or still infeasible after blockers resolve; record reasons. |
-| Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement authorizes a start only under a Ready-based start policy (below). |
+| Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement authorizes a start only under `"start": "ready"` (start policy below). |
 | In progress | Taken from Ready under the start policy after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
 | Automated review | Ready PR, passed selected checks, disclosed evidence limits; automatic reviews of the delivered revision are running or awaiting disposition. |
 | Human review | Ready for human acceptance: selected checks passed, automatic reviews finished and every finding fixed or linked to an actionable follow-up; disclose confirmed unavailable reviews under the exception below. |
@@ -35,9 +35,10 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   outcome, files/contracts, non-goals, steps, acceptance, checks, real dependencies,
   risks and recovery. Evidence needs durable authorized links/paths, not chat alone.
 - Start policy: implementation starts only from Ready. By default each start needs
-  an explicit human request covering that issue/scope. A consumer's root `AGENTS.md`
-  may instead declare human triage to Ready as that authorization; it then owns
-  that rule, and every other gate here still applies. Never take implementation
+  an explicit human request covering that issue/scope. A project may instead set
+  `"start": "ready"` in `.github/workflow-project.json` (project-owned; setup and
+  kit updates keep it) to declare human triage to Ready as that authorization;
+  every other gate here still applies. Never take implementation
   directly from Backlog or autonomously move a candidate to Ready/In progress
   because it seems useful or executable.
 - If Ready is empty, inspect Backlog without implementation: assess scope, evidence,
