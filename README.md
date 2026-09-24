@@ -32,8 +32,11 @@ git submodule add https://github.com/vaultdex/workflow-kit.git .vendor/workflow-
 git submodule update --init --recursive
 node .vendor/workflow-kit/scripts/init-project.mjs . --existing
 node scripts/setup-skills.mjs
-node scripts/check-skills.mjs
+node .vendor/workflow-kit/scripts/check-skills.mjs .
 ```
+
+The final `.` selects the consumer checkout. No local `scripts/check-skills.mjs`
+wrapper is generated; the implementation stays in the kit.
 
 For an existing project use `init-project.mjs . --existing`: managed hooks,
 entry points and ignored generated paths are integrated; previously managed template
@@ -91,8 +94,10 @@ automation and server rules. Review/merge remains human-owned.
 The kit itself uses Renovate for upstream release-tag proposals. Consumers can use
 existing Renovate or the included Dependabot configuration, never both for the same
 dependencies. A kit update PR pins a new commit; run init-project and setup-skills,
-commit regenerated `.github` files, run check-skills and review patch/engine changes
-before merging. Required workflow source checks catch stale generated output.
+commit regenerated `.github` files, run
+`node .vendor/workflow-kit/scripts/check-skills.mjs .` from the consumer root and
+review patch/engine changes before merging. Required workflow source checks catch
+stale generated output.
 `node .vendor/workflow-kit/scripts/init-project.mjs . --existing --check`
 validates every recorded managed file and hook snapshot without writing files;
 review intentional local edits before reconciling the receipt.
@@ -101,6 +106,7 @@ Changed hook snapshots need explicit installation and renewed host trust.
 
 ## Verification and budget
 
+The following commands are for contributors working in the kit itself, not a consumer.
 `node --test scripts/tests` checks actual setup, update preservation and hook protocols.
 `node scripts/check-skills.mjs` regenerates all cloud discovery from real pinned
 sources and compares content. `node scripts/check-impeccable.mjs` runs isolated
