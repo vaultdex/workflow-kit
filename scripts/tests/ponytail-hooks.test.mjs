@@ -175,7 +175,9 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   if (!windows) {
     mkdirSync(externalNode);
     // The trusted external shim must not inherit a checkout-controlled Bash.
-    writeFileSync(path.join(externalNode, 'node'), '#!/usr/bin/env bash\nexec '
+    const systemEnv = ['/usr/bin/env', '/bin/env', '/run/current-system/sw/bin/env'].find(existsSync);
+    assert.ok(systemEnv, 'System env is required for the external shim fixture');
+    writeFileSync(path.join(externalNode, 'node'), '#!' + systemEnv + ' bash\nexec '
       + "'" + process.execPath.replaceAll("'", "'\\''") + "' \"$@\"\n", { mode: 0o755 });
   }
   const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
@@ -185,7 +187,8 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     // profile directories and individual commands are symlinks into its store.
     const launcher = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-6/launch.sh');
     const source = readFileSync(launcher, 'utf8');
-    const systemReadlink = ['/usr/bin/readlink', '/bin/readlink'].find(existsSync);
+    const systemReadlink = ['/usr/bin/readlink', '/bin/readlink', '/run/current-system/sw/bin/readlink'].find(existsSync);
+    assert.ok(systemReadlink, 'System readlink is required for the NixOS fixture');
     const store = path.join(temp, 'store');
     mkdirSync(store);
     cpSync(systemReadlink, path.join(store, 'readlink'), { dereference: true });
