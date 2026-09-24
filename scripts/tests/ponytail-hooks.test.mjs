@@ -181,17 +181,21 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
     PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked, externalNode] : []), process.env.PATH].join(path.delimiter) };
   if (!windows) {
-    // Emulate a non-FHS host without changing system files. The real launcher
-    // must discover a trusted binary through a profile-directory symlink.
+    // Emulate NixOS's trusted OS path without changing system files. Both
+    // profile directories and individual commands are symlinks into its store.
     const launcher = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-6/launch.sh');
     const source = readFileSync(launcher, 'utf8');
     const systemReadlink = ['/usr/bin/readlink', '/bin/readlink'].find(existsSync);
-    cpSync(systemReadlink, path.join(externalNode, 'readlink'), { dereference: true });
+    const store = path.join(temp, 'store');
+    mkdirSync(store);
+    cpSync(systemReadlink, path.join(store, 'readlink'), { dereference: true });
+    symlinkSync(path.join(store, 'readlink'), path.join(externalNode, 'readlink'));
     symlinkSync(path.join(bin, 'readlink'), path.join(fileLinked, 'readlink'));
     const profile = path.join(temp, 'profile');
     symlinkSync(externalNode, profile, 'dir');
     writeFileSync(launcher, source.replaceAll('canonical=/usr/bin/readlink', 'canonical=/missing-ponytail-readlink')
-      .replaceAll('canonical=/bin/readlink', 'canonical=/missing-ponytail-readlink'));
+      .replaceAll('canonical=/bin/readlink', 'canonical=/missing-ponytail-readlink')
+      .replaceAll('canonical=/run/current-system/sw/bin/readlink', 'canonical=' + "'" + profile.replaceAll("'", "'\\''") + "/readlink'"));
     const result = spawnSync('/bin/sh', [launcher, 'activate', 'codex'], {
       cwd: checkout, env: { ...hostileEnv, PATH: [checkout, linked, fileLinked, profile, process.env.PATH].join(':') },
       input: '{}', encoding: 'utf8', timeout: 5000,

@@ -22,17 +22,9 @@ done
 prefix=${boundary%/}/
 # Use the OS utility by absolute path, never a checkout-supplied readlink.
 [ -x "$canonical" ] || canonical=/bin/readlink
-# Non-FHS systems expose binaries through profile directories (e.g. Nix).
-# Resolve directories with the shell; reject file links until readlink is trusted.
-remaining=${PATH:-}
-while [ ! -x "$canonical" ] && [ -n "$remaining" ]; do
-  directory=${remaining%%:*}
-  case "$remaining" in *:*) remaining=${remaining#*:};; *) remaining=;; esac
-  case "$directory" in /*) ;; *) continue;; esac
-  case "$directory/" in "$prefix"*) continue;; *) directory=$(CDPATH= cd -P -- "$directory" 2>/dev/null && pwd -P) || continue;; esac
-  case "$directory/" in "$prefix"*) continue;; *) candidate=$directory/readlink;; esac
-  if [ -f "$candidate" ] && [ -x "$candidate" ] && [ ! -L "$candidate" ]; then canonical=$candidate; fi
-done
+# NixOS publishes its root-owned system profile here, including file symlinks.
+# Trust this OS path just like /usr/bin; never bootstrap readlink from PATH.
+[ -x "$canonical" ] || canonical=/run/current-system/sw/bin/readlink
 [ -x "$canonical" ] || { printf '%s\n' 'Ponytail: system readlink required' >&2; exit 1; }
 # cd -P resolves directory links; plain readlink also works on Darwin/BSD.
 canonicalize() (

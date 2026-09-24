@@ -30,10 +30,10 @@ fnm/nvm installations remain supported. The exported PATH contains only canonica
 absolute directories outside that boundary, protecting external shims and child
 processes too. Node preload environment variables are removed for this hook
 process. POSIX uses `cd -P` and absolute system `readlink` without GNU-only flags.
-When `/usr/bin/readlink` and `/bin/readlink` are absent, it searches absolute PATH
-directories after resolving directory links and rejecting checkout paths; the
-fallback binary itself must not be a symlink. This supports non-FHS profile
-directories without executing checkout-supplied utilities. Windows
+When `/usr/bin/readlink` and `/bin/readlink` are absent, it uses NixOS's root-owned
+`/run/current-system/sw/bin/readlink`, including system-profile file symlinks.
+These fixed OS paths are the bootstrap trust anchor; `readlink` is never selected
+from inherited PATH. Other layouts without these utilities fail closed. Windows
 uses native final-path handles through PowerShell. No additional dependency or
 checkout JavaScript runs during bootstrap.
 
