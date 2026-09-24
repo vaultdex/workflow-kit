@@ -37,8 +37,10 @@ remain default. Driver owns coordination, integration, proof and delivery;
 delegation grants no ownership, scope expansion or approval authority.
 
 Finish authorized scope through verification and PR delivery, not the entire
-board. After implementation, local proof and selected checks, immediately set
-Ready for Review / Automated review. Never wait for automatic reviews while Draft
+board. Verify PR/issue links and closure intent before the Ready for Review
+transition. Once that verification, implementation, local proof and selected
+checks are complete, immediately set Ready for Review / Automated review.
+Never wait for automatic reviews while Draft
 or delay that transition for optional self-reviews, subagents or extra analyses.
 Await running checks through the harness waiting mechanism. Before reporting agent
 work complete, await the configured reviews of the delivered revision; fix or link

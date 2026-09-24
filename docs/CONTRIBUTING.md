@@ -249,16 +249,16 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    or a selected pre-review check remains open. Await running checks through the
    harness waiting mechanism, not model polling. Refresh unknown metadata boundedly,
    then report the concrete blocker; do not park a finished PR in Draft without one.
-4. As soon as implementation, local proof and selected checks are complete, mark
-   the PR Ready for Review and set Automated review. In this workflow automatic
+4. Before marking the PR Ready for Review and setting Automated review, verify
+   delivered issue links and closure intent under [issue, branch and PR links](#issue-branch-and-pr-links).
+   Once that verification, implementation, local proof and selected checks are
+   complete, immediately mark Ready for Review / Automated review. Automatic
    reviews start outside Draft; never wait for them while the PR is Draft.
    Optional extra self-reviews, subagents or analyses are not new gates delaying
    this transition. Their actionable findings enter the same rework cycle below.
    Await all configured automatic reviews for the delivered revision before
-   reporting agent work complete; green CI alone is insufficient. Verify delivered
-   issue links and closure intent under [issue, branch and PR links](#issue-branch-and-pr-links)
-   before entering review. Record local proof against tested revision in issue;
-   CI owns check state.
+   reporting agent work complete; green CI alone is insufficient. Record local
+   proof against tested revision in issue; CI owns check state.
    Query analyzer findings directly (Sonar issues/security hotspots and review-body
    comments), including every page; verify analysis covers delivered HEAD. A green
    quality gate does not mean zero findings. Re-query after the final push and record
