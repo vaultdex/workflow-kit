@@ -14,13 +14,14 @@ including Backlog and follow-ups; retain metadata after closure.
 See docs/CONTRIBUTING.md#milestones for scope and the ongoing hotfix milestone.
 
 New issues start in Backlog. Human-authorized triage may promote feasible issues
-to Ready even while dependencies or external blockers remain. Ready alone never
-authorizes implementation: resolve blockers before a human-requested start.
+to Ready even while dependencies or external blockers remain. Ready is not proof
+that blockers are resolved; resolve them before any start.
 
-Start implementation only from Ready and on an explicit human request for that
-work. If Ready is empty, analyze Backlog and propose the next executable issue
-with rationale/blockers; do not implement or change status. A human must authorize
-promotion/start; record readiness before moving to In progress (Doing).
+Start implementation only from Ready under the start policy in
+docs/CONTRIBUTING.md#board-and-ownership (default: an explicit human request
+for that work). If Ready is empty, analyze Backlog and propose the next executable
+issue with rationale/blockers; do not implement or change status. A human must
+authorize promotion; record readiness before moving to In progress (Doing).
 Existing authorization covers review fixes within the same scope, not new tasks.
 
 Before work, check issue, dependencies, current main and competing PRs. Use

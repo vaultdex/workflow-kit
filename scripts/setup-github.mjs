@@ -27,7 +27,8 @@ const project = number
   : JSON.parse(gh('project', 'copy', '5', '--source-owner', 'vaultdex', '--target-owner', owner, '--title', name, '--format', 'json'));
 const saveProject = () => {
   mkdirSync(dirname(marker), { recursive: true });
-  writeFileSync(marker, JSON.stringify({ repository: repo, owner, number: project.number, id: project.id, url: project.url }, null, 2) + '\n');
+  // Keep project-owned settings such as "start"; only the board binding is rewritten.
+  writeFileSync(marker, JSON.stringify({ ...saved, repository: repo, owner, number: project.number, id: project.id, url: project.url }, null, 2) + '\n');
 };
 // Retain newly copied boards on failure so retry cannot create duplicates.
 if (!number) saveProject();

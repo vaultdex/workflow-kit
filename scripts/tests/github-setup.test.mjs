@@ -70,9 +70,11 @@ test('Rejected supplied boards do not poison retries; copied boards survive fail
   assert.notEqual(run().status, 0);
   assert.equal(JSON.parse(readFileSync(marker)).number, 3, 'New copied board retained for retry');
   assert.equal(existsSync(mutations), false, 'Invalid copied board is not linked and creates no labels');
+  writeFileSync(marker, JSON.stringify({ ...JSON.parse(readFileSync(marker)), start: 'ready' }));
   const corrected = run('2');
   assert.equal(corrected.status, 0, corrected.stderr);
   assert.equal(JSON.parse(readFileSync(marker)).number, 2, 'Explicit corrected board replaces rejected saved selection');
+  assert.equal(JSON.parse(readFileSync(marker)).start, 'ready', 'Project-owned start policy survives setup');
   const acceptedWrites = readFileSync(mutations, 'utf8');
   assert.equal(acceptedWrites, 'link;label;label;label;label;label;');
   for (const number of ['4', '5', '6', '7']) {

@@ -107,8 +107,10 @@ script's success alone is not full setup. Follow [GitHub integration](docs/githu
   despite unresolved dependencies. Keep native dependency links and external
   blocker evidence. Agents skip blocked Ready work and recheck before execution.
 - Disable automatic promotion to Ready/In progress from PR linking or bot events.
-  Implementation/Doing requires an explicit human request and resolved execution
-  blockers. If Ready is empty, analyze Backlog and propose work, without starting.
+  Implementation/Doing requires resolved execution blockers and the start policy's
+  authorization: by default an explicit human request; set `"start": "ready"` in
+  `.github/workflow-project.json` only when the user chooses human triage to Ready as
+  that authorization. If Ready is empty, analyze Backlog and propose work, without starting.
   Cancelled/not-planned closures must not imply accepted/merged Done work.
 - Reuse the selected updater; configure git-submodule and GitHub Actions proposals.
   Integrate into existing Renovate rules or use the template's Dependabot setup.

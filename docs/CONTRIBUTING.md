@@ -14,8 +14,8 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 | Status | Required state |
 | --- | --- |
 | Backlog | Newly proposed, awaiting human triage, or still infeasible after blockers resolve; record reasons. |
-| Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement alone does not authorize a start. |
-| In progress | Taken from Ready on explicit human request after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
+| Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement authorizes a start only under `"start": "ready"` (start policy below). |
+| In progress | Taken from Ready under the start policy after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
 | Automated review | Ready PR, passed selected checks, disclosed evidence limits; automatic reviews of the delivered revision are running or awaiting disposition. |
 | Human review | Ready for human acceptance: selected checks passed, automatic reviews finished and every finding fixed or linked to an actionable follow-up; disclose confirmed unavailable reviews under the exception below. |
 | Done | Acceptance satisfied; delivered repository work actually merged. |
@@ -24,7 +24,9 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   authorize triage of one issue or the whole Backlog: check scope and metadata,
   promote feasible work to Ready even with unresolved blockers, and retain only
   work that remains infeasible after its blockers are resolved, with reasons.
-  Triage authorization never authorizes implementation or moving to In progress.
+  Under the default start policy, triage authorization never authorizes
+  implementation or moving to In progress; under `"start": "ready"`, Ready placement
+  from human-authorized triage is that authorization (start policy below).
   Preserve native dependency links and explicit external blocker/recovery evidence.
   Before selecting Ready work, recheck blockers and skip blocked items: GitHub
   resolves dependency relationships when predecessors close, but Ready itself is
@@ -34,9 +36,13 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   Extend compatible unowned work; coordinate foreign active scope. Plans specify
   outcome, files/contracts, non-goals, steps, acceptance, checks, real dependencies,
   risks and recovery. Evidence needs durable authorized links/paths, not chat alone.
-- Implementation may start only from Ready, on an explicit human request covering
-  that issue/scope. Never take implementation directly from Backlog or autonomously
-  move a candidate to Ready/In progress because it seems useful or executable.
+- Start policy: implementation starts only from Ready. By default each start needs
+  an explicit human request covering that issue/scope. A project may instead set
+  `"start": "ready"` in `.github/workflow-project.json` (project-owned; setup and
+  kit updates keep it) to declare human triage to Ready as that authorization;
+  every other gate here still applies. Never take implementation
+  directly from Backlog or autonomously move a candidate to Ready/In progress
+  because it seems useful or executable.
 - If Ready is empty, inspect Backlog without implementation: assess scope, evidence,
   dependencies, ownership and blockers; propose the next executable issue with a
   short reason and needed preparation. Leave its status unchanged pending a human
@@ -46,7 +52,7 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   record the instruction and accepted scope, move through Ready,
   then start In progress only after resolving execution blockers. Do not skip unresolved dependencies or required approval.
   Existing authorization covers verification/review fixes within the same active
-  scope; starting another issue needs a new human request. Native automations must
+  scope; starting another issue needs new authorization under the start policy. Native automations must
   not promote work to Ready/In progress just because a PR was linked or a bot acted.
 - Before taking work, refresh main, status, assignee, dependencies and linked PRs.
   Record driver/session/branch, assign and set In progress, then re-read. Shared
