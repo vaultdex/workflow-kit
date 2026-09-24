@@ -1,3 +1,6 @@
+// Zweck: Verwaltete Projektdateien und Hook-Konfiguration aus den Kit-Vorlagen aktualisieren.
+// Aufruf: Bei Einrichtung oder Kit-Updates; --check prueft ohne zu schreiben.
+// Nutzen: Ein gemeinsamer, wiederholbarer Updatepfad mit Schutz fuer fremde und bearbeitete Dateien.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -85,10 +88,17 @@ for (const file of readdirSync(join(kit, 'templates'), { recursive: true })) {
 if (root !== kit) {
   const kitRelative = relative(root, kit).split(sep).join('/');
   assert.equal(kitRelative, '.vendor/workflow-kit', 'Install the kit at .vendor/workflow-kit in the target');
-  for (const name of ['setup-skills', 'install-ponytail-hooks', 'install-impeccable-hooks', 'check-skills']) {
+  // Keep only the bootstrap contract and installer paths used by the hook recovery messages.
+  // Checks run directly from the kit: node .vendor/workflow-kit/scripts/check-skills.mjs .
+  const purposes = {
+    'setup-skills': 'Richtet die gepinnten Skills ein; gemeinsamer Einstieg fuer Menschen und Workspace-Bootstrap.',
+    'install-ponytail-hooks': 'Installiert den geprueften Ponytail-Hook-Snapshot; Einstieg der Hook-Fehlerhinweise.',
+    'install-impeccable-hooks': 'Installiert die gepruefte Impeccable-Engine; Einstieg der Hook-Fehlerhinweise.',
+  };
+  for (const [name, purpose] of Object.entries(purposes)) {
     const file = `scripts/${name}.mjs`;
     const target = safe(file);
-    const value = `import { execFileSync } from 'node:child_process';\nimport { fileURLToPath } from 'node:url';\nexecFileSync(process.execPath, [fileURLToPath(new URL('../.vendor/workflow-kit/scripts/${name}.mjs', import.meta.url)), fileURLToPath(new URL('../', import.meta.url))], { stdio: 'inherit' });\n`;
+    const value = `// Zweck: ${purpose}\n// Nutzen: Uebergibt immer dieses Projekt als Ziel, auch bei anderem Arbeitsverzeichnis.\n// Die Logik liegt nur im Workflow Kit. Bewusst aufrufen; keine automatische Hook-Freigabe.\nimport { execFileSync } from 'node:child_process';\nimport { fileURLToPath } from 'node:url';\nexecFileSync(process.execPath, [fileURLToPath(new URL('../.vendor/workflow-kit/scripts/${name}.mjs', import.meta.url)), fileURLToPath(new URL('../', import.meta.url))], { stdio: 'inherit' });\n`;
     assert.ok(!existsSync(target) || text(target) === value || hash(text(target)) === prior.files[file], `Existing entry point left untouched: ${file}`);
     files[file] = hash(value);
     pending[file] = value;
