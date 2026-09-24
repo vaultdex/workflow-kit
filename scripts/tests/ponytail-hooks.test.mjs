@@ -186,8 +186,24 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     symlinkSync(path.join(bin, 'bash'), path.join(fileLinked, 'bash'));
   }
   const externalNode = path.join(temp, 'external-node');
+  mkdirSync(externalNode);
+  if (windows) {
+    // Native loading must skip a script named node.exe and reject resolved
+    // script extensions even if their first bytes happen to look like MZ.
+    writeFileSync(path.join(externalNode, 'node.exe'), '@echo unsafe\r\n');
+    const scriptTarget = path.join(temp, 'script.cmd');
+    writeFileSync(scriptTarget, 'MZ\r\n');
+    const checked = spawnSync(shells[0].executable, [...shells[0].args, `
+$source = Get-Content -Raw -LiteralPath $env:PONYTAIL_BOOTSTRAP
+$native = [regex]::Match($source, "(?s)Add-Type -TypeDefinition @'\\r?\\n(.*?)\\r?\\n'@").Groups[1].Value
+Add-Type -TypeDefinition $native
+if ([PonytailNativePath]::IsNativeNode($env:PONYTAIL_SCRIPT_TARGET)) { throw 'Script target accepted' }
+if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'Native Node rejected' }
+`], { env: { ...env, PONYTAIL_BOOTSTRAP: path.join(checkout, 'scripts/ponytail/launch.ps1'),
+      PONYTAIL_SCRIPT_TARGET: scriptTarget, PONYTAIL_NATIVE_NODE: process.execPath }, encoding: 'utf8' });
+    assert.equal(checked.status, 0, checked.stderr);
+  }
   if (!windows) {
-    mkdirSync(externalNode);
     // Script shims are not native Node, even with an external OS interpreter.
     const systemEnv = ['/usr/bin/env', '/bin/env', '/run/current-system/sw/bin/env'].find(existsSync);
     assert.ok(systemEnv, 'System env is required for the external shim fixture');
@@ -195,7 +211,7 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
       + "'" + process.execPath.replaceAll("'", "'\\''") + "' \"$@\"\n", { mode: 0o755 });
   }
   const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
-    PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked, externalNode] : []), process.env.PATH].join(path.delimiter) };
+    PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked] : []), externalNode, process.env.PATH].join(path.delimiter) };
   if (!windows) {
     // Emulate NixOS's trusted OS path without changing system files. Both
     // profile directories and individual commands are symlinks into its store.

@@ -12,6 +12,12 @@ using System.Text;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 public static class PonytailNativePath {
+  public static bool IsNativeNode(string path) {
+    if (!String.Equals(System.IO.Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase)) return false;
+    using (var file = System.IO.File.OpenRead(path)) {
+      return file.ReadByte() == 0x4d && file.ReadByte() == 0x5a;
+    }
+  }
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
   static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint mode, uint flags, IntPtr template);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
@@ -54,6 +60,7 @@ foreach ($directory in ($env:PATH -split ';')) {
     $candidate = Join-Path $actualDirectory 'node.exe'
     $actual = [PonytailNativePath]::Resolve($candidate)
     if ($actual.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+    if (-not [PonytailNativePath]::IsNativeNode($actual)) { continue }
     $node = $actual
     break
   } catch { continue }

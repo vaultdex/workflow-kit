@@ -31,6 +31,9 @@ Node executable (including universal Mach-O); the OS `od` utility next to
 `readlink` checks its magic bytes before execution. Script shims are skipped:
 their absolute shebang or body can execute checkout code regardless of PATH.
 Managed native executables outside the checkout remain the user's trust boundary.
+Windows requires the resolved target to retain `.exe` and an MZ header; scripts
+behind `node.exe` links are rejected before PowerShell's call operator runs.
+Windows' native loader validates the executable format itself.
 After selecting Node by its actual path,
 the exported PATH contains only fixed OS directories: `/usr/bin`, `/bin`,
 `/usr/sbin`, `/sbin`, NixOS's system profile, or Windows' native system directory.
