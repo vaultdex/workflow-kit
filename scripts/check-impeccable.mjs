@@ -193,8 +193,12 @@ try {
   const version = readFileSync(join(checkout, ".agents/skills/impeccable/scripts/VERSION"), "utf8").trim();
   const missing = spawnSync(windows ? postEdit.commandWindows : postEdit.command,
     { shell, cwd: join(checkout, "frontend"), env, input: "{}", encoding: "utf8" });
-  assert.notEqual(missing.status, 0);
-  assert.match(missing.stderr, /node scripts\/install-impeccable-hooks.mjs/);
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.equal(missing.stdout, '');
+  assert.equal(missing.stderr, '');
+  const start = codex.SessionStart[0].hooks.find(hook => hook.command.includes('engine-0.1.5'));
+  const notice = run(windows ? start.commandWindows : start.command, join(checkout, 'frontend'));
+  assert.match(notice, /node .vendor\/workflow-kit\/scripts\/install-impeccable-hooks.mjs/);
   assert.ok(!existsSync(env.IMPECCABLE_HOME), "A hook must not auto-install checkout code");
   const installer = join(checkout, "scripts/install-impeccable-hooks.mjs");
   execFileSync(process.execPath, [installer], { env });
