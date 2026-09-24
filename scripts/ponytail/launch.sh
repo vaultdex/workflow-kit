@@ -40,7 +40,6 @@ canonicalize() (
   exit 1
 )
 node=
-clean_path=
 remaining=${PATH:-}
 while [ -n "$remaining" ]; do
   directory=${remaining%%:*}
@@ -48,16 +47,16 @@ while [ -n "$remaining" ]; do
   case "$directory" in /*) ;; *) continue;; esac
   case "$directory/" in "$prefix"*) continue;; *) directory=$(canonicalize "$directory") || continue;; esac
   [ -d "$directory" ] || continue
-  case "$directory/" in "$prefix"*) continue;; *) clean_path=${clean_path:+$clean_path:}$directory;; esac
-  [ -z "$node" ] || continue
-  candidate=$directory/node
+  case "$directory/" in "$prefix"*) continue;; *) candidate=$directory/node;; esac
   [ -x "$candidate" ] || continue
   actual=$(canonicalize "$candidate") || continue
-  case "$actual" in "$boundary"|"$prefix"*) continue;; *) node=$actual;; esac
+  case "$actual" in "$boundary"|"$prefix"*) continue;; *) node=$actual; break;; esac
 done
 [ -n "$node" ] || { printf '%s\n' 'Ponytail: install Node outside the checkout on an absolute PATH' >&2; exit 1; }
 # Prevent Node preload options from executing checkout code before the snapshot.
 unset NODE_OPTIONS NODE_PATH
-PATH=$clean_path
+# External directories can expose file links back into the checkout. Only OS
+# directories may supply interpreters to trusted external Node shims.
+PATH=/usr/bin:/bin:/usr/sbin:/sbin:/run/current-system/sw/bin
 export PATH
 exec "$node" "${0%/*}/.agents/hooks/ponytail-$action.js" "$host" "$root" "${3:-}"

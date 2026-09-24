@@ -26,9 +26,13 @@ Never run installation from an automatic hook or silently change native trust.
 The launchers locate the checkout by walking to `.git`, without executing Git.
 Before starting Node they skip relative/checkout-local PATH entries and resolve
 executable symlinks/junctions, rejecting targets inside the checkout. External
-fnm/nvm installations remain supported. The exported PATH contains only canonical
-absolute directories outside that boundary, protecting external shims and child
-processes too. Node preload environment variables are removed for this hook
+fnm/nvm installations remain supported. After selecting Node by its actual path,
+the exported PATH contains only fixed OS directories: `/usr/bin`, `/bin`,
+`/usr/sbin`, `/sbin`, NixOS's system profile, or Windows' native system directory.
+External Node shims may use OS interpreters; custom interpreters must be installed
+there or Node must be a native binary. No inherited PATH directory reaches the
+hook: even external directories can expose file links into the checkout.
+Node preload environment variables are removed for this hook
 process. POSIX uses `cd -P` and absolute system `readlink` without GNU-only flags.
 When `/usr/bin/readlink` and `/bin/readlink` are absent, it uses NixOS's root-owned
 `/run/current-system/sw/bin/readlink`, including system-profile file symlinks.

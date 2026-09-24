@@ -43,7 +43,6 @@ while ($directory) {
 if (-not $root) { throw 'Ponytail: no checkout root found' }
 $prefix = $boundary.TrimEnd('\') + '\'
 $node = $null
-$cleanPath = @()
 foreach ($directory in ($env:PATH -split ';')) {
   if ($directory -notmatch '^(?:[A-Za-z]:[\\/]|\\\\)') { continue }
   try {
@@ -52,16 +51,16 @@ foreach ($directory in ($env:PATH -split ';')) {
     $actualDirectory = [PonytailNativePath]::Resolve($directory)
     if (-not [IO.Directory]::Exists($actualDirectory) -or
         ($actualDirectory.TrimEnd('\') + '\').StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
-    $cleanPath += $actualDirectory
-    if ($node) { continue }
     $candidate = Join-Path $actualDirectory 'node.exe'
     $actual = [PonytailNativePath]::Resolve($candidate)
     if ($actual.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
     $node = $actual
+    break
   } catch { continue }
 }
 if (-not $node) { throw 'Ponytail: install Node outside the checkout on an absolute PATH' }
 Remove-Item Env:NODE_OPTIONS, Env:NODE_PATH -ErrorAction SilentlyContinue
-$env:PATH = $cleanPath -join ';'
+# External directories may contain executable links back into the checkout.
+$env:PATH = [Environment]::SystemDirectory
 & $node (Join-Path $PSScriptRoot ".agents/hooks/ponytail-$Action.js") $HostName $root $Resume
 exit $LASTEXITCODE

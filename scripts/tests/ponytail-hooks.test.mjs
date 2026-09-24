@@ -170,6 +170,7 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   if (!windows) {
     mkdirSync(fileLinked);
     symlinkSync(path.join(bin, 'node'), path.join(fileLinked, 'node'));
+    symlinkSync(path.join(bin, 'bash'), path.join(fileLinked, 'bash'));
   }
   const externalNode = path.join(temp, 'external-node');
   if (!windows) {
