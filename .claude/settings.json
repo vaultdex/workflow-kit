@@ -32,8 +32,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-activate.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}else{console.log(JSON.stringify({systemMessage:'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.',hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.'}}))}\" -- claude \"$(git rev-parse --show-toplevel)\"",
-            "timeout": 5
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-6/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude; else printf '%s\\n' 'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.'; fi",
+            "timeout": 5,
+            "shell": "bash"
           },
           {
             "type": "command",
@@ -47,8 +48,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-activate.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}else{console.log(JSON.stringify({systemMessage:'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.',hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.'}}))}\" -- claude \"$(git rev-parse --show-toplevel)\" continue",
-            "timeout": 5
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-6/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude continue; else printf '%s\\n' 'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.'; fi",
+            "timeout": 5,
+            "shell": "bash"
           }
         ]
       }
@@ -58,8 +60,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-subagent.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- claude \"$(git rev-parse --show-toplevel)\"",
-            "timeout": 5
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-6/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" subagent claude; fi",
+            "timeout": 5,
+            "shell": "bash"
           }
         ]
       }
@@ -69,8 +72,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-mode-tracker.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- claude \"$(git rev-parse --show-toplevel)\"",
-            "timeout": 5
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-6/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" mode-tracker claude; fi",
+            "timeout": 5,
+            "shell": "bash"
           }
         ]
       }

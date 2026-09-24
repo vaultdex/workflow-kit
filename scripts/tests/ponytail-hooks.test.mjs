@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,7 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
   cpSync(path.join(root, '.agents/skills/ponytail'), path.join(checkout, '.agents/skills/ponytail'), { recursive: true, dereference: true });
   mkdirSync(path.join(checkout, 'scripts'));
   cpSync(fileURLToPath(new URL('../install-ponytail-hooks.mjs', import.meta.url)), path.join(checkout, 'scripts/install-ponytail-hooks.mjs'));
+  cpSync(fileURLToPath(new URL('../ponytail', import.meta.url)), path.join(checkout, 'scripts/ponytail'), { recursive: true });
   mkdirSync(path.join(checkout, 'frontend'));
   const init = spawnSync(git, ['init', '--quiet', checkout], { encoding: 'utf8' });
   assert.equal(init.status, 0, init.stderr);
@@ -146,6 +147,32 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
     : [{ executable: '/bin/sh', args: ['-c'] }];
   const gitBash = windows && path.resolve(path.dirname(git), '../bin/bash.exe');
   if (gitBash && existsSync(gitBash)) shells.push({ executable: gitBash, args: ['--noprofile', '--norc', '-c'] });
+  // Executable markers, including a PATH directory outside the checkout whose
+  // real junction/symlink target is inside it. No malicious program is executed.
+  const marker = path.join(temp, 'hijacked'), bin = path.join(checkout, 'tools');
+  mkdirSync(bin);
+  if (windows) {
+    const shim = path.join(bin, 'node.exe');
+    const compiled = spawnSync(shells[0].executable, [...shells[0].args, `Add-Type -OutputType ConsoleApplication -OutputAssembly $env:PONYTAIL_SHIM -TypeDefinition '
+public class Shim { public static void Main() { System.IO.File.WriteAllText(System.Environment.GetEnvironmentVariable("PONYTAIL_MARKER"), "executed"); } }'`],
+    { env: { ...env, PONYTAIL_SHIM: shim }, encoding: 'utf8' });
+    assert.equal(compiled.status, 0, compiled.stderr);
+    cpSync(shim, path.join(bin, 'git.exe'));
+    for (const directory of [checkout, path.join(checkout, 'frontend')])
+      for (const tool of ['node.exe', 'git.exe']) cpSync(path.join(bin, tool), path.join(directory, tool));
+  } else {
+    for (const directory of [checkout, bin]) for (const tool of ['node', 'git'])
+      writeFileSync(path.join(directory, tool), '#!/bin/sh\nprintf executed > "$PONYTAIL_MARKER"\n', { mode: 0o755 });
+  }
+  const linked = path.join(temp, 'external-link');
+  symlinkSync(bin, linked, windows ? 'junction' : 'dir');
+  const fileLinked = path.join(temp, 'external-file-link');
+  if (!windows) {
+    mkdirSync(fileLinked);
+    symlinkSync(path.join(bin, 'node'), path.join(fileLinked, 'node'));
+  }
+  const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
+    PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked] : []), process.env.PATH].join(path.delimiter) };
   for (const manifest of manifests) {
     const hooks = JSON.parse(readFileSync(path.join(root, manifest), 'utf8')).hooks;
     if (manifest === '.codex/hooks.json' || manifest === '.claude/settings.json') {
@@ -155,36 +182,48 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
     const handlers = Object.values(hooks).flat().flatMap(group => group.hooks || [group]);
     for (const handler of handlers.filter(hook => /ponytail/.test(hook.command || hook.bash || ''))) {
       for (const shell of shells) {
-        const command = handler.command || (shell.executable.endsWith('powershell.exe') ? handler.powershell : handler.bash);
+        const powershell = shell.executable.endsWith('powershell.exe');
+        if (powershell && !handler.powershell && manifest !== '.cursor/hooks.json') continue;
+        const command = powershell ? handler.powershell ?? handler.command : handler.command ?? handler.bash;
         const continuedHost = manifest === '.codex/hooks.json' ? 'codex' : 'claude';
-        if (command.endsWith(' continue')) writeFileSync(state(continuedHost), 'lite');
+        if (command.includes(' continue')) writeFileSync(state(continuedHost), 'lite');
         const result = spawnSync(shell.executable, [...shell.args, command], {
-          cwd: path.join(checkout, 'frontend'), env,
+          cwd: path.join(checkout, 'frontend'), env: hostileEnv,
           input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: 5000,
         });
         assert.equal(result.status, 0, `${manifest}: ${result.stderr || result.error?.message}`);
+        assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed`);
         assert.ok(result.stdout.trim(), `${manifest}: no hook output`);
-        if (command.endsWith(' continue')) {
+        if (command.includes(' continue')) {
           assert.match(result.stdout, /level: lite/);
           assert.equal(readFileSync(state(continuedHost), 'utf8'), 'lite');
         }
       }
       if (windows && handler.commandWindows) {
-        if (handler.commandWindows.endsWith(' continue')) writeFileSync(state('codex'), 'lite');
+        if (handler.commandWindows.includes(' continue')) writeFileSync(state('codex'), 'lite');
         const result = spawnSync(path.join(process.env.SystemRoot, 'System32/cmd.exe'), ['/d', '/s', '/c', handler.commandWindows], {
-          cwd: path.join(checkout, 'frontend'), env, windowsVerbatimArguments: true,
+          cwd: path.join(checkout, 'frontend'), env: hostileEnv, windowsVerbatimArguments: true,
           input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: 5000,
         });
         assert.equal(result.status, 0, result.stderr || result.error?.message);
+        assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed in cmd`);
         assert.ok(result.stdout.trim(), `${manifest}: no Windows override output`);
-        if (handler.commandWindows.endsWith(' continue')) assert.match(result.stdout, /level: lite/);
+        if (handler.commandWindows.includes(' continue')) assert.match(result.stdout, /level: lite/);
       }
     }
   }
 
   const codexStart = JSON.parse(readFileSync(path.join(root, '.codex/hooks.json'), 'utf8'))
-    .hooks.SessionStart.flatMap(group => group.hooks).find(hook => hook.command.includes('ponytail-activate.js'));
-  const missing = spawnSync(shells[0].executable, [...shells[0].args, codexStart.command], {
+    .hooks.SessionStart.flatMap(group => group.hooks).find(hook => hook.command.includes(' activate codex'));
+  const missingShell = windows ? shells.at(-1) : shells[0];
+  const noExternalNode = spawnSync(missingShell.executable, [...missingShell.args, codexStart.command], {
+    cwd: checkout, env: { ...hostileEnv, PATH: [checkout, bin, '.', linked].join(path.delimiter) },
+    input: '{}', encoding: 'utf8', timeout: 5000,
+  });
+  assert.notEqual(noExternalNode.status, 0, 'Untrusted-only PATH must not start Node');
+  assert.match(noExternalNode.stderr, /install Node outside the checkout/);
+  assert.equal(existsSync(marker), false);
+  const missing = spawnSync(missingShell.executable, [...missingShell.args, codexStart.command], {
     cwd: checkout, env: { ...env, HOME: path.join(temp, 'missing'), USERPROFILE: path.join(temp, 'missing') },
     input: '{}', encoding: 'utf8', timeout: 5000,
   });
@@ -198,12 +237,16 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
     for (const [event, groups] of Object.entries(hooks)) {
       if (event.toLowerCase() === 'sessionstart') continue;
       for (const handler of groups.flatMap(group => group.hooks || [group])) {
-        const command = handler.command || (windows ? handler.powershell : handler.bash);
+        const command = handler.command ?? handler.bash;
         if (!command?.includes('.ponytail')) continue;
-        const result = spawnSync(shells[0].executable, [...shells[0].args, command], {
+        const result = spawnSync(missingShell.executable, [...missingShell.args, command], {
           cwd: checkout, env: { ...env, HOME: path.join(temp, 'missing'), USERPROFILE: path.join(temp, 'missing') },
           input: '{}', encoding: 'utf8', timeout: 5000,
         });
+        if (manifest === '.cursor/hooks.json') {
+          assert.notEqual(result.status, 0, 'Missing native Cursor launcher must fail closed');
+          continue;
+        }
         assert.equal(result.status, 0, result.stderr);
         assert.equal(result.stdout, '', `${manifest}/${event}: repeated activation warning`);
       }

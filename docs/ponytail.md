@@ -13,8 +13,8 @@ Personal plugin installations remain independent; choose one injection source in
 your agent's settings if duplicate skill names/hooks are enabled.
 
 Run `node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` separately to
-install the immutable `~/.ponytail/vaultdex/4.10.0-5/` snapshot. Runtime bytes remain
-identical to the previous reviewed integration. Identical snapshots are reused;
+install the immutable `~/.ponytail/vaultdex/4.10.0-6/` snapshot. It adds native
+launchers before the unchanged JavaScript hooks. Identical snapshots are reused;
 changed bytes at the same version are refused. `vaultdex` is the publisher namespace;
 runtime state is isolated by checkout hash and host. Personal defaults are retained.
 
@@ -23,8 +23,23 @@ subagentStart and userPromptSubmitted (prompt stdout is not injected). Cursor:
 sessionStart/beforeSubmitPrompt; an existing always-on Ponytail rule takes precedence.
 Other providers get skills only. Hook manifests differ because host protocols differ.
 Never run installation from an automatic hook or silently change native trust.
-The inherited PATH issue [#3](https://github.com/vaultdex/workflow-kit/issues/3)
-remains a separate activation blocker until its runtime fix and platform proofs are accepted.
+The launchers locate the checkout by walking to `.git`, without executing Git.
+Before starting Node they skip relative/checkout-local PATH entries and resolve
+executable symlinks/junctions, rejecting targets inside the checkout. External
+fnm/nvm installations remain supported. Node preload environment variables are
+removed for this hook process. POSIX uses the absolute system `readlink`; Windows
+uses native final-path handles through PowerShell. No additional dependency or
+checkout JavaScript runs during bootstrap.
+
+Claude explicitly selects Bash (Git Bash on Windows). Codex uses its native cmd
+override on Windows; Copilot supplies Bash and PowerShell commands. Cursor's
+single command uses an installed cmd/sh launcher via `~`, preserving spaces in
+the home path. Install before enabling Cursor hooks: an absent launcher produces
+the shell's missing-command error and never installs itself. Other hosts retain
+their SessionStart setup hint and silent uninstalled prompt/subagent hooks.
+Review the changed hook definitions and trust the new snapshot explicitly; the
+old `4.10.0-5` installation is left untouched. An existing enabled old definition
+remains vulnerable until replaced and reviewed.
 
 The generator reads skill names from the pinned tree. On an upgrade it removes only
 unchanged owned files of retired skills and provider links pointing exactly to those

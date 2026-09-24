@@ -4,24 +4,24 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-activate.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}else{console.log(JSON.stringify({additionalContext:'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.'}))}\" -- copilot \"$(git rev-parse --show-toplevel)\"",
-        "powershell": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-activate.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}else{console.log(JSON.stringify({additionalContext:'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.'}))}\" -- copilot \"$(git rev-parse --show-toplevel)\"",
+        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-6/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate copilot; else printf '%s\\n' '{\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.\"}'; fi",
+        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-6/launch.ps1\"; if (Test-Path -LiteralPath $launcher) { & $launcher activate copilot } else { Write-Output '{\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.\"}' }",
         "timeoutSec": 5
       }
     ],
     "userPromptSubmitted": [
       {
         "type": "command",
-        "bash": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-mode-tracker.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- copilot \"$(git rev-parse --show-toplevel)\"",
-        "powershell": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-mode-tracker.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- copilot \"$(git rev-parse --show-toplevel)\"",
+        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-6/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" mode-tracker copilot; fi",
+        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-6/launch.ps1\"; if (Test-Path -LiteralPath $launcher) { & $launcher mode-tracker copilot }",
         "timeoutSec": 5
       }
     ],
     "subagentStart": [
       {
         "type": "command",
-        "bash": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-subagent.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- copilot \"$(git rev-parse --show-toplevel)\"",
-        "powershell": "node -e \"const p=require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-subagent.js');if(require('node:fs').existsSync(p)){process.argv.splice(1,0,p);require(p)}\" -- copilot \"$(git rev-parse --show-toplevel)\"",
+        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-6/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" subagent copilot; fi",
+        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-6/launch.ps1\"; if (Test-Path -LiteralPath $launcher) { & $launcher subagent copilot }",
         "timeoutSec": 5
       }
     ]
