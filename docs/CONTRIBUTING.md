@@ -87,6 +87,14 @@ of creating duplicates. Link an existing branch through the issue's Development
 control. After an error, inspect remote refs and issue links before retrying;
 branch creation may have succeeded even when the command reported failure.
 
+Decide the delivery boundary **before creating the PR, including a Draft**. When
+an acceptance item cannot be performed within this delivery (for example a live
+provider check requiring unavailable credentials), split that separately executable
+acceptance into a follow-up under [scope and findings](#recovery-scope-and-findings).
+Record the split and remaining limits in the original issue first. The delivery PR
+uses `Closes #N` for the original issue's resulting, fully delivered scope; it does
+not close the follow-up or claim its missing acceptance passed.
+
 Every PR description must identify all delivered issues from its first publication,
 including Drafts. For complete issue scope targeting the default branch, put
 `Closes #N` in the PR body (`Closes OWNER/REPO#N` across repositories), repeating
@@ -94,13 +102,15 @@ the keyword for each issue. A branch name, title, comment or commit-only closing
 keyword does not establish the required PR relationship. GitHub normally converts
 an issue-linked branch into a linked PR when that PR is created; verify the result.
 
-Partial deliveries use `Refs OWNER/REPO#N` plus remaining acceptance, without
-closing keywords. Check and remove any inherited/manual closing relationship:
-GitHub's Development links can close issues on merge even without `Closes` text.
-Use an accepted delivery sub-issue when a separately closing unit is needed; never
-split scope merely to satisfy linking. For PRs targeting a non-default branch,
-closing keywords are ignored: retain explicit references and remaining delivery
-steps, then recheck closure intent when the base or scope changes.
+Use `Refs OWNER/REPO#N` without closing keywords only when there is no sensible
+separate delivery unit, for example several PRs contributing to one issue or a
+non-default target branch. State remaining acceptance and delivery steps. A manual
+Development closing relationship must be removed through the PR's Development UI;
+removing a keyword only removes a keyword-based link. Do not repeatedly attempt
+body edits to remove a manual relationship. Resolve closure intent before PR
+creation to avoid an unnecessary later UI handoff. For non-default targets, closing
+keywords are ignored; recheck closure intent when the base or scope changes.
+A scope split is not a way to waive required security, integrity or merge gates.
 
 Immediately after PR creation/body or base changes, and before Ready for Review
 or Human review, read back the saved description and actual GitHub relationships:
@@ -206,6 +216,17 @@ scope, never approval, priority, checks or merge authority. Preserve existing la
   dependencies, risk, product/architecture or protected-data changes need separately
   scoped work/authorization. Preserve foreign work; retain out-of-scope findings.
   Independent follow-ups need planning, not implementation before this delivery.
+- Before PR creation, move separately executable unavailable acceptance into a
+  follow-up issue: record exact acceptance, missing access/evidence, recovery and
+  checks; assign milestone, Project Priority, labels and Backlog; set its native
+  `blocked by` dependency to the original issue. Record the split, follow-up link
+  and resulting deliverable scope in the original issue. Preserve historical
+  acceptance text with an explicit superseding decision, not silent deletion.
+  This policy permits that bounded split, not a waiver of security/integrity or
+  mandatory pre-merge checks. If safe delivery depends on the missing proof,
+  retain the blocker. Changed outcomes, risk or ownership still need the separately
+  scoped authorization above. Creating the follow-up grants no implementation
+  authority: Backlog-to-Ready remains human triage under the start policy.
 - Research retains full results and each finding's accept/defer/reject rationale
   with human decision. Accepted implementation findings become deduplicated tasks;
   result PR only when files change. Closing PRs never substitutes for that decision.
@@ -224,15 +245,20 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    conflicts, affected correctness/ownership or an actual gate—not unrelated movement.
 3. Inspect live base/head, ownership, mergeability and selected checks together.
    Empty checks do not prove no workflow runs; missing expected/pending/cancelled/
-   failed checks are not success. Keep Draft while work/gates remain. Refresh unknown
-   metadata boundedly, then report blocker; otherwise refresh only meaningful changes.
-4. Once implementation and selected checks are complete, mark PR Ready for Review
-   and set Automated review; this triggers automatic code reviews. Await all configured
-   automatic reviews for the delivered revision before reporting agent work complete;
-   green CI alone is insufficient. Verify all delivered issue links and closure
-   intent under [issue, branch and PR links](#issue-branch-and-pr-links) before
-   entering review. Record local proof against tested revision in issue; CI owns
-   check state.
+   failed checks are not success. Keep Draft only while implementation, local proof
+   or a selected pre-review check remains open. Await running checks through the
+   harness waiting mechanism, not model polling. Refresh unknown metadata boundedly,
+   then report the concrete blocker; do not park a finished PR in Draft without one.
+4. As soon as implementation, local proof and selected checks are complete, mark
+   the PR Ready for Review and set Automated review. In this workflow automatic
+   reviews start outside Draft; never wait for them while the PR is Draft.
+   Optional extra self-reviews, subagents or analyses are not new gates delaying
+   this transition. Their actionable findings enter the same rework cycle below.
+   Await all configured automatic reviews for the delivered revision before
+   reporting agent work complete; green CI alone is insufficient. Verify delivered
+   issue links and closure intent under [issue, branch and PR links](#issue-branch-and-pr-links)
+   before entering review. Record local proof against tested revision in issue;
+   CI owns check state.
    Query analyzer findings directly (Sonar issues/security hotspots and review-body
    comments), including every page; verify analysis covers delivered HEAD. A green
    quality gate does not mean zero findings. Re-query after the final push and record
@@ -255,10 +281,12 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    Pending, queued or unknown review state remains Automated review and is not this exception; inspect
    PR reviews, comments and checks, not only CI. This exception grants no merge
    authority, check bypass or pre-merge Done status.
-7. After actual merge, verify acceptance/delivered work before closure and Done.
-   Unprovable post-merge/external acceptance needs a dependent task. Queued merge or
-   PR closure is not delivery. Verify native Project automation before relying on it;
-   not-planned closure must not become Done. GITHUB_TOKEN Project access is not assumed.
+7. After actual merge, verify acceptance of the recorded delivered scope before
+   closure and Done. Separately scoped external acceptance remains in its dependent
+   follow-up; it is not certified by this merge. Apply the split before PR creation,
+   not for the first time after merge. Queued merge or PR closure is not delivery.
+   Verify native Project automation before relying on it; not-planned closure must
+   not become Done. GITHUB_TOKEN Project access is not assumed.
 
 Write concise PR titles/descriptions in the project language: **Was wurde geändert und warum?**
 (plans: **Was ist geplant und warum?**), resulting behavior/reason and issue links.
