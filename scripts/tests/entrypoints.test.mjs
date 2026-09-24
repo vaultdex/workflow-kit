@@ -96,6 +96,19 @@ test('edited schema fails without changing files or claiming its ownership', t =
   assert.notEqual(f.run().status, 0);
   assert.equal(read(path).version, 99); assert.deepEqual(readFileSync(f.receipt), before);
 });
+
+test('foreign hooks-first groups retain their order and repeat without receipt drift', t => {
+  const f = fixture(t), name = '.claude/settings.json', target = join(f.root, name);
+  const foreignGroup = { hooks: [foreign, own], matcher: 'startup' };
+  json(target, { hooks: { SessionStart: [foreignGroup] } });
+  f.template(name, { hooks: { SessionStart: [{ matcher: 'startup', hooks: [own] }] } });
+  succeeds(f.run());
+  const before = readFileSync(target), receipt = readFileSync(f.receipt);
+  succeeds(f.run()); succeeds(f.run('--check'));
+  assert.deepEqual(read(target).hooks.SessionStart[0], foreignGroup);
+  assert.deepEqual(readFileSync(target), before);
+  assert.deepEqual(readFileSync(f.receipt), receipt);
+});
 test('legacy metadata can be adopted only when identical, never inferred on conflict', t => {
   const f = fixture(t); f.template('.cursor/hooks.json', manifest(1)); succeeds(f.run());
   const receipt = read(f.receipt); delete receipt.hookMetadata; json(f.receipt, receipt);
