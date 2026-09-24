@@ -29,16 +29,25 @@ codex/<issue>-<topic>, one driver and linked branch/PR. Assignment is not a lock
 Create issue-linked branches natively; verify PR/issue links after creation and
 before review under docs/CONTRIBUTING.md#issue-branch-and-pr-links.
 Branch names or mentions alone do not prove linkage; partial work must not close issues.
+Resolve separately executable unavailable acceptance before PR creation using
+that guide's follow-up rule, with explicit human authorization of the changed
+acceptance/scope; close only the resulting fully delivered scope.
+Follow-ups remain Backlog, not permission to start them or waive merge gates.
 Preserve foreign work/ownership; no force-push or admin bypass. Human review/merge
 remain default. Driver owns coordination, integration, proof and delivery;
 delegation grants no ownership, scope expansion or approval authority.
 
 Finish authorized scope through verification and PR delivery, not the entire
-board. Before reporting agent work complete, await automatic reviews triggered by
-Ready for Review in Automated review; fix or link actionable follow-ups for every
-finding, then move to Human review for human acceptance. Return
-PR to Draft/In progress for further work, then Ready for Review/Automated review
-and await reviews again.
+board. Verify PR/issue links and closure intent before the Ready for Review
+transition. Once that verification, implementation, local proof and selected
+checks are complete, immediately set Ready for Review / Automated review.
+Never wait for automatic reviews while Draft
+or delay that transition for optional self-reviews, subagents or extra analyses.
+Await running checks through the harness waiting mechanism. Before reporting agent
+work complete, await the configured reviews of the delivered revision; fix or link
+actionable follow-ups for every finding, then move to Human review for acceptance.
+Return PR to Draft/In progress for further work, then Ready for Review/Automated
+review and await reviews again.
 Confirmed review unavailability (e.g. exhausted tokens/quota) permits agent
 completion only with the missing review and cause disclosed; pending/unknown is
 not unavailable. See docs/CONTRIBUTING.md#publication-and-review. Prepare concrete
