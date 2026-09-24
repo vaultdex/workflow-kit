@@ -99,7 +99,9 @@ test('dirty upstream and edited consumer files are still refused', t => {
   const f = fixture(t); succeeds(f.run());
   const source = join(f.source, 'hooks/ponytail-runtime.js');
   writeFileSync(source, '// local change\n');
-  assert.match(f.run().stderr, /Ponytail source has local changes/);
+  const dirty = f.run();
+  assert.notEqual(dirty.status, 0);
+  assert.match(dirty.stderr, /Ponytail source has local changes/);
   writeFileSync(source, '');
   const output = join(f.root, '.github/skills/ponytail/SKILL.md');
   writeFileSync(output, 'Manual change\n');

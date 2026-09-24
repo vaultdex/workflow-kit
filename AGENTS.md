@@ -1,8 +1,9 @@
 # Workflow Kit contributors
 
 Start with this file and WATCHDOG.md's engineering rules.
-Read the applicable sections of docs/CONTRIBUTING.md before each
-workflow action, not every linked document, generated skill or provider directory.
+Read the applicable sections of docs/CONTRIBUTING.md once when needed;
+reuse them and reread only when relevant rules change. Do not recursively load
+every linked document, generated skill or provider directory.
 Reuse unchanged context/evidence; refresh live issue/dependency/ownership state.
 The GitHub Project recorded in
 `.github/workflow-project.json` owns order/status; issues own scope,
