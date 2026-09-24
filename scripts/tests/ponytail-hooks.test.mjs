@@ -56,6 +56,19 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
   const installation = install();
   assert.equal(installation.status, 0, installation.stderr);
   assert.equal(install().status, 0, 'Identical installation must be reusable');
+  // Refuse snapshots inside Git roots, including a personal-directory junction.
+  const linkedHome = path.join(temp, 'linked-home');
+  mkdirSync(linkedHome);
+  symlinkSync(checkout, path.join(linkedHome, '.ponytail'), windows ? 'junction' : 'dir');
+  for (const unsafeHome of [checkout, path.join(checkout, 'new-home'), linkedHome]) {
+    const refused = spawnSync(process.execPath, [path.join(checkout, 'scripts/install-ponytail-hooks.mjs')], {
+      env: { ...env, HOME: unsafeHome, USERPROFILE: unsafeHome }, encoding: 'utf8',
+    });
+    assert.notEqual(refused.status, 0, 'Checkout-local snapshots must not be installed');
+    assert.match(refused.stderr, /snapshot must be outside Git checkouts/);
+  }
+  for (const untouched of ['.ponytail', 'new-home', 'vaultdex'])
+    assert.equal(existsSync(path.join(checkout, untouched)), false, 'Refusal must precede writes');
 
   for (const host of ['codex', 'claude', 'copilot', 'cursor']) {
     const output = run('ponytail-activate.js', host);

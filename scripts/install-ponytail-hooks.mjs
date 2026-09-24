@@ -1,7 +1,7 @@
 // Zweck: Einen geprueften Ponytail-Snapshot im Benutzerverzeichnis installieren.
 // Nutzen: Automatische Hooks muessen keine veraenderlichen Checkout-Skripte ausfuehren.
 // Aufruf: Explizit aus dem Kit mit dem Projektpfad; persoenliche Hook-Freigabe bleibt getrennt.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,20 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(process.argv[2] ?? fileURLToPath(new URL('../', import.meta.url)));
 const parent = path.join(homedir(), '.ponytail', 'vaultdex');
 const destination = path.join(parent, '4.10.0-6');
+// The bootstrap itself must remain personal trusted code, outside every checkout.
+// Resolve the existing prefix before checking ancestors, including junctions.
+let existing = destination;
+const missingParts = [];
+while (!existsSync(existing) && existing !== path.dirname(existing)) {
+  missingParts.unshift(path.basename(existing));
+  existing = path.dirname(existing);
+}
+for (let directory = path.join(realpathSync(existing), ...missingParts);; directory = path.dirname(directory)) {
+  if (existsSync(path.join(directory, '.git'))) {
+    throw new Error('Ponytail snapshot must be outside Git checkouts. Use a personal home/snapshot location outside the checkout before installing or enabling hooks.');
+  }
+  if (directory === path.dirname(directory)) break;
+}
 const files = [
   '.agents/hooks/LICENSE.md',
   ...['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent']

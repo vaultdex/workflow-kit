@@ -58,9 +58,14 @@ remains vulnerable until replaced and reviewed.
 Windows execution policy remains enforced: `Restricted` blocks the installed
 PowerShell script. An operator must authorize reviewed local scripts under their
 own policy before enabling hooks; installers and launchers never use Bypass or
-change personal/managed policy. If `$HOME` itself is a Git checkout, runtimes
-under it are checkout-local, including nvm/fnm. Use Node outside that checkout;
-do not whitelist the home directory and reopen the executable trust boundary.
+change personal/managed policy. The installer rejects snapshot destinations inside
+any Git checkout, resolving existing directory links/junctions before writing.
+This includes `$HOME` being a Git checkout or `.ponytail` linking into one: the
+launcher itself must be trusted code outside the checkout, not just Node.
+Keep the personal snapshot outside Git roots throughout its lifetime. If moving
+it or turning a parent directory into a checkout, disable hooks and provision a
+personal home outside that checkout before installing and enabling them again.
+No HOME exception or automatic relocation weakens this trust boundary.
 
 The generator reads skill names from the pinned tree. On an upgrade it removes only
 unchanged owned files of retired skills and provider links pointing exactly to those
