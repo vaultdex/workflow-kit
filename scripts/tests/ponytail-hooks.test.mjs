@@ -161,7 +161,7 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     for (const directory of [checkout, path.join(checkout, 'frontend')])
       for (const tool of ['node.exe', 'git.exe']) cpSync(path.join(bin, tool), path.join(directory, tool));
   } else {
-    for (const directory of [checkout, bin]) for (const tool of ['node', 'git', 'bash'])
+    for (const directory of [checkout, bin]) for (const tool of ['node', 'git', 'bash', 'readlink'])
       writeFileSync(path.join(directory, tool), '#!/bin/sh\nprintf executed > "$PONYTAIL_MARKER"\n', { mode: 0o755 });
   }
   const linked = path.join(temp, 'external-link');
@@ -180,6 +180,27 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   }
   const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
     PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked, externalNode] : []), process.env.PATH].join(path.delimiter) };
+  if (!windows) {
+    // Emulate a non-FHS host without changing system files. The real launcher
+    // must discover a trusted binary through a profile-directory symlink.
+    const launcher = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-6/launch.sh');
+    const source = readFileSync(launcher, 'utf8');
+    const systemReadlink = ['/usr/bin/readlink', '/bin/readlink'].find(existsSync);
+    cpSync(systemReadlink, path.join(externalNode, 'readlink'), { dereference: true });
+    symlinkSync(path.join(bin, 'readlink'), path.join(fileLinked, 'readlink'));
+    const profile = path.join(temp, 'profile');
+    symlinkSync(externalNode, profile, 'dir');
+    writeFileSync(launcher, source.replaceAll('canonical=/usr/bin/readlink', 'canonical=/missing-ponytail-readlink')
+      .replaceAll('canonical=/bin/readlink', 'canonical=/missing-ponytail-readlink'));
+    const result = spawnSync('/bin/sh', [launcher, 'activate', 'codex'], {
+      cwd: checkout, env: { ...hostileEnv, PATH: [checkout, linked, fileLinked, profile, process.env.PATH].join(':') },
+      input: '{}', encoding: 'utf8', timeout: 5000,
+    });
+    writeFileSync(launcher, source);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /PONYTAIL MODE ACTIVE/);
+    assert.equal(existsSync(marker), false, 'Non-FHS discovery executed checkout readlink');
+  }
   for (const manifest of manifests) {
     const hooks = JSON.parse(readFileSync(path.join(root, manifest), 'utf8')).hooks;
     if (manifest === '.codex/hooks.json' || manifest === '.claude/settings.json') {

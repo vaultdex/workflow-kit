@@ -22,6 +22,19 @@ done
 prefix=${boundary%/}/
 # Use the OS utility by absolute path, never a checkout-supplied readlink.
 [ -x "$canonical" ] || canonical=/bin/readlink
+# Non-FHS systems expose binaries through profile directories (e.g. Nix).
+# Resolve directories with the shell; reject file links until readlink is trusted.
+remaining=${PATH:-}
+while [ ! -x "$canonical" ] && [ -n "$remaining" ]; do
+  directory=${remaining%%:*}
+  case "$remaining" in *:*) remaining=${remaining#*:};; *) remaining=;; esac
+  case "$directory" in /*) ;; *) continue;; esac
+  case "$directory/" in "$prefix"*) continue;; esac
+  directory=$(CDPATH= cd -P -- "$directory" 2>/dev/null && pwd -P) || continue
+  case "$directory/" in "$prefix"*) continue;; esac
+  candidate=$directory/readlink
+  if [ -f "$candidate" ] && [ -x "$candidate" ] && [ ! -L "$candidate" ]; then canonical=$candidate; fi
+done
 [ -x "$canonical" ] || { printf '%s\n' 'Ponytail: system readlink required' >&2; exit 1; }
 # cd -P resolves directory links; plain readlink also works on Darwin/BSD.
 canonicalize() (

@@ -29,7 +29,11 @@ executable symlinks/junctions, rejecting targets inside the checkout. External
 fnm/nvm installations remain supported. The exported PATH contains only canonical
 absolute directories outside that boundary, protecting external shims and child
 processes too. Node preload environment variables are removed for this hook
-process. POSIX uses `cd -P` and absolute system `readlink` without GNU-only flags; Windows
+process. POSIX uses `cd -P` and absolute system `readlink` without GNU-only flags.
+When `/usr/bin/readlink` and `/bin/readlink` are absent, it searches absolute PATH
+directories after resolving directory links and rejecting checkout paths; the
+fallback binary itself must not be a symlink. This supports non-FHS profile
+directories without executing checkout-supplied utilities. Windows
 uses native final-path handles through PowerShell. No additional dependency or
 checkout JavaScript runs during bootstrap.
 
