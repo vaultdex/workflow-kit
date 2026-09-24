@@ -194,6 +194,8 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
         assert.equal(result.status, 0, `${manifest}: ${result.stderr || result.error?.message}`);
         assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed`);
         assert.ok(result.stdout.trim(), `${manifest}: no hook output`);
+        if (manifest !== '.claude/settings.json') assert.doesNotThrow(() => JSON.parse(result.stdout),
+          `${manifest}: native launcher must preserve the host JSON protocol`);
         if (command.includes(' continue')) {
           assert.match(result.stdout, /level: lite/);
           assert.equal(readFileSync(state(continuedHost), 'utf8'), 'lite');
@@ -208,6 +210,7 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
         assert.equal(result.status, 0, result.stderr || result.error?.message);
         assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed in cmd`);
         assert.ok(result.stdout.trim(), `${manifest}: no Windows override output`);
+        assert.doesNotThrow(() => JSON.parse(result.stdout), 'cmd must preserve the Codex JSON protocol');
         if (handler.commandWindows.includes(' continue')) assert.match(result.stdout, /level: lite/);
       }
     }
