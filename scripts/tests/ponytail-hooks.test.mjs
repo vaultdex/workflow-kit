@@ -14,7 +14,8 @@ const git = (process.env.PATH || '').split(path.delimiter)
   .map(directory => path.join(directory, windows ? 'git.exe' : 'git'))
   .find(existsSync);
 // Deadlines only catch hung hooks; they must not measure speed on slow shared runners.
-const hookTimeout = Number(process.env.WORKFLOW_KIT_HOOK_TIMEOUT_MS) || 30_000;
+const configuredTimeout = Number(process.env.WORKFLOW_KIT_HOOK_TIMEOUT_MS);
+const hookTimeout = Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 30_000;
 // Nonblocking checks keep a behavioral bound: 10x the hooks' own 1 s stdin deadline.
 const nonblockingTimeout = 10_000;
 const failure = (result, label) => result.error?.code === 'ETIMEDOUT'
