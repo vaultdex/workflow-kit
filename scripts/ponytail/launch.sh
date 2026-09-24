@@ -29,10 +29,8 @@ while [ ! -x "$canonical" ] && [ -n "$remaining" ]; do
   directory=${remaining%%:*}
   case "$remaining" in *:*) remaining=${remaining#*:};; *) remaining=;; esac
   case "$directory" in /*) ;; *) continue;; esac
-  case "$directory/" in "$prefix"*) continue;; esac
-  directory=$(CDPATH= cd -P -- "$directory" 2>/dev/null && pwd -P) || continue
-  case "$directory/" in "$prefix"*) continue;; esac
-  candidate=$directory/readlink
+  case "$directory/" in "$prefix"*) continue;; *) directory=$(CDPATH= cd -P -- "$directory" 2>/dev/null && pwd -P) || continue;; esac
+  case "$directory/" in "$prefix"*) continue;; *) candidate=$directory/readlink;; esac
   if [ -f "$candidate" ] && [ -x "$candidate" ] && [ ! -L "$candidate" ]; then canonical=$candidate; fi
 done
 [ -x "$canonical" ] || { printf '%s\n' 'Ponytail: system readlink required' >&2; exit 1; }
