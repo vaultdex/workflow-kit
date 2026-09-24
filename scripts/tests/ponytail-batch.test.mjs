@@ -172,3 +172,14 @@ for (const changed of ['cloud', 'local', 'foreign-file', 'foreign-link', 'receip
     assert.equal(readFileSync(join(outside, 'SKILL.md'), 'utf8'), 'User-owned\n');
     assert.deepEqual(readdirSync(join(f.root, '.workflow-kit')), ['ponytail']);
   });
+
+test('an already missing retired cloud directory does not block provider cleanup', t => {
+  const f = fixture(t); succeeds(f.run());
+  const skill = 'ponytail-audit';
+  rmSync(join(f.root, '.github/skills', skill), { recursive: true });
+  rmSync(join(f.source, 'skills', skill), { recursive: true }); f.pin();
+  succeeds(f.run()); succeeds(f.run());
+  assert.equal(existsSync(join(f.root, '.github/skills', skill)), false);
+  for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi'])
+    assert.equal(lstatSync(join(f.root, provider, 'skills', skill), { throwIfNoEntry: false }), undefined);
+});

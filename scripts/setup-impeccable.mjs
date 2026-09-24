@@ -161,7 +161,7 @@ try {
   for (const file of newFiles) copyFileSync(join(bundle, file), join(root, file));
   published = true;
   console.log(`Impeccable ${revision.slice(0, 7)}: five providers linked; tracked Copilot assets and companions refreshed.\n`
-    + "Hook engine/trust unchanged. For first hook setup: node scripts/install-impeccable-hooks.mjs");
+    + "Hook engine/trust unchanged. From the product root: node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .; inside the kit: node scripts/install-impeccable-hooks.mjs .");
 } finally {
   // Only this invocation's generated staging/previous bundle, confined to state.
   assert.equal(dirname(stage), state);
