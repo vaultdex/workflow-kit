@@ -57,7 +57,7 @@ task process. Add the kit only if absent; verify an existing gitlink/remote firs
 git submodule add https://github.com/vaultdex/workflow-kit.git .vendor/workflow-kit
 git submodule update --init --recursive
 node .vendor/workflow-kit/scripts/init-project.mjs . --existing
-node scripts/setup-skills.mjs
+node .vendor/workflow-kit/scripts/setup-skills.mjs .
 node .vendor/workflow-kit/scripts/init-project.mjs . --existing --check
 node .vendor/workflow-kit/scripts/check-skills.mjs .
 ```
@@ -67,13 +67,12 @@ already-present submodule add. Read scripts from the pinned kit, not an unrelate
 download. If a file was intentionally edited, reconcile it with the user/project
 contract; never delete or rewrite the receipt merely to silence a conflict.
 
-The consumer keeps only three documented entrypoints: `setup-skills.mjs` for
-workspace bootstrap and the two hook installers named by recovery messages.
-All implementation stays in the kit. Run the checker directly as shown above;
-the final `.` selects the consumer, not the kit. During a kit update, `init-project`
-retires an unedited, kit-managed `scripts/check-skills.mjs`; update the consumer's
-CI and documentation in the same PR. Edited or unmanaged files are not removed.
-Do not copy product-specific database, API or runtime proofs into this generic kit.
+All shared setup, checking and hook installation runs directly from the kit.
+The final `.` selects the consumer, not the kit. No harness wrappers are generated
+in the consumer's `scripts/`. During an update, `init-project` retires the old
+unchanged managed wrappers; update bootstrap callers, CI, tests and documentation
+in the same migration. Edited or unmanaged files are not removed. Product-specific
+database, API and runtime proofs stay in the product, not in this generic kit.
 
 Existing-project mode preserves unmanaged files. Integrate links to the shared
 CONTRIBUTING.md and WATCHDOG.md into its root AGENTS.md, retaining project-specific
@@ -141,8 +140,14 @@ checkout proof as evidence for Ponytail's native start commands. Keep affected
 automatic Ponytail hooks disabled while that start boundary is unresolved; manual
 skill use and the rest of setup can continue.
 
-For supported, reviewed hooks use the provided explicit installers; personal host
-trust remains a user decision. Files and manual runs do not prove automatic hook
+For supported, reviewed hooks use the provided explicit installers from the product root:
+
+```sh
+node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .
+node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .
+```
+
+Personal host trust remains a user decision. Files and manual runs do not prove automatic hook
 activation. Report confirmed enabled/disabled/unavailable status separately and
 request a fresh agent session only when discovery actually requires it.
 

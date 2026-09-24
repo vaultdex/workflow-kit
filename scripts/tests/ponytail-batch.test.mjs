@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, lstatSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,7 @@ const hooks = ['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 const write = (path, content) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); };
 
+/** Exercise the real setup with committed local upstreams; no download or model call. */
 function fixture(t) {
   const base = mkdtempSync(join(tmpdir(), 'ponytail batch '));
   t.after(() => rmSync(base, { recursive: true, force: true }));
@@ -26,6 +27,7 @@ function fixture(t) {
   const expected = new Map(skills.map(name => [`skills/${name}/SKILL.md`, `# ${name}\r\nGrüße 🎴\r\n\n`])
     .concat(hooks.map(name => [`hooks/ponytail-${name}.js`, name === 'runtime' ? '' : `// ${name}\r\n`])));
   expected.set('skills/ponytail/SKILL.md', '# ponytail\nbase\nGrüße 🎴\n');
+  expected.set('skills/ponytail-help/SKILL.md', 'Run `node scripts/install-ponytail-hooks.mjs` from the product root.\n');
   expected.set('LICENSE', 'License\r\n© Example 🎴\r\n');
   for (const [path, content] of expected) write(join(upstream, path), content);
   git(upstream, 'add', '.'); git(upstream, 'commit', '--quiet', '-m', 'Fixture sources');
@@ -61,7 +63,8 @@ test('one batch reads all pinned blobs with byte-correct UTF-8, CRLF and empty f
   assert.equal(calls.filter(args => args.includes('cat-file') && args.includes('--batch')).length, 1);
   assert.equal(calls.filter(args => args.includes('show')).length, 0);
   for (const [path, original] of f.expected) {
-    const value = original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n');
+    let value = original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n');
+    if (path === 'skills/ponytail-help/SKILL.md') value = value.replace('node scripts/install-ponytail-hooks.mjs', 'node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .');
     const output = path === 'LICENSE' ? '.agents/hooks/LICENSE.md' : `.agents/${path}`;
     assert.equal(readFileSync(join(f.root, output), 'utf8'), value, path);
   }
@@ -118,3 +121,54 @@ test('missing license fails without publishing a partial installation', t => {
   assert.match(result.stderr, /Missing or non-blob pinned source: LICENSE/);
   assert.equal(existsSync(join(f.root, '.workflow-kit/ponytail')), false);
 });
+
+// Future upstream releases may remove or rename optional skills. Exercise both,
+// including symlinks/junctions: existsSync alone misses a stale dangling link.
+for (const action of ['remove', 'rename']) test(`${action} a pinned skill removes only managed outputs and every provider link`, t => {
+  const f = fixture(t); succeeds(f.run());
+  const old = 'ponytail-audit', next = 'ponytail-scan';
+  if (action === 'remove') rmSync(join(f.source, 'skills', old), { recursive: true });
+  else renameSync(join(f.source, 'skills', old), join(f.source, 'skills', next));
+  f.pin(); succeeds(f.run());
+  for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi']) {
+    assert.equal(lstatSync(join(f.root, provider, 'skills', old), { throwIfNoEntry: false }), undefined);
+    if (action === 'rename') assert.ok(lstatSync(join(f.root, provider, 'skills', next)).isSymbolicLink());
+  }
+  assert.equal(existsSync(join(f.root, '.github/skills', old)), false);
+  const receipt = join(f.root, '.github/skills/ponytail/.workflow-source.json');
+  const before = readFileSync(receipt);
+  succeeds(f.run()); assert.deepEqual(readFileSync(receipt), before);
+  assert.ok(!Object.keys(JSON.parse(before).files).some(name => name.includes(old)));
+  const cloudSkills = readdirSync(join(f.root, '.github/skills'));
+  assert.equal(cloudSkills.length, skills.length - (action === 'remove' ? 1 : 0));
+});
+for (const changed of ['cloud', 'local', 'foreign-file', 'foreign-link', 'receipt-path', 'cloud-symlink'])
+  test(`retirement refuses ${changed} without replacing the installation or receipt`, t => {
+    const f = fixture(t); succeeds(f.run());
+    const receipt = join(f.root, '.github/skills/ponytail/.workflow-source.json');
+    const cloud = join(f.root, '.github/skills/ponytail-audit');
+    const local = join(f.root, '.agents/skills/ponytail-audit/SKILL.md');
+    const outside = join(dirname(f.root), 'external'); mkdirSync(outside);
+    write(join(outside, 'SKILL.md'), 'User-owned\n');
+    if (changed === 'cloud') write(join(cloud, 'SKILL.md'), 'User-owned\n');
+    if (changed === 'local') write(local, 'User-owned\n');
+    if (changed === 'foreign-file') write(join(cloud, 'notes.txt'), 'User-owned\n');
+    if (changed === 'foreign-link') {
+      const link = join(f.root, '.pi/skills/ponytail-audit'); unlinkSync(link); symlinkSync(outside, link, 'junction');
+    }
+    if (changed === 'receipt-path') {
+      const data = JSON.parse(readFileSync(receipt)); data.files['../../external/SKILL.md'] = 'a'.repeat(64);
+      write(receipt, JSON.stringify(data));
+    }
+    if (changed === 'cloud-symlink') {
+      rmSync(cloud, { recursive: true }); symlinkSync(outside, cloud, 'junction');
+    }
+    const before = readFileSync(receipt);
+    const original = readFileSync(local);
+    rmSync(join(f.source, 'skills/ponytail-audit'), { recursive: true }); f.pin();
+    assert.notEqual(f.run().status, 0);
+    assert.deepEqual(readFileSync(receipt), before);
+    assert.deepEqual(readFileSync(local), original);
+    assert.equal(readFileSync(join(outside, 'SKILL.md'), 'utf8'), 'User-owned\n');
+    assert.deepEqual(readdirSync(join(f.root, '.workflow-kit')), ['ponytail']);
+  });

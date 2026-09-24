@@ -20,49 +20,53 @@ It reuses existing choices and asks only for missing information or account step
 
 Use [vaultdex/project-template](https://github.com/vaultdex/project-template) on GitHub.
 It contains this kit as a pinned submodule, so future kit changes arrive as update PRs.
-Clone recursively, then run `node scripts/setup-skills.mjs`. Follow the starter README
-for board setup and the one-time reviewer/hook authorizations.
+Clone recursively, then run `node .vendor/workflow-kit/scripts/setup-skills.mjs .`.
+Follow the starter README for board setup and one-time reviewer/hook authorizations.
 
 ## Existing project
 
-Use Node 26 and Git. Start in a Git repository (paths with spaces are supported):
+Use Node 26 and Git. Start in the product repository root (paths with spaces are supported):
 
 ```sh
 git submodule add https://github.com/vaultdex/workflow-kit.git .vendor/workflow-kit
 git submodule update --init --recursive
 node .vendor/workflow-kit/scripts/init-project.mjs . --existing
-node scripts/setup-skills.mjs
+node .vendor/workflow-kit/scripts/setup-skills.mjs .
 node .vendor/workflow-kit/scripts/check-skills.mjs .
 ```
 
-The final `.` selects the consumer checkout. No local `scripts/check-skills.mjs`
-wrapper is generated; the implementation stays in the kit.
+The final `.` selects the consumer checkout. All harness commands run directly
+from the kit. No setup, check or hook-installer wrappers are generated in `scripts/`.
+Product-specific build, database and integration tests remain with the product.
 
-For an existing project use `init-project.mjs . --existing`: managed hooks,
-entry points and ignored generated paths are integrated; previously managed template
-files are updated if unedited. Unmanaged contribution rules, issue forms, update bots
-and product CI remain yours. Add links to the shared
+For an existing project use `init-project.mjs . --existing`: managed hooks and
+ignored generated paths are integrated; previously managed template files are
+updated if unedited. Unmanaged contribution rules, issue forms, update bots and
+product CI remain yours. Add links to the shared
 [contribution workflow](docs/CONTRIBUTING.md) and [Watchdog](WATCHDOG.md) in your root
 AGENTS.md. Existing conflicting files are refused, never force-overwritten.
 
-`.github/workflow-kit.json` records hashes of generated files in the consumer
-checkout (including thin entry-point wrappers), not hashes of kit implementations.
+`.github/workflow-kit.json` records hashes of managed consumer files and individual
+hook handlers, plus the top-level hook metadata owned by the kit. It is not a copy
+of the kit implementation. Older unchanged wrappers are retired by the same update
+command; edited/unmanaged files are not deleted. Update bootstrap callers, CI and
+recovery instructions together with the kit pin before removing their entrypoints.
 
 This repository owns implementation and source pins. The separate thin starter
 owns the initial product-repository layout; no source implementation is copied
 into each new project. Both paths use the same init/setup/check commands.
 
-Commit `.gitmodules`, the kit gitlink, `.github` generated discovery, hook manifests
-and entry points. Local links/bundles and personal settings stay ignored. Agents
-may need a fresh session. Config files do not prove actual native hook activation.
+Commit `.gitmodules`, the kit gitlink, `.github` generated discovery and hook manifests.
+Local links/bundles and personal settings stay ignored. Agents may need a fresh
+session. Config files do not prove actual native hook activation.
 
 ## Hooks and reviews
 
 Explicitly install verified user-local hook snapshots after reviewing the checkout:
 
 ```sh
-node scripts/install-ponytail-hooks.mjs
-node scripts/install-impeccable-hooks.mjs
+node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .
+node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .
 ```
 
 Review changed hook definitions in each agent. Setup never grants personal trust,
@@ -99,8 +103,11 @@ commit regenerated `.github` files, run
 review patch/engine changes before merging. Required workflow source checks catch
 stale generated output.
 `node .vendor/workflow-kit/scripts/init-project.mjs . --existing --check`
-validates every recorded managed file and hook snapshot without writing files;
-review intentional local edits before reconciling the receipt.
+validates every recorded managed file, hook handler and top-level metadata without
+writing files; review intentional local edits before reconciling the receipt.
+A retired hook keeps foreign handlers and the schema envelope they still need.
+Removed/renamed Ponytail skills retire only unchanged owned cloud files and exact
+provider links. Foreign contents stop migration before publication.
 Submodule proposals alone do not regenerate files or update a developer's checkout.
 Changed hook snapshots need explicit installation and renewed host trust.
 
