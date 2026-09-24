@@ -19,8 +19,9 @@ const searchPath = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
     && !realpathSync(p).startsWith(realpathSync(root) + sep));
 const binary = searchPath.map(p => join(p, process.platform === 'win32' ? 'git.exe' : 'git')).find(existsSync);
 assert.ok(binary, 'Install Git outside the checkout on an absolute PATH');
-const git = (...args) => execFileSync(binary, args, { cwd: root, encoding: 'utf8',
-  env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: '1' } });
+const gitOptions = { cwd: root,
+  env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: '1' } };
+const git = (...args) => execFileSync(binary, args, { ...gitOptions, encoding: 'utf8' });
 
 function directory(p) {
   let parent = p;
@@ -39,6 +40,28 @@ const revision = git('-C', source, 'rev-parse', 'HEAD').trim();
 const skills = ['ponytail', 'ponytail-audit', 'ponytail-debt', 'ponytail-gain', 'ponytail-help', 'ponytail-review'];
 const files = [...skills.map(s => `skills/${s}/SKILL.md`),
   ...['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent'].map(n => `hooks/ponytail-${n}.js`)];
+// Read committed blobs in one Git process. Parse byte lengths before decoding:
+// UTF-8 characters and embedded newlines are not batch-record boundaries.
+const requested = [...files, 'LICENSE'];
+const batch = execFileSync(binary, ['-C', source, 'cat-file', '--batch'], {
+  ...gitOptions, input: requested.map(file => `${revision}:${file}\n`).join(''),
+  maxBuffer: 16 * 1024 * 1024,
+});
+let offset = 0;
+const contents = new Map();
+for (const file of requested) {
+  const end = batch.indexOf(10, offset);
+  assert.ok(end >= offset, `Missing pinned blob header: ${file}`);
+  const header = /^([a-f0-9]{40}|[a-f0-9]{64}) blob ([0-9]+)$/.exec(batch.toString('ascii', offset, end));
+  assert.ok(header, `Missing or non-blob pinned source: ${file}`);
+  const size = Number(header[2]);
+  offset = end + 1;
+  assert.ok(Number.isSafeInteger(size) && size >= 0 && size < batch.length - offset
+    && batch[offset + size] === 10, `Incomplete pinned blob: ${file}`);
+  contents.set(file, batch.toString('utf8', offset, offset + size).replaceAll('\r\n', '\n'));
+  offset += size + 1;
+}
+assert.equal(offset, batch.length, 'Unexpected trailing pinned-source output');
 const stage = mkdtempSync(join(state, 'setup-'));
 const next = join(stage, 'next');
 const previous = join(stage, 'previous');
@@ -47,12 +70,12 @@ try {
   for (const file of files) {
     const p = join(next, '.agents', file);
     mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, git('-C', source, 'show', `${revision}:${file}`).replaceAll('\r\n', '\n'));
+    writeFileSync(p, contents.get(file));
   }
   git('apply', '--whitespace=error-all', `--directory=${relative(root, join(next, '.agents')).split(sep).join('/')}`,
     join(kit, 'scripts/ponytail/adaptations.patch'));
   for (const file of files) writeFileSync(join(next, '.agents', file), text(join(next, '.agents', file)));
-  const license = git('-C', source, 'show', `${revision}:LICENSE`).replaceAll('\r\n', '\n');
+  const license = contents.get('LICENSE');
   writeFileSync(join(next, '.agents/hooks/LICENSE.md'), license);
   writeFileSync(join(next, '.agents/skills/ponytail/LICENSE.md'), license);
   writeFileSync(join(next, '.agents/skills/ponytail/NOTICE.md'), text(join(kit, 'scripts/ponytail/NOTICE.md')));

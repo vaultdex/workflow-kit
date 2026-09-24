@@ -1,7 +1,11 @@
 # Contributors
 
-Read .vendor/workflow-kit/docs/CONTRIBUTING.md for workflow and .vendor/workflow-kit/WATCHDOG.md for engineering/review.
-Refresh changed rules/state; reuse valid evidence. The GitHub Project recorded in
+Start with this file and .vendor/workflow-kit/WATCHDOG.md's engineering rules.
+Read the applicable sections of .vendor/workflow-kit/docs/CONTRIBUTING.md once when needed;
+reuse them and reread only when relevant rules change. Do not recursively load
+every linked document, generated skill or provider directory.
+Reuse unchanged context/evidence; refresh live issue/dependency/ownership state.
+The GitHub Project recorded in
 `.github/workflow-project.json` owns order/status; issues own scope,
 acceptance, dependencies and evidence; PRs own review. No second task ledger,
 claim PRs or central steering issue.
@@ -60,6 +64,11 @@ following [hook preflight](.vendor/workflow-kit/docs/agent-hooks.md). Warn once 
 for confirmed failures or missing/disabled/untrusted hooks. If status is inaccessible,
 continue without a warning or user check request; do not claim automatic execution.
 Files or manual script runs do not prove live activation. Continue unaffected work.
+
+Skill generation and hook installation belong to reviewed checkout provisioning
+or explicit kit/tool upgrades, not routine task/turn preflight. Reuse a prepared
+checkout; rerun affected validation after inputs change. Native hook trust stays
+an explicit personal step; missing prerequisites do not authorize bypasses.
 
 ## Token and Actions budgets
 

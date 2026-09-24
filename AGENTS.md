@@ -1,7 +1,11 @@
 # Workflow Kit contributors
 
-Read docs/CONTRIBUTING.md for workflow and WATCHDOG.md for engineering/review.
-Refresh changed rules/state; reuse valid evidence. The GitHub Project recorded in
+Start with this file and WATCHDOG.md's engineering rules.
+Read the applicable sections of docs/CONTRIBUTING.md once when needed;
+reuse them and reread only when relevant rules change. Do not recursively load
+every linked document, generated skill or provider directory.
+Reuse unchanged context/evidence; refresh live issue/dependency/ownership state.
+The GitHub Project recorded in
 `.github/workflow-project.json` owns order/status; issues own scope,
 acceptance, dependencies and evidence; PRs own review. No second task ledger,
 claim PRs or central steering issue.
@@ -61,6 +65,11 @@ for confirmed failures or missing/disabled/untrusted hooks. If status is inacces
 continue without a warning or user check request; do not claim automatic execution.
 Files or manual script runs do not prove live activation. Continue unaffected work.
 
+Skill generation and hook installation belong to reviewed checkout provisioning
+or explicit kit/tool upgrades, not routine task/turn preflight. Reuse a prepared
+checkout; rerun affected validation after inputs change. Native hook trust stays
+an explicit personal step; missing prerequisites do not authorize bypasses.
+
 ## Token and Actions budgets
 
 Treat tokens and GitHub Actions usage as limited budgets, not free capacity.
@@ -91,7 +100,9 @@ consistent. Reuse standard/native facilities before introducing dependencies.
 ## Kit contracts
 
 Use pinned upstream submodules and reviewed patches; never edit generated skills.
-Run `node scripts/setup-skills.mjs`, `node --test scripts/tests` and
-`node scripts/check-skills.mjs`. Hook/launcher changes additionally require
+For setup, source, template or test changes run `node scripts/setup-skills.mjs`,
+`node --test scripts/tests` and `node scripts/check-skills.mjs`. Documentation-only
+changes need diff/link review, not local skill regeneration; required CI still applies.
+Hook/launcher changes additionally require
 `node scripts/check-impeccable.mjs` with its real isolated engine proof.
 No npm install, automatic installer hooks, secrets or private product files.
