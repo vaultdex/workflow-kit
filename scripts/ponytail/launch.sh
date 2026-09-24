@@ -50,13 +50,19 @@ while [ -n "$remaining" ]; do
   case "$directory/" in "$prefix"*) continue;; *) candidate=$directory/node;; esac
   [ -x "$candidate" ] || continue
   actual=$(canonicalize "$candidate") || continue
-  case "$actual" in "$boundary"|"$prefix"*) continue;; *) node=$actual; break;; esac
+  case "$actual" in "$boundary"|"$prefix"*) continue;; *) magic=$(LC_ALL=C "${canonical%/*}/od" -An -N4 -tx1 "$actual" 2>/dev/null) || continue;; esac
+  # Script shims can name checkout interpreters or execute checkout commands.
+  # Accept native ELF/Mach-O (including universal binaries), never shell fallback.
+  case "$magic" in
+    *"7f 45 4c 46"*|*"fe ed fa ce"*|*"ce fa ed fe"*|*"fe ed fa cf"*|*"cf fa ed fe"*|*"ca fe ba be"*|*"be ba fe ca"*|*"ca fe ba bf"*|*"bf ba fe ca"*) node=$actual; break;;
+    *) continue;;
+  esac
 done
-[ -n "$node" ] || { printf '%s\n' 'Ponytail: install Node outside the checkout on an absolute PATH' >&2; exit 1; }
+[ -n "$node" ] || { printf '%s\n' 'Ponytail: install Node outside the checkout on an absolute PATH (native executable required)' >&2; exit 1; }
 # Prevent Node preload options from executing checkout code before the snapshot.
 unset NODE_OPTIONS NODE_PATH
 # External directories can expose file links back into the checkout. Only OS
-# directories may supply interpreters to trusted external Node shims.
+# directories may supply executables to the installed hook.
 PATH=/usr/bin:/bin:/usr/sbin:/sbin:/run/current-system/sw/bin
 export PATH
 exec "$node" "${0%/*}/.agents/hooks/ponytail-$action.js" "$host" "$root" "${3:-}"

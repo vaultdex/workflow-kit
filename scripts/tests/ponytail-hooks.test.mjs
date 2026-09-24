@@ -175,10 +175,10 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   const externalNode = path.join(temp, 'external-node');
   if (!windows) {
     mkdirSync(externalNode);
-    // The trusted external shim must not inherit a checkout-controlled Bash.
+    // Script shims are not native Node, even with an external OS interpreter.
     const systemEnv = ['/usr/bin/env', '/bin/env', '/run/current-system/sw/bin/env'].find(existsSync);
     assert.ok(systemEnv, 'System env is required for the external shim fixture');
-    writeFileSync(path.join(externalNode, 'node'), '#!' + systemEnv + ' bash\nexec '
+    writeFileSync(path.join(externalNode, 'node'), '#!' + systemEnv + ' bash\nprintf executed > "$PONYTAIL_MARKER"\nexec '
       + "'" + process.execPath.replaceAll("'", "'\\''") + "' \"$@\"\n", { mode: 0o755 });
   }
   const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
@@ -193,6 +193,7 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     const store = path.join(temp, 'store');
     mkdirSync(store);
     cpSync(systemReadlink, path.join(store, 'readlink'), { dereference: true });
+    cpSync(path.join(path.dirname(systemReadlink), 'od'), path.join(externalNode, 'od'), { dereference: true });
     symlinkSync(path.join(store, 'readlink'), path.join(externalNode, 'readlink'));
     symlinkSync(path.join(bin, 'readlink'), path.join(fileLinked, 'readlink'));
     const profile = path.join(temp, 'profile');
