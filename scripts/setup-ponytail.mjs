@@ -82,8 +82,8 @@ try {
   // Render the consumer entrypoint in generated help; runtime sources remain unchanged.
   const help = join(next, '.agents/skills/ponytail-help/SKILL.md');
   if (existsSync(help)) writeFileSync(help, text(help).replaceAll(
-    'node scripts/install-ponytail-hooks.mjs',
-    'node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .'));
+    '`node scripts/install-ponytail-hooks.mjs`',
+    '`node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` (inside the kit: `node scripts/install-ponytail-hooks.mjs .`)'));
   const license = contents.get('LICENSE');
   writeFileSync(join(next, '.agents/hooks/LICENSE.md'), license);
   writeFileSync(join(next, '.agents/skills/ponytail/LICENSE.md'), license);

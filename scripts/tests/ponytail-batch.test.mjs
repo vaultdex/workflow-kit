@@ -64,7 +64,8 @@ test('one batch reads all pinned blobs with byte-correct UTF-8, CRLF and empty f
   assert.equal(calls.filter(args => args.includes('show')).length, 0);
   for (const [path, original] of f.expected) {
     let value = original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n');
-    if (path === 'skills/ponytail-help/SKILL.md') value = value.replace('node scripts/install-ponytail-hooks.mjs', 'node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .');
+    if (path === 'skills/ponytail-help/SKILL.md') value = value.replace('`node scripts/install-ponytail-hooks.mjs`',
+      '`node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` (inside the kit: `node scripts/install-ponytail-hooks.mjs .`)');
     const output = path === 'LICENSE' ? '.agents/hooks/LICENSE.md' : `.agents/${path}`;
     assert.equal(readFileSync(join(f.root, output), 'utf8'), value, path);
   }
