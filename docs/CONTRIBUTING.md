@@ -24,7 +24,9 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   authorize triage of one issue or the whole Backlog: check scope and metadata,
   promote feasible work to Ready even with unresolved blockers, and retain only
   work that remains infeasible after its blockers are resolved, with reasons.
-  Triage authorization never authorizes implementation or moving to In progress.
+  Under the default start policy, triage authorization never authorizes
+  implementation or moving to In progress; under `"start": "ready"`, Ready placement
+  from human-authorized triage is that authorization (start policy below).
   Preserve native dependency links and explicit external blocker/recovery evidence.
   Before selecting Ready work, recheck blockers and skip blocked items: GitHub
   resolves dependency relationships when predecessors close, but Ready itself is
