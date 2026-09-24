@@ -50,6 +50,12 @@ edit/Stop hooks do not certify successful analysis. Existing engine failures rem
   definitions and restart the session. Preserve other hooks and personal settings.
 - **Copilot:** inspect native hook loading and `.github/hooks/*.json`; cloud hooks
   require the definitions on the default branch. Report unsupported events explicitly.
+  Copilot CLI 1.0.56 is affected by [upstream issue 3589](https://github.com/github/copilot-cli/issues/3589):
+  multiple SessionStart hooks execute, but only the last `additionalContext` reaches
+  the model. With both integrations missing, one setup warning may therefore be
+  hidden. Inspect both hook results during preflight; a missing warning does not
+  prove installation. The upstream issue remains open as of 2026-09-24; no fixed
+  CLI version has been verified here.
 - **Cursor:** inspect Settings → Hooks and enable supported local hooks. The
   bundled Ponytail rule, if separately installed, overrides its mode-switching hooks.
 - **Other hosts:** state that these manifests do not supply native hooks there;

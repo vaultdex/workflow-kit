@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 const installer = fileURLToPath(new URL('../init-project.mjs', import.meta.url));
@@ -140,9 +140,67 @@ test('receipt traversal and symlink escapes cannot delete an outside file', t =>
     assert.equal(readFileSync(join(outside, 'keep'), 'utf8'), 'keep');
   }
   json(f.receipt, { files: {}, hooks: {} });
+  // An allowed receipt name must still reject a symlinked deletion parent.
+  rmSync(join(f.root, 'scripts'), { recursive: true });
+  write(join(outside, 'check-skills.mjs'), 'keep');
+  symlinkSync(outside, join(f.root, 'scripts'), 'junction');
+  json(f.receipt, { files: { 'scripts/check-skills.mjs': hash('keep') }, hooks: {} });
+  assert.notEqual(f.run().status, 0);
+  assert.equal(readFileSync(join(outside, 'check-skills.mjs'), 'utf8'), 'keep');
+  rmSync(join(f.root, 'scripts'));
+  json(f.receipt, { files: {}, hooks: {} });
   symlinkSync(outside, join(f.root, '.cursor'), 'junction');
   f.template('.cursor/hooks.json', manifest(1));
   assert.notEqual(f.run().status, 0); assert.equal(existsSync(join(outside, 'hooks.json')), false);
+});
+
+test('an unrelated checkout cannot be selected through CLI arguments', t => {
+  const f = fixture(t), outside = join(f.base, 'consumer-other');
+  mkdirSync(join(outside, '.git'), { recursive: true });
+  const result = spawnSync(process.execPath, [join(f.kit, 'scripts/init-project.mjs'), outside], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Target must own this kit/);
+  assert.equal(existsSync(join(outside, '.github')), false);
+});
+
+test('interrupted hook writes resume; foreign edits remain protected', t => {
+  const f = fixture(t), name = '.cursor/hooks.json', target = join(f.root, name);
+  f.template(name, manifest(1)); succeeds(f.run());
+  const value = read(target); value.hooks.sessionStart.push(foreign); json(target, value);
+  const next = { version: 2, hooks: { sessionStart: [{ command: 'echo new' }] } };
+  f.template(name, next);
+  // Fail the next real write after the hook output, before the final receipt.
+  const fault = join(f.base, 'fault.mjs');
+  write(fault, `import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module';
+const write = fs.writeFileSync; let changed = false;
+fs.writeFileSync = (path, ...args) => {
+  if (changed) throw new Error('injected write failure');
+  const result = write(path, ...args);
+  if (String(path) === ${JSON.stringify(target)}) changed = true;
+  return result;
+}; syncBuiltinESMExports();`);
+  const failed = spawnSync(process.execPath, ['--import', pathToFileURL(fault).href, join(f.kit, 'scripts/init-project.mjs'), f.root, '--existing'], { encoding: 'utf8' });
+  assert.notEqual(failed.status, 0); assert.match(failed.stderr, /injected write failure/);
+  const interrupted = readFileSync(f.receipt), updated = readFileSync(target);
+  assert.ok(read(f.receipt).planned[name]);
+  assert.notEqual(f.run('--check').status, 0);
+  assert.deepEqual(readFileSync(f.receipt), interrupted);
+  const edited = read(target); edited.hooks.sessionStart.at(-1).command = 'echo user edit'; json(target, edited);
+  assert.notEqual(f.run().status, 0);
+  assert.deepEqual(read(target), edited);
+  writeFileSync(target, updated);
+  succeeds(f.run()); succeeds(f.run('--check'));
+  assert.deepEqual(read(target).hooks.sessionStart, [foreign, ...next.hooks.sessionStart]);
+  assert.equal(read(f.receipt).planned, undefined);
+});
+
+test('interrupted retirement tolerates an already removed manifest', t => {
+  const f = fixture(t), name = '.github/hooks/old.json';
+  f.template(name, manifest(1)); succeeds(f.run());
+  rmSync(join(f.kit, 'templates', name)); rmSync(join(f.root, name));
+  assert.notEqual(f.run('--check').status, 0);
+  succeeds(f.run()); succeeds(f.run('--check'));
+  assert.equal(read(f.receipt).hooks[name], undefined);
 });
 
 test('retired template preserves user-edited metadata after removing owned handlers', t => {
