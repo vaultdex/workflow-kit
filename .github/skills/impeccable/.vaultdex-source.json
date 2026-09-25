@@ -1,6 +1,6 @@
 {
   "revision": "cd12f8660e2dde57b9615c8a6b8ea674101f9cfc",
-  "inputs": "b967b78b73464b7aad2e05dee995ad347622dcc782c9f2885b056af204044dd7",
+  "inputs": "532c66e746c0f06d73f7927dde2879574b9c743899d7192143221a5a3cfe8970",
   "files": {
     ".claude/agents/impeccable-asset-producer.md": "c6a0ec6c28ae55fe539f0f41a507b1638495afd285d6eb15c00245fc8cc7e7fe",
     ".claude/agents/impeccable-documenter.md": "6bc62a59f6fef0b749927c8d10e9849ab2411199d86d70772a86f8e83ac309f5",
@@ -64,7 +64,7 @@
     ".github/skills/impeccable/scripts/impeccable": "2ca89890289a201304728275d79d883dbfa399a7e89d3f0b7b5d52fbb77d0511",
     ".github/skills/impeccable/scripts/impeccable.cmd": "677882ed0ac16564320570fa66f38ba27f56c61bc30c78b3d5209b9c810c48a8",
     ".github/skills/impeccable/scripts/live-browser-dom.js": "de1b7404f4cdfd7b515196afb17b74b1980f0bc88cb8681ae93a76ca48ec7bdb",
-    ".github/skills/impeccable/scripts/live-browser-ignores.js": "c1cb6877ca99a0c1b38ba0c7d59f32702d3022f6821d8045f7133f7c40b6362f",
+    ".github/skills/impeccable/scripts/live-browser-ignores.js": "3f6eed812c2097a4035f45ee05f7df23df0977fdafe864cfc35abf88f824ff95",
     ".github/skills/impeccable/scripts/live-browser-session.js": "edddeb3fad88adec9a055b1bf9d5c75418cbe97a13b1a7f6765e73249e482563",
     ".github/skills/impeccable/scripts/live-browser.js": "7af0a8665057c83b39bca2c8c7427ef2343734f70d4128c377113a6726a1e3b1",
     ".github/skills/impeccable/scripts/modern-screenshot.umd.js": "bb36665889124a0b6e15f16045265737449c3bdcf2712cdb08af3cfa01563e2b",

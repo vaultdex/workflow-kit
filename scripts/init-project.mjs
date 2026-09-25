@@ -62,28 +62,38 @@ function writeReceipt(value) {
   }
 }
 
+// Drop only the fragments a previous receipt owns; foreign groups and handlers stay.
+function withoutOwned(groups, owned) {
+  return groups.flatMap(group => {
+    if (!group.hooks) return owned.includes(fingerprint(group)) ? [] : [group];
+    const remaining = group.hooks.filter(hook => !owned.includes(fingerprint({ ...group, hooks: [hook] })));
+    return remaining.length ? [{ ...group, hooks: remaining }] : [];
+  });
+}
+
+function addIncoming(retained, parts) {
+  for (const part of parts) {
+    if (retained.flatMap(fragments).some(x => fingerprint(x) === fingerprint(part))) continue;
+    const { hooks: handlers } = part;
+    // Preserve the exact serialized fragment used by existing receipts.
+    const matching = handlers && retained.find(x => x.hooks
+      && fingerprint({ ...x, hooks: handlers }) === fingerprint(part));
+    if (matching) matching.hooks.push(...handlers);
+    else retained.push(part);
+  }
+}
+
 // Plan all changes before writing. Legacy receipts may adopt identical metadata,
 // but cannot prove that a conflicting schema version belongs to the kit.
 function migrateEvents(name, current, old, incoming) {
   for (const event of new Set([...Object.keys(old), ...Object.keys(incoming?.hooks ?? {})])) {
     assert.match(event, /^[A-Za-z][A-Za-z0-9]*$/, 'Invalid hook event');
     const groups = current.hooks[event] ?? [];
-    for (const digest of old[event] ?? []) assert.ok(groups.flatMap(fragments).some(group => fingerprint(group) === digest),
+    const owned = old[event] ?? [];
+    for (const digest of owned) assert.ok(groups.flatMap(fragments).some(group => fingerprint(group) === digest),
       `Managed hook edited or disabled; preserved without replacement: ${name}/${event}`);
-    const retained = groups.flatMap(group => {
-      if (!group.hooks) return (old[event] ?? []).includes(fingerprint(group)) ? [] : [group];
-      const remaining = group.hooks.filter(hook => !(old[event] ?? []).includes(fingerprint({ ...group, hooks: [hook] })));
-      return remaining.length ? [{ ...group, hooks: remaining }] : [];
-    });
-    for (const part of (incoming?.hooks[event] ?? []).flatMap(fragments)) {
-        if (retained.flatMap(fragments).some(x => fingerprint(x) === fingerprint(part))) continue;
-        const { hooks: handlers } = part;
-        // Preserve the exact serialized fragment used by existing receipts.
-        const matching = handlers && retained.find(x => x.hooks
-          && fingerprint({ ...x, hooks: handlers }) === fingerprint(part));
-        if (matching) matching.hooks.push(...handlers);
-        else retained.push(part);
-    }
+    const retained = withoutOwned(groups, owned);
+    addIncoming(retained, (incoming?.hooks[event] ?? []).flatMap(fragments));
     if (retained.length) current.hooks[event] = retained;
     else delete current.hooks[event];
   }

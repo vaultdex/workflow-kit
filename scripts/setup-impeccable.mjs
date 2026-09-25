@@ -104,11 +104,12 @@ try {
     // Release archives add these root attribution files to every provider package.
     for (const file of ["LICENSE", "NOTICE.md"])
       writeFileSync(join(next, skill, file), text(join(source, file)));
-    // Git for Windows may check upstream out as CRLF. Shell scripts need LF.
-    for (const name of ["impeccable", "impeccable.cmd"])
+    // Git for Windows may check upstream out as CRLF. Shell scripts and the LF patches need LF.
+    for (const name of ["impeccable", "impeccable.cmd", "live-browser-ignores.js"])
       writeFileSync(join(next, skill, "scripts", name), text(join(next, skill, "scripts", name)));
-    git("apply", "--whitespace=error-all", `--directory=${relative(root, join(next, skill)).split(sep).join("/")}`,
-      join(security, "launchers.patch"));
+    for (const patch of ["launchers.patch", "maintainability.patch"])
+      git("apply", "--whitespace=error-all", `--directory=${relative(root, join(next, skill)).split(sep).join("/")}`,
+        join(security, patch));
     copyFileSync(join(security, "SHA256SUMS"), join(next, skill, "scripts/SHA256SUMS"));
     chmodSync(join(next, skill, "scripts/impeccable"), 0o755);
   }
@@ -117,7 +118,7 @@ try {
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
   const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/impeccable/launchers.patch",
-    "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
+    "scripts/impeccable/maintainability.patch", "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
   const inputs = createHash("sha256").update(inputFiles.map((file) => text(join(kit, file))).join("\0")).digest("hex");
   const recorded = existsSync(join(root, receipt)) ? JSON.parse(text(join(root, receipt))) : null;
   const files = Object.fromEntries(companionFiles(next).sort().map(file => [file, digest(join(next, file))]));
