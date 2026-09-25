@@ -17,10 +17,12 @@ const bundle = join(state, 'ponytail');
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const checkouts = [root, kit, process.cwd()].map(p => realpathSync(p));
+const outside = p => checkouts.every(base => p !== base && !p.startsWith(base + sep));
 const searchPath = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
-  .filter(p => existsSync(p) && realpathSync(p) !== realpathSync(root)
-    && !realpathSync(p).startsWith(realpathSync(root) + sep));
-const binary = searchPath.map(p => join(p, process.platform === 'win32' ? 'git.exe' : 'git')).find(existsSync);
+  .filter(p => existsSync(p) && outside(realpathSync(p)));
+const binary = searchPath.map(p => join(p, process.platform === 'win32' ? 'git.exe' : 'git'))
+  .filter(existsSync).map(p => realpathSync(p)).find(outside);
 assert.ok(binary, 'Install Git outside the checkout on an absolute PATH');
 const gitOptions = { cwd: root,
   env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: '1' } };
@@ -36,7 +38,11 @@ function directory(p) {
 
 directory(state);
 assert.ok(!present(bundle)?.isSymbolicLink(), 'Generated Ponytail bundle must not be a link');
-if (existsSync(bundle)) assert.equal(text(join(bundle, '.owner')), 'vaultdex-workflow-kit\n');
+if (existsSync(bundle)) {
+  const owner = join(bundle, '.owner');
+  assert.ok(present(owner)?.isFile() && text(owner) === 'vaultdex-workflow-kit\n',
+    'Refusing to replace an unknown .workflow-kit/ponytail directory');
+}
 if (existsSync(join(source, '.git'))) assert.equal(git('-C', source, 'status', '--porcelain', '--untracked-files=all').trim(), '', 'Ponytail source has local changes');
 git('-C', kit, 'submodule', 'update', '--init', '--', '.vendor/ponytail');
 const revision = git('-C', source, 'rev-parse', 'HEAD').trim();
@@ -56,7 +62,7 @@ const contents = new Map();
 for (const file of requested) {
   const end = batch.indexOf(10, offset);
   assert.ok(end >= offset, `Missing pinned blob header: ${file}`);
-  const header = /^([a-f0-9]{40}|[a-f0-9]{64}) blob ([0-9]+)$/.exec(batch.toString('ascii', offset, end));
+  const header = /^([a-f0-9]{40}|[a-f0-9]{64}) blob (\d+)$/.exec(batch.toString('ascii', offset, end));
   assert.ok(header, `Missing or non-blob pinned source: ${file}`);
   const size = Number(header[2]);
   offset = end + 1;
@@ -146,8 +152,10 @@ try {
   for (const [file, bytes] of Object.entries(outputs)) {
     const target = join(root, file);
     directory(dirname(target));
-    if (present(target)) assert.ok(present(target).isFile() && (text(target) === bytes || old[file] === hash(text(target))),
-      `Existing or edited Copilot skill left untouched: ${target}`);
+    if (present(target)) {
+      assert.ok(present(target).isFile() && (text(target) === bytes || old[file] === hash(text(target))),
+        `Existing or edited Copilot skill left untouched: ${target}`);
+    }
   }
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   if (existsSync(bundle)) renameSync(bundle, previous);

@@ -114,6 +114,15 @@ Changed hook snapshots need explicit installation and renewed host trust.
 ## Verification and budget
 
 The following commands are for contributors working in the kit itself, not a consumer.
+Setup accepts an explicit target checkout, including one outside the current working
+directory. Review that target before invoking setup. Generated directories must
+remain inside its canonical path; ownership and receipt files must be regular files.
+Git must resolve outside the target, kit and invoking checkout, including executable
+symlinks. GitHub setup likewise rejects checkout-owned CLI executables and redirected
+project metadata before invoking GitHub. Failed ownership checks do not print file
+contents. These checks cover existing path redirections, not concurrent filesystem
+changes; run explicit setup in a checkout you control.
+
 `node --test scripts/tests` checks actual setup, update preservation and hook protocols.
 `node scripts/check-skills.mjs` regenerates all cloud discovery from real pinned
 sources and compares content. `node scripts/check-impeccable.mjs` runs isolated

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 const repo = process.argv[2];
@@ -16,6 +16,10 @@ assert.ok(binary, 'Install GitHub CLI in an absolute PATH directory outside this
 const gh = (...args) => execFileSync(realpathSync(binary), args, { encoding: 'utf8',
   env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: '1' } }).trim();
 const marker = resolve('.github/workflow-project.json');
+const directory = dirname(marker);
+const present = path => lstatSync(path, { throwIfNoEntry: false });
+assert.ok(!present(directory) || !outside(realpathSync(directory)), 'Project directory leaves checkout');
+assert.ok(!present(marker) || present(marker).isFile(), 'Project marker must be a regular file');
 const saved = existsSync(marker) ? JSON.parse(readFileSync(marker, 'utf8')) : null;
 if (saved) assert.equal(saved.repository, repo, 'Recorded project belongs to another repository');
 const meta = JSON.parse(gh('repo', 'view', repo, '--json', 'viewerPermission,url'));
