@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 
@@ -97,30 +96,14 @@ public static class PonytailLauncher {
                 (args.Length == 3 ? " " + Quote(args[2]) : ""));
             start.UseShellExecute = false;
             start.CreateNoWindow = true;
-            start.RedirectStandardInput = true;
+            // Inherit stdin unchanged: .NET Framework's redirected StreamWriter
+            // adds Console.InputEncoding's BOM before any BaseStream write.
             start.RedirectStandardOutput = true;
             start.RedirectStandardError = true;
             start.EnvironmentVariables.Remove("NODE_OPTIONS");
             start.EnvironmentVariables.Remove("NODE_PATH");
             start.EnvironmentVariables["PATH"] = Environment.SystemDirectory;
             using (var child = Process.Start(start)) {
-                var input = child.StandardInput.BaseStream;
-                // Hosts may keep stdin open beyond the hook's own read deadline; never wait for this pump.
-                new Thread(() => {
-                    try {
-                        using (input) {
-                            var source = Console.OpenStandardInput();
-                            var buffer = new byte[8192];
-                            int count;
-                            while ((count = source.Read(buffer, 0, buffer.Length)) > 0) {
-                                input.Write(buffer, 0, count);
-                                input.Flush();
-                            }
-                        }
-                    }
-                    catch (IOException) { }
-                    catch (ObjectDisposedException) { }
-                }) { IsBackground = true }.Start();
                 Task output = child.StandardOutput.BaseStream.CopyToAsync(Console.OpenStandardOutput());
                 Task errors = child.StandardError.BaseStream.CopyToAsync(Console.OpenStandardError());
                 child.WaitForExit();

@@ -13,7 +13,7 @@ Personal plugin installations remain independent; choose one injection source in
 your agent's settings if duplicate skill names/hooks are enabled.
 
 Run `node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` separately to
-install the immutable `~/.ponytail/vaultdex/4.10.0-7/` snapshot. It adds native
+install the immutable `~/.ponytail/vaultdex/4.10.0-8/` snapshot. It adds native
 launchers before the unchanged JavaScript hooks. On Windows, explicit provisioning
 compiles the reviewed `launch.cs` with the Windows-provided .NET Framework compiler
 at `%SystemRoot%/Microsoft.NET/Framework64/v4.0.30319/csc.exe` (or `Framework`).
@@ -55,6 +55,11 @@ uses native final-path handles in the installed executable. Its .NET Framework
 `ProcessStartInfo` disables shell execution and passes the existing standard streams
 and exit status through to the verified Node executable. No checkout JavaScript
 runs during bootstrap.
+Version `4.10.0-8` inherits stdin directly. This avoids the UTF-8 preamble that
+.NET Framework's redirected `StandardInput` writer adds before a byte-stream
+copy, which doubled PowerShell's BOM and prevented Cursor prompt JSON parsing.
+Input bytes, including a caller-supplied BOM, remain unchanged; Node owns its
+existing input deadline. The launcher does not change console encoding or policy.
 
 Claude explicitly selects Bash (Git Bash on Windows). Codex uses its native cmd
 override on Windows; Copilot supplies Bash and PowerShell commands. Cursor's
@@ -65,8 +70,8 @@ off mode. Cursor's prompt hook still calls the cmd/sh launcher via `~`; a missin
 installation there produces the shell's error. Other hosts retain their
 SessionStart setup hint and silent uninstalled prompt/subagent hooks.
 Review the changed hook definitions and trust the new snapshot explicitly; the
-old `4.10.0-6` installation is left untouched. An existing enabled old definition
-remains vulnerable until replaced and reviewed.
+old `4.10.0-6` and `4.10.0-7` installations are left untouched. Enabled old
+definitions retain their previous behavior until replaced and reviewed.
 
 Windows execution policy remains enforced: `Restricted` still blocks PowerShell
 script files. The hook no longer executes a `.ps1`, so both Restricted and

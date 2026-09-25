@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 // snapshot, never the installer or mutable JavaScript in the working tree.
 const root = path.resolve(process.argv[2] ?? fileURLToPath(new URL('../', import.meta.url)));
 const parent = path.join(homedir(), '.ponytail', 'vaultdex');
-const destination = path.join(parent, '4.10.0-7');
+const destination = path.join(parent, '4.10.0-8');
 const windows = process.platform === 'win32';
 // The bootstrap itself must remain personal trusted code, outside every checkout.
 // Resolve the existing prefix before checking ancestors, including junctions.
@@ -53,7 +53,7 @@ const missing = files.filter(file => !existsSync(path.join(root, file)));
 if (missing.length) throw new Error(`Ponytail sources missing in ${root} (${missing[0]}); run the kit's scripts/setup-skills.mjs with this project path first.`);
 
 if (existsSync(destination)) {
-  if (!matches(destination)) throw new Error('Ponytail 4.10.0-7 differs from this checkout or lacks its Windows executable. Review and provision a new personal snapshot; existing installation was not replaced.');
+  if (!matches(destination)) throw new Error('Ponytail 4.10.0-8 differs from this checkout or lacks its Windows executable. Review and provision a new personal snapshot; existing installation was not replaced.');
 } else {
   mkdirSync(parent, { recursive: true });
   const staging = mkdtempSync(path.join(parent, '.install-'));
