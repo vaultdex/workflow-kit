@@ -20,7 +20,7 @@ const skills = providers.map((provider) => `${provider}/skills/impeccable`);
 const linkedSkills = skills.filter((skill) => !skill.startsWith(".github/"));
 const text = (path) => readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 // Resolve installed Git once; neither it nor child commands may come from checkout/PATH-relative entries.
-const checkouts = [root, kit, process.cwd()].map(checkoutRoot);
+const checkouts = [root, kit, process.cwd()].map(path => checkoutRoot(path));
 const outside = path => checkouts.every(base => path !== base && !path.startsWith(base + sep));
 const searchPath = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
   .filter((path) => existsSync(path) && outside(realpathSync(path)));

@@ -18,7 +18,7 @@ const bundle = join(state, 'ponytail');
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const checkouts = [root, kit, process.cwd()].map(checkoutRoot);
+const checkouts = [root, kit, process.cwd()].map(p => checkoutRoot(p));
 const outside = p => checkouts.every(base => p !== base && !p.startsWith(base + sep));
 const searchPath = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
   .filter(p => existsSync(p) && outside(realpathSync(p)));
