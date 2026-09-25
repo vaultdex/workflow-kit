@@ -96,6 +96,8 @@ are never converted to a missing-install hint. The `exit` before the PowerShell
 branch prevents POSIX from interpreting it. No checkout script, PATH utility or
 execution-policy override is used by this dispatch. Review the changed native
 hook definition before granting trust.
+Windows invocation errors return failure even when PowerShell leaves
+`$LASTEXITCODE` unset; a launcher that actually starts retains its own exit code.
 
 The shell separation follows the [Bash/PowerShell comment technique](https://shogo82148.github.io/blog/2021/12/30/polyglot-of-bash-and-powershell/).
 Tests run the actual manifest with missing, active and off installations, hostile
