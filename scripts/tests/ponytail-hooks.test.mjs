@@ -175,6 +175,12 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
     : [{ executable: '/bin/sh', args: ['-c'] }];
   const gitBash = windows && path.resolve(path.dirname(git), '../bin/bash.exe');
   if (gitBash && existsSync(gitBash)) shells.push({ executable: gitBash, args: ['--noprofile', '--norc', '-c'] });
+  const cursorPayload = path.join(temp, 'cursor input.json');
+  writeFileSync(cursorPayload, JSON.stringify({ prompt: '/ponytail full' }));
+  // Cursor pipes its payload through $input, rather than invoking the command
+  // directly. In particular, Write-Output with a positional argument rejects it.
+  const cursorCommand = (shell, command) => shell.executable.endsWith('powershell.exe')
+    ? `Get-Content -LiteralPath $env:PONYTAIL_CURSOR_INPUT -Raw | & { $input | ${command}\n }` : command;
   // Executable markers, including a PATH directory outside the checkout whose
   // real junction/symlink target is inside it. No malicious program is executed.
   const marker = path.join(temp, 'hijacked'), bin = path.join(checkout, 'tools');
@@ -224,7 +230,7 @@ if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'N
     writeFileSync(path.join(externalNode, 'node'), '#!' + systemEnv + ' bash\nprintf executed > "$PONYTAIL_MARKER"\nexec '
       + "'" + process.execPath.replaceAll("'", "'\\''") + "' \"$@\"\n", { mode: 0o755 });
   }
-  const hostileEnv = { ...env, PONYTAIL_MARKER: marker,
+  const hostileEnv = { ...env, PONYTAIL_MARKER: marker, PONYTAIL_CURSOR_INPUT: cursorPayload,
     PATH: [checkout, bin, '.', linked, ...(!windows ? [fileLinked] : []), externalNode, process.env.PATH].join(path.delimiter) };
   if (!windows) {
     // Emulate NixOS's trusted OS path without changing system files. Both
@@ -264,7 +270,9 @@ if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'N
       for (const shell of shells) {
         const powershell = shell.executable.endsWith('powershell.exe');
         if (powershell && !handler.powershell && manifest !== '.cursor/hooks.json') continue;
-        const command = powershell ? handler.powershell ?? handler.command : handler.command ?? handler.bash;
+        const nativeCommand = powershell ? handler.powershell ?? handler.command : handler.command ?? handler.bash;
+        const command = manifest === '.cursor/hooks.json' && nativeCommand.includes(' activate cursor')
+          ? cursorCommand(shell, nativeCommand) : nativeCommand;
         const continuedHost = manifest === '.codex/hooks.json' ? 'codex' : 'claude';
         if (command.includes(' continue')) writeFileSync(state(continuedHost), 'lite');
         const result = spawnSync(shell.executable, [...shell.args, command], {
@@ -273,7 +281,7 @@ if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'N
         });
         assert.equal(result.status, 0, `${manifest}: ${failure(result, command)}`);
         assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed`);
-        assert.ok(result.stdout.trim(), `${manifest}: no hook output`);
+        assert.ok(result.stdout.trim(), `${manifest} (${shell.executable}): no hook output from ${nativeCommand}; ${result.stderr}`);
         if (manifest !== '.claude/settings.json') assert.doesNotThrow(() => JSON.parse(result.stdout),
           `${manifest}: native launcher must preserve the host JSON protocol`);
         if (command.includes(' continue')) {
@@ -383,30 +391,37 @@ process.stdin.on('data', chunk => { input += chunk; if (input.endsWith('\\n')) {
   assert.match(missing.stdout, /node scripts\/install-ponytail-hooks.mjs/);
   assert.equal(existsSync(path.join(temp, 'missing/.ponytail')), false, 'Hook must not install itself');
 
-  // Execute the real Cursor commands, not a simulated Cursor app. Cursor's
-  // documented response merge gives the later launcher's context precedence.
+  // Execute the manifest through Cursor's documented shell invocation, without
+  // claiming that a native Cursor app loaded or trusted the manifest.
   const cursorStart = JSON.parse(readFileSync(path.join(root, '.cursor/hooks.json'), 'utf8')).hooks.sessionStart;
-  assert.equal(cursorStart.length, 2, 'Recovery context must precede the personal launcher');
-  for (const shell of shells) for (const installed of [false, true]) {
+  assert.equal(cursorStart.length, 1, 'One command must choose activation or recovery');
+  for (const shell of shells) for (const mode of ['missing', 'active', 'off', 'no-node']) {
+    const installed = mode !== 'missing';
     const home = installed ? env.HOME : path.join(temp, 'missing cursor home');
-    const cursorEnv = { ...hostileEnv, HOME: home, USERPROFILE: home };
-    const hint = spawnSync(shell.executable, [...shell.args, cursorStart[0].command], {
-      cwd: path.join(checkout, 'frontend'), env: { ...cursorEnv, PATH: bin },
-      input: '{}', encoding: 'utf8', timeout: hookTimeout,
-    });
-    assert.equal(hint.status, 0, failure(hint, cursorStart[0].command));
-    assert.match(JSON.parse(hint.stdout).additional_context, /node \.vendor\/workflow-kit\/scripts\/install-ponytail-hooks\.mjs \./);
-    const launched = spawnSync(shell.executable, [...shell.args, cursorStart[1].command], {
+    const cursorEnv = { ...hostileEnv, HOME: home, USERPROFILE: home,
+      PATH: mode === 'missing' || mode === 'no-node' ? bin : hostileEnv.PATH,
+      PONYTAIL_DEFAULT_MODE: mode === 'off' ? 'off' : 'full' };
+    const command = cursorCommand(shell, cursorStart[0].command);
+    const launched = spawnSync(shell.executable, [...shell.args, command], {
       cwd: path.join(checkout, 'frontend'), env: cursorEnv,
       input: '{}', encoding: 'utf8', timeout: hookTimeout,
     });
-    assert.notEqual(launched.error?.code, 'ETIMEDOUT', failure(launched, cursorStart[1].command));
-    if (installed) {
-      assert.equal(launched.status, 0, failure(launched, cursorStart[1].command));
-      assert.match(JSON.parse(launched.stdout).additional_context, /PONYTAIL MODE ACTIVE/);
+    assert.notEqual(launched.error?.code, 'ETIMEDOUT', failure(launched, command));
+    if (mode === 'no-node') {
+      assert.notEqual(launched.status, 0, 'Installed launcher failures must remain failures');
+      assert.match(launched.stderr, /install Node outside the checkout/);
+      assert.equal(launched.stdout, '', 'Launcher failures must not become missing-install hints');
     } else {
-      assert.notEqual(launched.status, 0, 'Missing launcher must remain a failure');
-      assert.equal(launched.stdout, '', 'Recovery JSON comes from the preceding builtin');
+      assert.equal(launched.status, 0, failure(launched, command));
+      assert.equal(launched.stderr, '', 'Cursor command must not emit shell errors');
+    }
+    if (mode === 'active') {
+      assert.match(JSON.parse(launched.stdout).additional_context, /PONYTAIL MODE ACTIVE/);
+      assert.doesNotMatch(launched.stdout, /Ponytail hooks fehlen/);
+    } else if (mode === 'off') {
+      assert.equal(launched.stdout, '', 'Installed off mode must remain silent');
+    } else if (mode === 'missing') {
+      assert.match(JSON.parse(launched.stdout).additional_context, /node \.vendor\/workflow-kit\/scripts\/install-ponytail-hooks\.mjs \./);
       assert.equal(existsSync(path.join(home, '.ponytail')), false, 'Recovery must not install hooks');
     }
     assert.equal(existsSync(marker), false, 'Recovery must not execute PATH-owned echo, Node or Git');

@@ -58,10 +58,12 @@ runs during bootstrap.
 
 Claude explicitly selects Bash (Git Bash on Windows). Codex uses its native cmd
 override on Windows; Copilot supplies Bash and PowerShell commands. Cursor's
-single command uses an installed cmd/sh launcher via `~`, preserving spaces in
-the home path. Install before enabling Cursor hooks: an absent launcher produces
-the shell's missing-command error and never installs itself. Other hosts retain
-their SessionStart setup hint and silent uninstalled prompt/subagent hooks.
+SessionStart command checks the personal exe/sh launcher and emits a structured
+installation hint if it is absent, preserving spaces in the home path. The
+installed launcher's output and failures pass through unchanged, including silent
+off mode. Cursor's prompt hook still calls the cmd/sh launcher via `~`; a missing
+installation there produces the shell's error. Other hosts retain their
+SessionStart setup hint and silent uninstalled prompt/subagent hooks.
 Review the changed hook definitions and trust the new snapshot explicitly; the
 old `4.10.0-6` installation is left untouched. An existing enabled old definition
 remains vulnerable until replaced and reviewed.
@@ -74,6 +76,29 @@ automatic policy change. Missing .NET Framework provisioning tools or an applica
 control policy that disallows the compiler/executable is an explicit operator
 prerequisite, not a reason to weaken that policy or fall back to checkout code.
 The operator must separately review the snapshot and grant native hook trust.
+
+### Cursor SessionStart command
+
+Cursor provides one command string for Windows and POSIX. The inline command uses
+the shells' comment syntax to select the same small existence check as Copilot's
+separate PowerShell/Bash handlers. The first `echo` is only a parser separator:
+POSIX executes an empty comment substitution and discards its output; PowerShell
+ignores the POSIX block and discards the separator's output/errors. This also
+absorbs Cursor's `$input | command` pipeline without printing its payload.
+SessionStart activation intentionally does not read stdin; the prompt hook, which
+does read it, is unchanged. Only the separator suppresses errors; launcher failures
+are never converted to a missing-install hint. The `exit` before the PowerShell
+branch prevents POSIX from interpreting it. No checkout script, PATH utility or
+execution-policy override is used by this dispatch. Review the changed native
+hook definition before granting trust.
+
+The shell separation follows the [Bash/PowerShell comment technique](https://shogo82148.github.io/blog/2021/12/30/polyglot-of-bash-and-powershell/).
+Tests run the actual manifest with missing, active and off installations, hostile
+PATH entries and a failing installed launcher, using home directories with spaces.
+Windows tests include Cursor's input pipeline described in the pinned
+[adapter verification record](../.vendor/ponytail/docs/cursor-hooks.md).
+They prove command behavior, not live Cursor loading or user trust.
+
 The installer rejects snapshot destinations inside
 any Git checkout, resolving existing directory links/junctions before writing.
 This includes `$HOME` being a Git checkout or `.ponytail` linking into one: the
