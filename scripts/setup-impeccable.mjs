@@ -6,6 +6,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
   unlinkSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkoutRoot } from "./checkout-root.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,7 +20,7 @@ const skills = providers.map((provider) => `${provider}/skills/impeccable`);
 const linkedSkills = skills.filter((skill) => !skill.startsWith(".github/"));
 const text = (path) => readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 // Resolve installed Git once; neither it nor child commands may come from checkout/PATH-relative entries.
-const checkouts = [root, kit, process.cwd()].map(path => realpathSync(path));
+const checkouts = [root, kit, process.cwd()].map(checkoutRoot);
 const outside = path => checkouts.every(base => path !== base && !path.startsWith(base + sep));
 const searchPath = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
   .filter((path) => existsSync(path) && outside(realpathSync(path)));
@@ -115,7 +116,7 @@ try {
     copyTracked(directory, join(next, directory));
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
-  const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/impeccable/launchers.patch",
+  const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/impeccable/launchers.patch",
     "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
   const inputs = createHash("sha256").update(inputFiles.map((file) => text(join(kit, file))).join("\0")).digest("hex");
   const recorded = existsSync(join(root, receipt)) ? JSON.parse(text(join(root, receipt))) : null;

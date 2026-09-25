@@ -4,9 +4,10 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { delimiter, isAbsolute, join, sep } from "node:path";
 import test from "node:test";
+import { checkoutRoot } from "../checkout-root.mjs";
 
 test("Copilot discovery assets were generated for the pinned submodule and setup", () => {
-  const root = realpathSync(process.cwd());
+  const root = checkoutRoot(process.cwd());
   const outside = p => p !== root && !p.startsWith(root + sep);
   const binary = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
     .filter(p => existsSync(p) && outside(realpathSync(p)))
@@ -15,7 +16,7 @@ test("Copilot discovery assets were generated for the pinned submodule and setup
   assert.ok(binary, "Install Git outside the checkout on an absolute PATH");
   const git = realpathSync(binary);
   const revision = execFileSync(git, ["rev-parse", "HEAD:.vendor/impeccable"], { encoding: "utf8" }).trim();
-  const files = ["scripts/setup-impeccable.mjs", "scripts/impeccable/launchers.patch",
+  const files = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/impeccable/launchers.patch",
     "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
   const inputs = createHash("sha256").update(files.map((file) => readFileSync(file, "utf8")
     .replaceAll("\r\n", "\n")).join("\0")).digest("hex");

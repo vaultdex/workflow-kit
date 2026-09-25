@@ -8,6 +8,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
   realpathSync, readdirSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkoutRoot } from './checkout-root.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
@@ -17,7 +18,7 @@ const bundle = join(state, 'ponytail');
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const checkouts = [root, kit, process.cwd()].map(p => realpathSync(p));
+const checkouts = [root, kit, process.cwd()].map(checkoutRoot);
 const outside = p => checkouts.every(base => p !== base && !p.startsWith(base + sep));
 const searchPath = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
   .filter(p => existsSync(p) && outside(realpathSync(p)));

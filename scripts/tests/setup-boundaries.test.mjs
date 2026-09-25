@@ -40,13 +40,15 @@ for (const [script, state] of [
       assert.equal(existsSync(join(root, '.github')), false, 'No publication on failed owner validation');
     });
   }
-  for (const linked of [false, true]) {
-    test(`${script} rejects Git ${linked ? 'file links into the target' : 'inside the invoking checkout'}`, t => {
+  for (const [linked, nested] of [[false, false], [false, true], [true, false]]) {
+    test(`${script} rejects Git ${linked ? 'file links into the target' : 'inside the invoking checkout'}${nested ? ' when invoked from a subdirectory' : ''}`, t => {
       const fixture = mkdtempSync(join(tmpdir(), 'workflow-git-boundary-'));
       t.after(() => { assert.equal(dirname(fixture), tmpdir()); rmSync(fixture, { recursive: true, force: true }); });
       const root = join(fixture, 'target'), caller = join(fixture, 'caller');
       const bin = join(fixture, linked ? 'external-bin' : 'caller/tools');
       mkdirSync(root); mkdirSync(caller); mkdirSync(bin, { recursive: true });
+      const cwd = nested ? join(caller, 'nested') : caller;
+      if (nested) { mkdirSync(join(caller, '.git')); mkdirSync(cwd); }
       const name = process.platform === 'win32' ? 'git.exe' : 'git';
       const executable = join(linked ? root : bin, name);
       copyFileSync(process.execPath, executable); chmodSync(executable, 0o755);
@@ -59,7 +61,7 @@ for (const [script, state] of [
       }
       const result = spawnSync(process.execPath,
         [fileURLToPath(new URL('../' + script, import.meta.url)), root],
-        { cwd: caller, encoding: 'utf8', env: { ...process.env, PATH: bin } });
+        { cwd, encoding: 'utf8', env: { ...process.env, PATH: bin } });
       assert.notEqual(result.status, 0);
       assert.match(result.stderr, /Install Git.*outside/);
       assert.equal(existsSync(join(root, state)), false, 'Reject the interpreter before setup writes');

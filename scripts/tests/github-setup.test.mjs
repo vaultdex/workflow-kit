@@ -6,27 +6,30 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-test('GitHub setup refuses checkout-controlled CLI before authentication', t => {
+for (const nested of [false, true]) test(`GitHub setup and checks refuse checkout-controlled CLI${nested ? ' from a subdirectory' : ''}`, t => {
   const root = mkdtempSync(join(tmpdir(), 'workflow-github-'));
   t.after(() => { assert.equal(dirname(root), tmpdir()); rmSync(root, { recursive: true, force: true }); });
+  mkdirSync(join(root, '.git'));
+  const cwd = nested ? join(root, 'nested') : root;
+  if (nested) mkdirSync(cwd);
   const localTools = join(root, 'tools');
   mkdirSync(localTools);
   const executable = join(localTools, process.platform === 'win32' ? 'gh.exe' : 'gh');
   copyFileSync(process.execPath, executable);
   chmodSync(executable, 0o755);
-  writeFileSync(join(root, 'repo'), "require('node:fs').writeFileSync('executed', 'unsafe CLI lookup');\n");
+  writeFileSync(join(cwd, 'repo'), "require('node:fs').writeFileSync('executed', 'unsafe CLI lookup');\n");
   const result = spawnSync(process.execPath, [fileURLToPath(new URL('../setup-github.mjs', import.meta.url)), 'test/example'], {
-    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: ['.', localTools].join(delimiter) },
+    cwd, encoding: 'utf8', env: { ...process.env, PATH: ['.', localTools].join(delimiter) },
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Install GitHub CLI in an absolute PATH directory outside/);
-  assert.equal(existsSync(join(root, 'executed')), false);
-  assert.equal(existsSync(join(root, '.github/workflow-project.json')), false);
+  assert.equal(existsSync(join(cwd, 'executed')), false);
+  assert.equal(existsSync(join(cwd, '.github/workflow-project.json')), false);
   const localGit = join(localTools, process.platform === 'win32' ? 'git.exe' : 'git');
   copyFileSync(process.execPath, localGit); chmodSync(localGit, 0o755);
   for (const script of ['check-skills.mjs', 'check-impeccable.mjs', 'tests/impeccable-installation.test.mjs']) {
-    const check = spawnSync(process.execPath, [fileURLToPath(new URL('../' + script, import.meta.url)), root], {
-      cwd: root, encoding: 'utf8', env: {...process.env, PATH: ['.', localTools].join(delimiter)},
+    const check = spawnSync(process.execPath, [fileURLToPath(new URL('../' + script, import.meta.url)), cwd], {
+      cwd, encoding: 'utf8', env: {...process.env, PATH: ['.', localTools].join(delimiter)},
     });
     assert.notEqual(check.status, 0, script);
     assert.match(check.stdout + check.stderr, /Install Git outside the checkout/, script);

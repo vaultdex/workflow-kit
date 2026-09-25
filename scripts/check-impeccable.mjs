@@ -5,6 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { checkoutRoot } from "./checkout-root.mjs";
 
 // Real first-use proof: no npm install, vendored binary, or existing engine cache.
 const temporary = mkdtempSync(join(tmpdir(), "vaultdex-impeccable-"));
@@ -20,7 +21,8 @@ const shell = windows ? join(process.env.SystemRoot, "System32/cmd.exe") : "/bin
 const powershell = windows ? join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe") : null;
 // Resolve developer-installed Git once; never search the checkout/current directory.
 const sourceRoot = realpathSync(resolve("."));
-const outside = p => p !== sourceRoot && !p.startsWith(sourceRoot + sep);
+const sourceCheckout = checkoutRoot(sourceRoot);
+const outside = p => p !== sourceCheckout && !p.startsWith(sourceCheckout + sep);
 const binary = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
   .filter(p => existsSync(p) && outside(realpathSync(p)))
   .map(directory => join(directory, windows ? "git.exe" : "git"))
