@@ -41,6 +41,7 @@
     },
     ".cursor/hooks.json": {
       "sessionStart": [
+        "b095de57be36fa7703c9c3348289d21cfc0f23bbd1febdab5cbf991fbccdd49c",
         "62077271a5308ee8d0403b9f3d8117911e8cf928d2f978bba3f4af4445d9a424"
       ],
       "beforeSubmitPrompt": [

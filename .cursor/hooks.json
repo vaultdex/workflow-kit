@@ -3,6 +3,10 @@
   "hooks": {
     "sessionStart": [
       {
+        "command": "echo '{\"additional_context\":\"Falls der Ponytail-Launcher fehlt: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.\"}'",
+        "timeout": 5
+      },
+      {
         "command": "~/.ponytail/vaultdex/4.10.0-7/launch.cmd activate cursor",
         "timeout": 5
       }

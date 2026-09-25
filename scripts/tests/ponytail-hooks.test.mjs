@@ -186,10 +186,11 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     { env: { ...env, PONYTAIL_SHIM: shim }, encoding: 'utf8' });
     assert.equal(compiled.status, 0, compiled.stderr);
     cpSync(shim, path.join(bin, 'git.exe'));
+    cpSync(shim, path.join(bin, 'echo.exe'));
     for (const directory of [checkout, path.join(checkout, 'frontend')])
       for (const tool of ['node.exe', 'git.exe']) cpSync(path.join(bin, tool), path.join(directory, tool));
   } else {
-    for (const directory of [checkout, bin]) for (const tool of ['node', 'git', 'bash', 'readlink'])
+    for (const directory of [checkout, bin]) for (const tool of ['node', 'git', 'bash', 'readlink', 'echo'])
       writeFileSync(path.join(directory, tool), '#!/bin/sh\nprintf executed > "$PONYTAIL_MARKER"\n', { mode: 0o755 });
   }
   const linked = path.join(temp, 'external-link');
@@ -381,6 +382,35 @@ process.stdin.on('data', chunk => { input += chunk; if (input.endsWith('\\n')) {
   assert.equal(missing.status, 0, failure(missing, codexStart.command));
   assert.match(missing.stdout, /node scripts\/install-ponytail-hooks.mjs/);
   assert.equal(existsSync(path.join(temp, 'missing/.ponytail')), false, 'Hook must not install itself');
+
+  // Execute the real Cursor commands, not a simulated Cursor app. Cursor's
+  // documented response merge gives the later launcher's context precedence.
+  const cursorStart = JSON.parse(readFileSync(path.join(root, '.cursor/hooks.json'), 'utf8')).hooks.sessionStart;
+  assert.equal(cursorStart.length, 2, 'Recovery context must precede the personal launcher');
+  for (const shell of shells) for (const installed of [false, true]) {
+    const home = installed ? env.HOME : path.join(temp, 'missing cursor home');
+    const cursorEnv = { ...hostileEnv, HOME: home, USERPROFILE: home };
+    const hint = spawnSync(shell.executable, [...shell.args, cursorStart[0].command], {
+      cwd: path.join(checkout, 'frontend'), env: { ...cursorEnv, PATH: bin },
+      input: '{}', encoding: 'utf8', timeout: hookTimeout,
+    });
+    assert.equal(hint.status, 0, failure(hint, cursorStart[0].command));
+    assert.match(JSON.parse(hint.stdout).additional_context, /node \.vendor\/workflow-kit\/scripts\/install-ponytail-hooks\.mjs \./);
+    const launched = spawnSync(shell.executable, [...shell.args, cursorStart[1].command], {
+      cwd: path.join(checkout, 'frontend'), env: cursorEnv,
+      input: '{}', encoding: 'utf8', timeout: hookTimeout,
+    });
+    assert.notEqual(launched.error?.code, 'ETIMEDOUT', failure(launched, cursorStart[1].command));
+    if (installed) {
+      assert.equal(launched.status, 0, failure(launched, cursorStart[1].command));
+      assert.match(JSON.parse(launched.stdout).additional_context, /PONYTAIL MODE ACTIVE/);
+    } else {
+      assert.notEqual(launched.status, 0, 'Missing launcher must remain a failure');
+      assert.equal(launched.stdout, '', 'Recovery JSON comes from the preceding builtin');
+      assert.equal(existsSync(path.join(home, '.ponytail')), false, 'Recovery must not install hooks');
+    }
+    assert.equal(existsSync(marker), false, 'Recovery must not execute PATH-owned echo, Node or Git');
+  }
 
   // SessionStart owns missing-install guidance; subsequent hooks stay silent.
   for (const manifest of manifests) {
