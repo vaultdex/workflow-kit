@@ -15,6 +15,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
+        env:
+          # Configure only checkout's Git processes; the requested ref still selects HEAD.
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: init.defaultBranch
+          GIT_CONFIG_VALUE_0: main
         with:
           submodules: recursive
           persist-credentials: false
