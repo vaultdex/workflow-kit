@@ -161,7 +161,10 @@ try {
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   if (existsSync(bundle)) renameSync(bundle, previous);
   try { renameSync(next, bundle); }
-  catch (error) { if (existsSync(previous)) renameSync(previous, bundle); throw error; }
+  catch (error) {
+    if (existsSync(previous)) renameSync(previous, bundle);
+    throw error;
+  }
   for (const [dest, from] of links) {
     const target = join(root, dest);
     if (!present(target)) symlinkSync(process.platform === 'win32' ? join(bundle, from) : relative(dirname(target), join(bundle, from)),
