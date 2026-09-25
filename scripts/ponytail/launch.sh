@@ -3,7 +3,7 @@
 set -eu
 # Git Bash shares Windows' case-insensitive filesystem and junction semantics.
 case "${OSTYPE:-}" in
-  msys*|cygwin*) exec "${SYSTEMROOT:-${SystemRoot:-C:/Windows}}/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -File "${0%/*}/launch.ps1" "$@";;
+  msys*|cygwin*) exec "${0%/*}/launch.exe" "$@";;
   *) canonical=/usr/bin/readlink;;
 esac
 action=$1 host=$2

@@ -11,6 +11,7 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   const fixture = mkdtempSync(join(tmpdir(), 'workflow-kit setup '));
   t.after(() => { assert.equal(dirname(fixture), tmpdir()); rmSync(fixture, { recursive: true, force: true }); });
   execFileSync('git', ['init', '--quiet', fixture]);
+  copyFileSync(join(kit, '.gitattributes'), join(fixture, '.gitattributes'));
   const setup = name => spawnSync(process.execPath, [join(kit, 'scripts', name), fixture], { encoding: 'utf8' });
   const run = name => { const result = setup(name); assert.equal(result.status, 0, result.stderr); };
   const collision = join(fixture, '.github/agents/impeccable-documenter.agent.md');

@@ -63,6 +63,14 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
   const installation = install();
   assert.equal(installation.status, 0, installation.stderr);
   assert.equal(install().status, 0, 'Identical installation must be reusable');
+  if (windows) {
+    const executable = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7/launch.exe');
+    const original = readFileSync(executable);
+    appendFileSync(executable, 'changed executable');
+    assert.notEqual(install().status, 0, 'Changed compiled launcher must not be reused or overwritten');
+    assert.equal(readFileSync(executable).length, original.length + 'changed executable'.length);
+    writeFileSync(executable, original);
+  }
   // Refuse snapshots inside Git roots, including a personal-directory junction.
   const linkedHome = path.join(temp, 'linked-home');
   mkdirSync(linkedHome);
@@ -201,12 +209,10 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     const scriptTarget = path.join(temp, 'script.cmd');
     writeFileSync(scriptTarget, 'MZ\r\n');
     const checked = spawnSync(shells[0].executable, [...shells[0].args, `
-$source = Get-Content -Raw -LiteralPath $env:PONYTAIL_BOOTSTRAP
-$native = [regex]::Match($source, "(?s)Add-Type -TypeDefinition @'\\r?\\n(.*?)\\r?\\n'@").Groups[1].Value
-Add-Type -TypeDefinition $native
-if ([PonytailNativePath]::IsNativeNode($env:PONYTAIL_SCRIPT_TARGET)) { throw 'Script target accepted' }
-if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'Native Node rejected' }
-`], { env: { ...env, PONYTAIL_BOOTSTRAP: path.join(checkout, 'scripts/ponytail/launch.ps1'),
+[void][Reflection.Assembly]::LoadFile($env:PONYTAIL_BOOTSTRAP)
+if ([PonytailLauncher]::IsNativeNode($env:PONYTAIL_SCRIPT_TARGET)) { throw 'Script target accepted' }
+if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'Native Node rejected' }
+`], { env: { ...env, PONYTAIL_BOOTSTRAP: path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7/launch.exe'),
       PONYTAIL_SCRIPT_TARGET: scriptTarget, PONYTAIL_NATIVE_NODE: process.execPath }, encoding: 'utf8' });
     assert.equal(checked.status, 0, checked.stderr);
   }
@@ -222,7 +228,7 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
   if (!windows) {
     // Emulate NixOS's trusted OS path without changing system files. Both
     // profile directories and individual commands are symlinks into its store.
-    const launcher = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-6/launch.sh');
+    const launcher = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-7/launch.sh');
     const source = readFileSync(launcher, 'utf8');
     const systemReadlink = ['/usr/bin/readlink', '/bin/readlink', '/run/current-system/sw/bin/readlink'].find(existsSync);
     assert.ok(systemReadlink, 'System readlink is required for the NixOS fixture');
@@ -301,12 +307,58 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
   assert.match(noExternalNode.stderr, /install Node outside the checkout/);
   assert.equal(existsSync(marker), false);
   if (windows) {
+    const launcher = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7/launch.exe');
+    for (const policy of ['Restricted', 'RemoteSigned']) {
+      const launched = spawnSync(shells[0].executable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', policy,
+        '-Command', '& $env:PONYTAIL_TEST_LAUNCHER activate codex; exit $LASTEXITCODE'],
+      { cwd: checkout, env: { ...hostileEnv, PONYTAIL_TEST_LAUNCHER: launcher },
+        input: '{}', encoding: 'utf8', timeout: hookTimeout });
+      assert.equal(launched.status, 0, failure(launched, `launcher under ${policy}`));
+      assert.match(JSON.parse(launched.stdout).hookSpecificOutput.additionalContext, /PONYTAIL MODE ACTIVE/);
+      assert.equal(existsSync(marker), false);
+    }
+    // The native launcher must not make ordinary script files executable under Restricted.
+    const script = path.join(temp, 'policy-control.ps1');
+    writeFileSync(script, "Write-Output 'Policy control executed'\n");
     const restricted = spawnSync(shells[0].executable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted',
-      '-File', path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-6/launch.ps1'), 'activate', 'codex'],
+      '-File', script],
     { cwd: checkout, env: hostileEnv, encoding: 'utf8', timeout: hookTimeout });
-    assert.notEqual(restricted.error?.code, 'ETIMEDOUT', failure(restricted, 'restricted launch.ps1 activate codex'));
+    assert.notEqual(restricted.error?.code, 'ETIMEDOUT', failure(restricted, 'restricted policy control'));
     assert.notEqual(restricted.status, 0, 'Native script policy must not be bypassed');
     assert.equal(existsSync(marker), false);
+    const allowed = spawnSync(shells[0].executable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
+      '-File', script], { cwd: checkout, env: hostileEnv, encoding: 'utf8', timeout: hookTimeout });
+    assert.equal(allowed.status, 0, failure(allowed, 'allowed policy control'));
+    assert.match(allowed.stdout, /Policy control executed/);
+
+    // Exercise native stream forwarding, including a caller that never closes stdin.
+    const installedHook = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7/.agents/hooks/ponytail-mode-tracker.js');
+    const original = readFileSync(installedHook);
+    writeFileSync(installedHook, `let input = ''; process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { input += chunk; if (input.endsWith('\\n')) {
+  process.stderr.write('forwarded stderr\\n');
+  process.stdout.write(input + 'x'.repeat(256 * 1024), () => process.exit(7));
+} });\n`);
+    try {
+      const forwarded = spawn(launcher, ['mode-tracker', 'codex'], {
+        cwd: checkout, env: hostileEnv, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+      });
+      t.after(() => forwarded.kill());
+      const input = 'native stream proof: ä 😀\n';
+      forwarded.stdin.write(input);
+      let output = '', errors = '';
+      forwarded.stdout.on('data', chunk => { output += chunk; });
+      forwarded.stderr.on('data', chunk => { errors += chunk; });
+      const code = await new Promise((resolve, reject) => {
+        const guard = setTimeout(() => { forwarded.kill(); reject(new Error('Native launcher blocked on streams')); }, nonblockingTimeout);
+        forwarded.once('error', error => { clearTimeout(guard); reject(error); });
+        forwarded.once('close', code => { clearTimeout(guard); resolve(code); });
+      });
+      assert.equal(code, 7, 'Native launcher must preserve the hook exit status');
+      assert.equal(output, input + 'x'.repeat(256 * 1024));
+      assert.equal(errors, 'forwarded stderr\n');
+      assert.equal(existsSync(marker), false);
+    } finally { writeFileSync(installedHook, original); }
   }
   // A nested/fake .git marker must not shrink the executable trust boundary.
   writeFileSync(path.join(checkout, 'frontend/.git'), 'not a Git repository');
