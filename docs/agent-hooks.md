@@ -58,6 +58,14 @@ edit/Stop hooks do not certify successful analysis. Existing engine failures rem
   CLI version has been verified here.
 - **Cursor:** inspect Settings → Hooks and enable supported local hooks. The
   bundled Ponytail rule, if separately installed, overrides its mode-switching hooks.
+  SessionStart invokes the personal launcher when present and otherwise emits
+  installation guidance as valid Cursor JSON using shell builtins. It neither
+  installs anything nor resolves a helper from PATH; installed off mode stays
+  silent, and launcher failures retain their exit status. See the
+  [Cursor command contract](ponytail.md#cursor-sessionstart-command).
+  Regression tests execute the manifest on Windows and POSIX, including Cursor's
+  Windows input-pipeline wrapper documented by the pinned Ponytail adapter. They do
+  not claim that the current Cursor app loaded or trusted these hooks.
 - **Other hosts:** state that these manifests do not supply native hooks there;
   use the skills and their documented manual checks.
 

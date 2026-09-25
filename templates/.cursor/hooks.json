@@ -3,7 +3,7 @@
   "hooks": {
     "sessionStart": [
       {
-        "command": "~/.ponytail/vaultdex/4.10.0-7/launch.cmd activate cursor",
+        "command": "echo `# <#` > /dev/null\nlauncher=\"$HOME/.ponytail/vaultdex/4.10.0-7/launch.sh\"; if [ -f \"$launcher\" ]; then exec /bin/sh \"$launcher\" activate cursor; fi\nprintf '%s\\n' '{\"additional_context\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.\"}'\nexit #> > $null 2>&1\n$launcher=Join-Path $env:USERPROFILE '.ponytail/vaultdex/4.10.0-7/launch.exe'; if (Test-Path -LiteralPath $launcher -PathType Leaf) { & $launcher activate cursor; exit $LASTEXITCODE }; Write-Output '{\"additional_context\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.\"}'",
         "timeout": 5
       }
     ],
