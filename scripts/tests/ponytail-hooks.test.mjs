@@ -426,6 +426,27 @@ process.stdin.on('data', chunk => { input += chunk; if (input.endsWith('\\n')) {
     }
     assert.equal(existsSync(marker), false, 'Recovery must not execute PATH-owned echo, Node or Git');
   }
+  if (windows) {
+    const snapshot = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7');
+    for (const [file, replacement, expected] of [
+      ['launch.exe', 'not an executable', 1],
+      ['.agents/hooks/ponytail-activate.js', 'process.exit(7);', 7],
+    ]) {
+      const target = path.join(snapshot, file), original = readFileSync(target);
+      let result;
+      try {
+        writeFileSync(target, replacement);
+        result = spawnSync(shells[0].executable, [...shells[0].args, cursorCommand(shells[0], cursorStart[0].command)], {
+          cwd: path.join(checkout, 'frontend'), env: hostileEnv,
+          input: '{}', encoding: 'utf8', timeout: hookTimeout,
+        });
+      } finally { writeFileSync(target, original); }
+      assert.equal(result.status, expected, `${file}: start failures must fail; native hook exits must be preserved`);
+      assert.equal(result.stdout, '', 'Installed failures must not emit recovery JSON');
+      if (file === 'launch.exe') assert.ok(result.stderr.trim(), 'Start failure must remain visible');
+      assert.equal(existsSync(marker), false);
+    }
+  }
 
   // SessionStart owns missing-install guidance; subsequent hooks stay silent.
   for (const manifest of manifests) {
