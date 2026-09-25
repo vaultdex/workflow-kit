@@ -2,6 +2,8 @@
 // Nutzen: Automatische Hooks muessen keine veraenderlichen Checkout-Skripte ausfuehren.
 // Aufruf: Explizit aus dem Kit mit dem Projektpfad; persoenliche Hook-Freigabe bleibt getrennt.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 // snapshot, never the installer or mutable JavaScript in the working tree.
 const root = path.resolve(process.argv[2] ?? fileURLToPath(new URL('../', import.meta.url)));
 const parent = path.join(homedir(), '.ponytail', 'vaultdex');
-const destination = path.join(parent, '4.10.0-6');
+const destination = path.join(parent, '4.10.0-7');
+const windows = process.platform === 'win32';
 // The bootstrap itself must remain personal trusted code, outside every checkout.
 // Resolve the existing prefix before checking ancestors, including junctions.
 let existing = destination;
@@ -35,18 +38,22 @@ const files = [
 ];
 const source = fileURLToPath(new URL('./ponytail/', import.meta.url));
 const inputs = Object.fromEntries(files.map(file => [file, path.join(root, file)]));
-for (const name of ['launch.sh', 'launch.ps1', 'launch.cmd']) inputs[name] = path.join(source, name);
+for (const name of ['launch.sh', 'launch.cs', 'launch.cmd']) inputs[name] = path.join(source, name);
+
+const binaryHash = directory => createHash('sha256').update(readFileSync(path.join(directory, 'launch.exe'))).digest('hex');
 
 function matches(directory) {
   return Object.entries(inputs).every(([file, input]) => existsSync(path.join(directory, file)) &&
-    readFileSync(path.join(directory, file)).equals(readFileSync(input)));
+    readFileSync(path.join(directory, file)).equals(readFileSync(input))) &&
+    (!windows || (existsSync(path.join(directory, 'launch.exe')) && existsSync(path.join(directory, 'launch.sha256')) &&
+      readFileSync(path.join(directory, 'launch.sha256'), 'utf8') === binaryHash(directory) + '\n'));
 }
 
 const missing = files.filter(file => !existsSync(path.join(root, file)));
 if (missing.length) throw new Error(`Ponytail sources missing in ${root} (${missing[0]}); run the kit's scripts/setup-skills.mjs with this project path first.`);
 
 if (existsSync(destination)) {
-  if (!matches(destination)) throw new Error('Ponytail 4.10.0-6 differs from this checkout. Review the change and publish a new runtime version; existing installation was not replaced.');
+  if (!matches(destination)) throw new Error('Ponytail 4.10.0-7 differs from this checkout or lacks its Windows executable. Review and provision a new personal snapshot; existing installation was not replaced.');
 } else {
   mkdirSync(parent, { recursive: true });
   const staging = mkdtempSync(path.join(parent, '.install-'));
@@ -55,6 +62,15 @@ if (existsSync(destination)) {
       const target = path.join(staging, file);
       mkdirSync(path.dirname(target), { recursive: true });
       writeFileSync(target, readFileSync(input), { mode: file === 'launch.cmd' ? 0o755 : 0o644 });
+    }
+    if (windows) {
+      // Use only the Windows-provided compiler during explicit installation, never inherited PATH or a hook.
+      const compiler = ['Framework64', 'Framework'].map(architecture =>
+        path.join(process.env.SystemRoot, 'Microsoft.NET', architecture, 'v4.0.30319', 'csc.exe')).find(existsSync);
+      if (!compiler) throw new Error('Ponytail: Windows .NET Framework compiler required for reviewed provisioning; no policy or installation was changed.');
+      execFileSync(compiler, ['/nologo', '/target:exe', '/optimize+', '/out:' + path.join(staging, 'launch.exe'),
+        path.join(staging, 'launch.cs')], { windowsHide: true, stdio: 'pipe' });
+      writeFileSync(path.join(staging, 'launch.sha256'), binaryHash(staging) + '\n');
     }
     try {
       renameSync(staging, destination);
