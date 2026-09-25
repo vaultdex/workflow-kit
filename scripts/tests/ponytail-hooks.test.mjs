@@ -13,6 +13,13 @@ const git = (process.env.PATH || '').split(path.delimiter)
   .filter(path.isAbsolute)
   .map(directory => path.join(directory, windows ? 'git.exe' : 'git'))
   .find(existsSync);
+// Deadlines only catch hung hooks; they must not measure speed on slow shared runners.
+const configuredTimeout = Number(process.env.WORKFLOW_KIT_HOOK_TIMEOUT_MS);
+const hookTimeout = Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 30_000;
+// Nonblocking checks keep a behavioral bound: 10x the hooks' own 1 s stdin deadline.
+const nonblockingTimeout = 10_000;
+const failure = (result, label) => result.error?.code === 'ETIMEDOUT'
+  ? `${label} timed out after ${hookTimeout} ms` : result.stderr || result.error?.message;
 
 test('shared hooks run from a fresh checkout with spaces and isolated personal state', async t => {
   assert.ok(git, 'Git must be available on an absolute PATH');
@@ -46,9 +53,9 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
   const run = (script, host, prompt = '', extra = {}, args = []) => {
     const result = spawnSync(process.execPath, [path.join(checkout, '.agents/hooks', script), host, ...args], {
       cwd: path.join(checkout, 'frontend'), env: { ...env, ...extra },
-      input: JSON.stringify({ prompt }), encoding: 'utf8', timeout: 4000,
+      input: JSON.stringify({ prompt }), encoding: 'utf8', timeout: hookTimeout,
     });
-    assert.equal(result.status, 0, result.stderr || result.error?.message);
+    assert.equal(result.status, 0, failure(result, `${script} ${host}`));
     return result.stdout;
   };
 
@@ -104,9 +111,9 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
       for (const agentName of ['explore', 'code-review']) {
         const result = spawnSync(process.execPath, [path.join(checkout, '.agents/hooks/ponytail-subagent.js'), host], {
           env: { ...env, PONYTAIL_SUBAGENT_MATCHER: '^explore$' },
-          input: JSON.stringify({ agentName }), encoding: 'utf8', timeout: 4000,
+          input: JSON.stringify({ agentName }), encoding: 'utf8', timeout: hookTimeout,
         });
-        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.status, 0, failure(result, `ponytail-subagent.js ${host} (${agentName})`));
         if (agentName === 'explore') assert.match(JSON.parse(result.stdout).additionalContext, /level: lite/);
         else assert.equal(result.stdout, '');
       }
@@ -232,10 +239,10 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
       .replaceAll('canonical=/run/current-system/sw/bin/readlink', 'canonical=' + "'" + profile.replaceAll("'", "'\\''") + "/readlink'"));
     const result = spawnSync('/bin/sh', [launcher, 'activate', 'codex'], {
       cwd: checkout, env: { ...hostileEnv, PATH: [checkout, linked, fileLinked, profile, process.env.PATH].join(':') },
-      input: '{}', encoding: 'utf8', timeout: 5000,
+      input: '{}', encoding: 'utf8', timeout: hookTimeout,
     });
     writeFileSync(launcher, source);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, failure(result, 'launcher activate codex'));
     assert.match(result.stdout, /PONYTAIL MODE ACTIVE/);
     assert.equal(existsSync(marker), false, 'Non-FHS discovery executed checkout readlink');
   }
@@ -255,9 +262,9 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
         if (command.includes(' continue')) writeFileSync(state(continuedHost), 'lite');
         const result = spawnSync(shell.executable, [...shell.args, command], {
           cwd: path.join(checkout, 'frontend'), env: hostileEnv,
-          input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: 5000,
+          input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: hookTimeout,
         });
-        assert.equal(result.status, 0, `${manifest}: ${result.stderr || result.error?.message}`);
+        assert.equal(result.status, 0, `${manifest}: ${failure(result, command)}`);
         assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed`);
         assert.ok(result.stdout.trim(), `${manifest}: no hook output`);
         if (manifest !== '.claude/settings.json') assert.doesNotThrow(() => JSON.parse(result.stdout),
@@ -271,9 +278,9 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
         if (handler.commandWindows.includes(' continue')) writeFileSync(state('codex'), 'lite');
         const result = spawnSync(path.join(process.env.SystemRoot, 'System32/cmd.exe'), ['/d', '/s', '/c', handler.commandWindows], {
           cwd: path.join(checkout, 'frontend'), env: hostileEnv, windowsVerbatimArguments: true,
-          input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: 5000,
+          input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: hookTimeout,
         });
-        assert.equal(result.status, 0, result.stderr || result.error?.message);
+        assert.equal(result.status, 0, failure(result, handler.commandWindows));
         assert.equal(existsSync(marker), false, `${manifest}: checkout Node/Git executed in cmd`);
         assert.ok(result.stdout.trim(), `${manifest}: no Windows override output`);
         assert.doesNotThrow(() => JSON.parse(result.stdout), 'cmd must preserve the Codex JSON protocol');
@@ -287,15 +294,17 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
   const missingShell = windows ? shells.at(-1) : shells[0];
   const noExternalNode = spawnSync(missingShell.executable, [...missingShell.args, codexStart.command], {
     cwd: checkout, env: { ...hostileEnv, PATH: [checkout, bin, '.', linked].join(path.delimiter) },
-    input: '{}', encoding: 'utf8', timeout: 5000,
+    input: '{}', encoding: 'utf8', timeout: hookTimeout,
   });
+  assert.notEqual(noExternalNode.error?.code, 'ETIMEDOUT', failure(noExternalNode, codexStart.command));
   assert.notEqual(noExternalNode.status, 0, 'Untrusted-only PATH must not start Node');
   assert.match(noExternalNode.stderr, /install Node outside the checkout/);
   assert.equal(existsSync(marker), false);
   if (windows) {
     const restricted = spawnSync(shells[0].executable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted',
       '-File', path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-6/launch.ps1'), 'activate', 'codex'],
-    { cwd: checkout, env: hostileEnv, encoding: 'utf8', timeout: 5000 });
+    { cwd: checkout, env: hostileEnv, encoding: 'utf8', timeout: hookTimeout });
+    assert.notEqual(restricted.error?.code, 'ETIMEDOUT', failure(restricted, 'restricted launch.ps1 activate codex'));
     assert.notEqual(restricted.status, 0, 'Native script policy must not be bypassed');
     assert.equal(existsSync(marker), false);
   }
@@ -306,18 +315,18 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
       ? JSON.parse(readFileSync(path.join(root, '.github/hooks/ponytail.json'))).hooks.sessionStart[0].powershell
       : codexStart.command;
     const nested = spawnSync(shell.executable, [...shell.args, command], {
-      cwd: path.join(checkout, 'frontend'), env: hostileEnv, input: '{}', encoding: 'utf8', timeout: 5000,
+      cwd: path.join(checkout, 'frontend'), env: hostileEnv, input: '{}', encoding: 'utf8', timeout: hookTimeout,
     });
-    assert.equal(nested.status, 0, nested.stderr);
+    assert.equal(nested.status, 0, failure(nested, command));
     assert.match(nested.stdout, /PONYTAIL MODE ACTIVE/);
     assert.equal(existsSync(marker), false, 'Nested marker admitted an outer-checkout executable');
   }
   rmSync(path.join(checkout, 'frontend/.git'));
   const missing = spawnSync(missingShell.executable, [...missingShell.args, codexStart.command], {
     cwd: checkout, env: { ...env, HOME: path.join(temp, 'missing'), USERPROFILE: path.join(temp, 'missing') },
-    input: '{}', encoding: 'utf8', timeout: 5000,
+    input: '{}', encoding: 'utf8', timeout: hookTimeout,
   });
-  assert.equal(missing.status, 0, missing.stderr);
+  assert.equal(missing.status, 0, failure(missing, codexStart.command));
   assert.match(missing.stdout, /node scripts\/install-ponytail-hooks.mjs/);
   assert.equal(existsSync(path.join(temp, 'missing/.ponytail')), false, 'Hook must not install itself');
 
@@ -331,13 +340,14 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
         if (!command?.includes('.ponytail')) continue;
         const result = spawnSync(missingShell.executable, [...missingShell.args, command], {
           cwd: checkout, env: { ...env, HOME: path.join(temp, 'missing'), USERPROFILE: path.join(temp, 'missing') },
-          input: '{}', encoding: 'utf8', timeout: 5000,
+          input: '{}', encoding: 'utf8', timeout: hookTimeout,
         });
         if (manifest === '.cursor/hooks.json') {
+          assert.notEqual(result.error?.code, 'ETIMEDOUT', failure(result, command));
           assert.notEqual(result.status, 0, 'Missing native Cursor launcher must fail closed');
           continue;
         }
-        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.status, 0, failure(result, command));
         assert.equal(result.stdout, '', `${manifest}/${event}: repeated activation warning`);
       }
     }
@@ -356,7 +366,7 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });
     await new Promise((resolve, reject) => {
-      const guard = setTimeout(() => { child.kill(); reject(new Error('Hook blocked while draining stdout')); }, 4000);
+      const guard = setTimeout(() => { child.kill(); reject(new Error('Hook blocked while draining stdout')); }, nonblockingTimeout);
       child.once('error', error => { clearTimeout(guard); reject(error); });
       child.once('close', code => { clearTimeout(guard); code === 0 ? resolve() : reject(new Error(`Hook exited ${code}`)); });
     });
@@ -369,7 +379,7 @@ if (-not [PonytailNativePath]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 
   });
   t.after(() => child.kill());
   const exitCode = await new Promise((resolve, reject) => {
-    const guard = setTimeout(() => { child.kill(); reject(new Error('Hook blocked on stdin')); }, 3000);
+    const guard = setTimeout(() => { child.kill(); reject(new Error('Hook blocked on stdin')); }, nonblockingTimeout);
     child.once('error', error => { clearTimeout(guard); reject(error); });
     child.once('exit', code => { clearTimeout(guard); resolve(code); });
   });
