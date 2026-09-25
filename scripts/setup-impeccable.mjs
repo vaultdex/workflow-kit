@@ -6,6 +6,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
   unlinkSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkoutRoot } from "./checkout-root.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,11 +20,12 @@ const skills = providers.map((provider) => `${provider}/skills/impeccable`);
 const linkedSkills = skills.filter((skill) => !skill.startsWith(".github/"));
 const text = (path) => readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 // Resolve installed Git once; neither it nor child commands may come from checkout/PATH-relative entries.
+const checkouts = [root, kit, process.cwd()].map(path => checkoutRoot(path));
+const outside = path => checkouts.every(base => path !== base && !path.startsWith(base + sep));
 const searchPath = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
-  .filter((path) => existsSync(path) && realpathSync(path) !== realpathSync(root)
-    && !realpathSync(path).startsWith(realpathSync(root) + sep));
+  .filter((path) => existsSync(path) && outside(realpathSync(path)));
 const gitBinary = searchPath.map((path) => join(path, process.platform === "win32" ? "git.exe" : "git"))
-  .find(existsSync);
+  .filter(existsSync).map(path => realpathSync(path)).find(outside);
 assert.ok(gitBinary, "Install Git in an absolute PATH directory outside this checkout");
 const git = (...args) => execFileSync(gitBinary, args, { cwd: root, encoding: "utf8",
   env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: "1" } });
@@ -76,9 +78,14 @@ function copyTracked(from, to) {
 localDirectory(state);
 assert.ok(!present(bundle)?.isSymbolicLink(), "Generated bundle must not be a link");
 if (existsSync(bundle)) {
-  assert.equal(text(join(bundle, ".owner")).trim(), "vaultdex-impeccable",
+  const owner = join(bundle, ".owner");
+  assert.ok(present(owner)?.isFile() && text(owner).trim() === "vaultdex-impeccable",
     "Refusing to replace an unknown .impeccable/vendor directory");
 }
+const receipt = ".github/skills/impeccable/.vaultdex-source.json";
+localDirectory(dirname(join(root, receipt)));
+assert.ok(!present(join(root, receipt)) || present(join(root, receipt)).isFile(),
+  "Receipt must be a regular file");
 git("-C", kit, "submodule", "update", "--init", "--", ".vendor/impeccable");
 assert.equal(git("-C", source, "status", "--porcelain", "--untracked-files=all").trim(), "",
   "Impeccable submodule has local changes; preserve/review them before setup");
@@ -109,10 +116,9 @@ try {
     copyTracked(directory, join(next, directory));
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
-  const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/impeccable/launchers.patch",
+  const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/impeccable/launchers.patch",
     "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
   const inputs = createHash("sha256").update(inputFiles.map((file) => text(join(kit, file))).join("\0")).digest("hex");
-  const receipt = ".github/skills/impeccable/.vaultdex-source.json";
   const recorded = existsSync(join(root, receipt)) ? JSON.parse(text(join(root, receipt))) : null;
   const files = Object.fromEntries(companionFiles(next).sort().map(file => [file, digest(join(next, file))]));
   writeFileSync(join(next, receipt), JSON.stringify({ revision, inputs, files }, null, 2) + "\n");

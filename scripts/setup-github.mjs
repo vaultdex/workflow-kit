@@ -1,21 +1,28 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { checkoutRoot } from './checkout-root.mjs';
 
 const repo = process.argv[2];
 assert.match(repo ?? '', /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Usage: node setup-github.mjs OWNER/REPO [PROJECT_NUMBER]');
 const [owner, name] = repo.split('/');
 const root = realpathSync(process.cwd());
+const checkout = checkoutRoot(root);
 const outside = path => path !== root && !path.startsWith(root + sep);
+const externalCli = path => path !== checkout && !path.startsWith(checkout + sep);
 const searchPath = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
-  .filter(path => existsSync(path) && outside(realpathSync(path)));
+  .filter(path => existsSync(path) && externalCli(realpathSync(path)));
 const binary = searchPath.map(path => join(path, process.platform === 'win32' ? 'gh.exe' : 'gh'))
-  .find(path => existsSync(path) && outside(realpathSync(path)));
+  .find(path => existsSync(path) && externalCli(realpathSync(path)));
 assert.ok(binary, 'Install GitHub CLI in an absolute PATH directory outside this checkout');
 const gh = (...args) => execFileSync(realpathSync(binary), args, { encoding: 'utf8',
   env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: '1' } }).trim();
 const marker = resolve('.github/workflow-project.json');
+const directory = dirname(marker);
+const present = path => lstatSync(path, { throwIfNoEntry: false });
+assert.ok(!present(directory) || !outside(realpathSync(directory)), 'Project directory leaves checkout');
+assert.ok(!present(marker) || present(marker).isFile(), 'Project marker must be a regular file');
 const saved = existsSync(marker) ? JSON.parse(readFileSync(marker, 'utf8')) : null;
 if (saved) assert.equal(saved.repository, repo, 'Recorded project belongs to another repository');
 const meta = JSON.parse(gh('repo', 'view', repo, '--json', 'viewerPermission,url'));

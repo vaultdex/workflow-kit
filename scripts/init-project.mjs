@@ -155,12 +155,12 @@ for (const name of Object.keys(prior.hooks)) if (!Object.hasOwn(hooks, name)) mi
 // No consumer scripts are generated. All setup/check/install calls target the kit.
 const ignore = safe('.gitignore');
 const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
-const legacy = ['/.agents/hooks/', ...providers.map(p => `/${p}/skills/ponytail*/`)];
+const legacy = new Set(['/.agents/hooks/', ...providers.map(p => `/${p}/skills/ponytail*/`)]);
 const patterns = ['/.workflow-kit/', '/.impeccable/vendor/', '/.impeccable/setup-*/', '/.agents/hooks',
   ...providers.flatMap(p => [`/${p}/skills/ponytail*`, `/${p}/skills/impeccable`]),
   '/.claude/agents/impeccable-*.md', '/.codex/agents/impeccable_*.toml', '/.opencode/commands/impeccable.md',
   '.claude/settings.local.json', '**/.impeccable/config.local.json', '**/skills/impeccable/scripts/bin/'];
-const currentIgnore = (existsSync(ignore) ? text(ignore) : '').split('\n').filter(line => !legacy.includes(line)).join('\n');
+const currentIgnore = (existsSync(ignore) ? text(ignore) : '').split('\n').filter(line => !legacy.has(line)).join('\n');
 const additions = patterns.filter(p => !currentIgnore.split('\n').includes(p));
 pending['.gitignore'] = currentIgnore.trimEnd() + (additions.length ? '\n' + additions.join('\n') : '') + '\n';
 for (const file of Object.keys(prior.files).filter(file => !Object.hasOwn(files, file))) {

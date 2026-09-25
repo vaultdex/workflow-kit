@@ -4,10 +4,11 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkoutRoot } from './checkout-root.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
-const checkouts = [root, kit, process.cwd()].map(p => realpathSync(p));
+const checkouts = [root, kit, process.cwd()].map(p => checkoutRoot(p));
 const outside = p => checkouts.every(base => p !== base && !p.startsWith(base + sep));
 const binary = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
   .filter(p => existsSync(p) && outside(realpathSync(p)))
