@@ -64,7 +64,7 @@ test('shared hooks run from a fresh checkout with spaces and isolated personal s
   assert.equal(installation.status, 0, installation.stderr);
   assert.equal(install().status, 0, 'Identical installation must be reusable');
   if (windows) {
-    const executable = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7/launch.exe');
+    const executable = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-8/launch.exe');
     const original = readFileSync(executable);
     appendFileSync(executable, 'changed executable');
     assert.notEqual(install().status, 0, 'Changed compiled launcher must not be reused or overwritten');
@@ -219,7 +219,7 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
 [void][Reflection.Assembly]::LoadFile($env:PONYTAIL_BOOTSTRAP)
 if ([PonytailLauncher]::IsNativeNode($env:PONYTAIL_SCRIPT_TARGET)) { throw 'Script target accepted' }
 if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'Native Node rejected' }
-`], { env: { ...env, PONYTAIL_BOOTSTRAP: path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7/launch.exe'),
+`], { env: { ...env, PONYTAIL_BOOTSTRAP: path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-8/launch.exe'),
       PONYTAIL_SCRIPT_TARGET: scriptTarget, PONYTAIL_NATIVE_NODE: process.execPath }, encoding: 'utf8' });
     assert.equal(checked.status, 0, checked.stderr);
   }
@@ -235,7 +235,7 @@ if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'N
   if (!windows) {
     // Emulate NixOS's trusted OS path without changing system files. Both
     // profile directories and individual commands are symlinks into its store.
-    const launcher = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-7/launch.sh');
+    const launcher = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-8/launch.sh');
     const source = readFileSync(launcher, 'utf8');
     const systemReadlink = ['/usr/bin/readlink', '/bin/readlink', '/run/current-system/sw/bin/readlink'].find(existsSync);
     assert.ok(systemReadlink, 'System readlink is required for the NixOS fixture');
@@ -259,6 +259,33 @@ if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'N
     assert.match(result.stdout, /PONYTAIL MODE ACTIVE/);
     assert.equal(existsSync(marker), false, 'Non-FHS discovery executed checkout readlink');
   }
+  if (windows) {
+    // Compare bytes with Node directly: PowerShell may supply one BOM, but
+    // neither the native launcher nor its cmd entrypoint may add another.
+    const installedHook = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-8/.agents/hooks/ponytail-mode-tracker.js');
+    const originalHook = readFileSync(installedHook);
+    writeFileSync(installedHook, "const parts=[]; process.stdin.on('data',p=>parts.push(p)); process.stdin.on('end',()=>process.stdout.write(Buffer.concat(parts).toString('hex')));");
+    try {
+      for (const pipeline of [false, true]) {
+        let expected;
+        for (const command of [
+          '& $env:PONYTAIL_TEST_NODE $env:PONYTAIL_TEST_HOOK',
+          '~/.ponytail/vaultdex/4.10.0-8/launch.exe mode-tracker cursor',
+          '~/.ponytail/vaultdex/4.10.0-8/launch.cmd mode-tracker cursor',
+        ]) {
+          const observed = spawnSync(shells[0].executable, [...shells[0].args, pipeline ? cursorCommand(shells[0], command) : command], {
+            cwd: checkout, env: { ...hostileEnv, PONYTAIL_TEST_NODE: process.execPath, PONYTAIL_TEST_HOOK: installedHook },
+            input: JSON.stringify({ prompt: '/ponytail full' }), encoding: 'utf8', timeout: hookTimeout,
+          });
+          assert.equal(observed.status, 0, failure(observed, command));
+          assert.ok(observed.stdout, 'Byte probe must receive its synthetic payload');
+          expected ??= observed.stdout;
+          assert.equal(observed.stdout, expected, `Launcher altered stdin (Cursor pipeline: ${pipeline})`);
+          assert.equal(existsSync(marker), false);
+        }
+      }
+    } finally { writeFileSync(installedHook, originalHook); }
+  }
   for (const manifest of manifests) {
     const hooks = JSON.parse(readFileSync(path.join(root, manifest), 'utf8')).hooks;
     if (manifest === '.codex/hooks.json' || manifest === '.claude/settings.json') {
@@ -271,7 +298,7 @@ if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'N
         const powershell = shell.executable.endsWith('powershell.exe');
         if (powershell && !handler.powershell && manifest !== '.cursor/hooks.json') continue;
         const nativeCommand = powershell ? handler.powershell ?? handler.command : handler.command ?? handler.bash;
-        const command = manifest === '.cursor/hooks.json' && nativeCommand.includes(' activate cursor')
+        const command = manifest === '.cursor/hooks.json'
           ? cursorCommand(shell, nativeCommand) : nativeCommand;
         const continuedHost = manifest === '.codex/hooks.json' ? 'codex' : 'claude';
         if (command.includes(' continue')) writeFileSync(state(continuedHost), 'lite');
@@ -316,7 +343,7 @@ if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'N
   assert.match(noExternalNode.stderr, /install Node outside the checkout/);
   assert.equal(existsSync(marker), false);
   if (windows) {
-    const launcher = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7/launch.exe');
+    const launcher = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-8/launch.exe');
     for (const policy of ['Restricted', 'RemoteSigned']) {
       const launched = spawnSync(shells[0].executable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', policy,
         '-Command', '& $env:PONYTAIL_TEST_LAUNCHER activate codex; exit $LASTEXITCODE'],
@@ -341,7 +368,7 @@ if (-not [PonytailLauncher]::IsNativeNode($env:PONYTAIL_NATIVE_NODE)) { throw 'N
     assert.match(allowed.stdout, /Policy control executed/);
 
     // Exercise native stream forwarding, including a caller that never closes stdin.
-    const installedHook = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7/.agents/hooks/ponytail-mode-tracker.js');
+    const installedHook = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-8/.agents/hooks/ponytail-mode-tracker.js');
     const original = readFileSync(installedHook);
     writeFileSync(installedHook, `let input = ''; process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { input += chunk; if (input.endsWith('\\n')) {
@@ -427,7 +454,7 @@ process.stdin.on('data', chunk => { input += chunk; if (input.endsWith('\\n')) {
     assert.equal(existsSync(marker), false, 'Recovery must not execute PATH-owned echo, Node or Git');
   }
   if (windows) {
-    const snapshot = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-7');
+    const snapshot = path.join(env.USERPROFILE, '.ponytail/vaultdex/4.10.0-8');
     for (const [file, replacement, expected] of [
       ['launch.exe', 'not an executable', 1],
       ['.agents/hooks/ponytail-activate.js', 'process.exit(7);', 7],
@@ -446,6 +473,33 @@ process.stdin.on('data', chunk => { input += chunk; if (input.endsWith('\\n')) {
       if (file === 'launch.exe') assert.ok(result.stderr.trim(), 'Start failure must remain visible');
       assert.equal(existsSync(marker), false);
     }
+  }
+
+  const cursorPrompt = JSON.parse(readFileSync(path.join(root, '.cursor/hooks.json'), 'utf8')).hooks.beforeSubmitPrompt[0].command;
+  for (const shell of shells) for (const mode of ['full', 'ordinary', 'lite', 'off']) {
+    const payload = JSON.stringify({ prompt: mode === 'ordinary' ? 'explain this function' : `/ponytail ${mode}` });
+    writeFileSync(cursorPayload, payload);
+    const result = spawnSync(shell.executable, [...shell.args, cursorCommand(shell, cursorPrompt)], {
+      cwd: path.join(checkout, 'frontend'), env: hostileEnv,
+      input: payload, encoding: 'utf8', timeout: hookTimeout,
+    });
+    assert.equal(result.status, 0, failure(result, cursorPrompt));
+    assert.equal(result.stderr, '');
+    if (mode === 'ordinary') {
+      assert.equal(result.stdout, '', 'Ordinary Cursor prompts must remain silent');
+      assert.equal(readFileSync(state('cursor'), 'utf8'), 'full');
+    } else {
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.continue, true);
+      if (mode === 'off') {
+        assert.equal(output.additional_context, 'PONYTAIL MODE OFF');
+        assert.equal(existsSync(state('cursor')), false);
+      } else {
+        assert.match(output.additional_context, new RegExp(`PONYTAIL MODE CHANGED — level: ${mode}`));
+        assert.equal(readFileSync(state('cursor'), 'utf8'), mode);
+      }
+    }
+    assert.equal(existsSync(marker), false);
   }
 
   // SessionStart owns missing-install guidance; subsequent hooks stay silent.
