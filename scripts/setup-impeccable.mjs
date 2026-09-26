@@ -130,14 +130,15 @@ try {
   const trackedCopilot = new Set(git("ls-files", "-z", "--", ".github/skills/impeccable",
     ".github/agents/impeccable*").split("\0").filter(Boolean));
   // Preflight every destination before replacing any working installation.
-  // Unedited copies match the new or the installed generated skill; links to this bundle path elsewhere are stale.
+  // Unedited copies match the new or installed generated skill, or the pinned upstream file an older kit copied before
+  // its patches (the clean submodule is that revision). Links to this bundle path elsewhere are stale.
   const stale = [];
   for (const skill of linkedSkills) {
     const target = join(root, skill);
     localDirectory(dirname(target));
     if (!present(target)) continue;
     const kind = classifyEntry(target, join(bundle, skill), relative(root, join(bundle, skill)),
-      (name, bytes) => sameFile(join(next, skill, name), bytes) || sameFile(join(bundle, skill, name), bytes));
+      (name, bytes) => [next, bundle, source].some(base => sameFile(join(base, skill, name), bytes)));
     if (kind === "stale") stale.push(target);
     else assert.equal(kind, "current", `Existing skill left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
   }

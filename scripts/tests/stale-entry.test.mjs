@@ -30,8 +30,9 @@ test('setup replaces copied or relocated kit entries and protects edited or fore
   const entries = ['.agents/hooks', '.claude/skills/ponytail-help', ...providers.flatMap(p => [`${p}/skills/ponytail`, `${p}/skills/impeccable`])];
   for (const entry of entries) {
     mkdirSync(dirname(join(worktree, entry)), { recursive: true });
-    // Ponytail and the hooks arrive as plain copies, Impeccable as links into the original checkout.
-    if (entry.includes('impeccable')) link(realpathSync(join(original, entry)), join(worktree, entry));
+    // Ponytail, the hooks and Claude's Impeccable arrive as plain copies, other Impeccable entries as links
+    // into the original checkout.
+    if (entry.includes('impeccable') && !entry.startsWith('.claude/')) link(realpathSync(join(original, entry)), join(worktree, entry));
     else cpSync(join(original, entry), join(worktree, entry), { recursive: true, dereference: true });
   }
   // A copy that an older kit generated equals an earlier committed Copilot output of that skill.
@@ -44,6 +45,9 @@ test('setup replaces copied or relocated kit entries and protects edited or fore
   git('rm', '--quiet', help);
   git('commit', '--quiet', '-m', 'retire output');
   writeFileSync(join(worktree, '.claude/skills/ponytail-help/SKILL.md'), 'older generated help\n');
+  // An older kit copied this upstream file before applying its maintainability patch.
+  const upstream = '.claude/skills/impeccable/scripts/live-browser-ignores.js';
+  copyFileSync(join(kit, '.vendor/impeccable', upstream), join(worktree, upstream));
   ok(worktree);
   for (const entry of entries) {
     assert.ok(lstatSync(join(worktree, entry)).isSymbolicLink(), entry);

@@ -103,7 +103,8 @@ try {
   directory(dirname(receiptPath));
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   const old = existsSync(receiptPath) ? JSON.parse(text(receiptPath)).files : {};
-  // Unedited copies match the new, the installed, a receipt-recorded or an earlier committed generated file;
+  // Unedited copies match the new, the installed, a receipt-recorded or an earlier committed generated file, or the
+  // pinned upstream file itself;
   // a harness worktree may copy a bundle that an older kit generated in the original checkout.
   const format = git('rev-parse', '--show-object-format').trim();
   const hasHistory = spawnSync(binary, ['rev-parse', '--verify', '--quiet', 'HEAD'], gitOptions).status === 0;
@@ -115,7 +116,8 @@ try {
   };
   const blob = value => createHash(format).update(`blob ${Buffer.byteLength(value)}\0`).update(value).digest('hex');
   const known = from => (name, bytes) => {
-    if (sameFile(join(next, from, name), bytes) || sameFile(join(bundle, from, name), bytes)) return true;
+    if (sameFile(join(next, from, name), bytes) || sameFile(join(bundle, from, name), bytes)
+      || sameFile(join(source, from.slice('.agents/'.length), name), bytes)) return true;
     if (!from.startsWith('.agents/skills/')) return false;
     const value = bytes.toString('utf8').replaceAll('\r\n', '\n');
     const output = `.github/skills/${from.split('/')[2]}/${name}`;
