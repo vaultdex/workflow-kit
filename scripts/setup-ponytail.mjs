@@ -9,7 +9,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkoutRoot } from './checkout-root.mjs';
-import { classifyEntry, removeStale, sameFile } from './stale-entry.mjs';
+import { classifyEntry, listing, removeStale, sameFile } from './stale-entry.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
@@ -126,7 +126,8 @@ try {
     const target = join(root, dest);
     directory(dirname(target));
     if (!present(target)) continue;
-    const kind = classifyEntry(target, join(bundle, from), relative(root, join(bundle, from)), known(from));
+    const kind = classifyEntry(target, join(bundle, from), relative(root, join(bundle, from)), known(from),
+      [listing(join(next, from)), listing(join(bundle, from))]);
     if (kind === 'stale') stale.push(target);
     else assert.equal(kind, 'current', `Existing skill/hook left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
   }

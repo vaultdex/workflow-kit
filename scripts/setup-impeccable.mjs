@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkoutRoot } from "./checkout-root.mjs";
-import { classifyEntry, removeStale, sameFile } from "./stale-entry.mjs";
+import { classifyEntry, listing, removeStale, sameFile } from "./stale-entry.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -138,7 +138,8 @@ try {
     localDirectory(dirname(target));
     if (!present(target)) continue;
     const kind = classifyEntry(target, join(bundle, skill), relative(root, join(bundle, skill)),
-      (name, bytes) => [next, bundle, source].some(base => sameFile(join(base, skill, name), bytes)));
+      (name, bytes) => [next, bundle, source].some(base => sameFile(join(base, skill, name), bytes)),
+      [listing(join(next, skill)), listing(join(bundle, skill))]);
     if (kind === "stale") stale.push(target);
     else assert.equal(kind, "current", `Existing skill left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
   }

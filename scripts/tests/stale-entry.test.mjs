@@ -90,6 +90,17 @@ test('setup replaces copied or relocated kit entries and protects edited or fore
   assert.ok(lstatSync(join(empty, 'nested')).isDirectory());
   rmSync(empty, { recursive: true });
 
+  // Every remaining file is generated, but a deleted one makes the copy a user edit.
+  const pruned = join(worktree, '.agent/skills/ponytail');
+  unlinkSync(pruned);
+  cpSync(join(original, '.agent/skills/ponytail'), pruned, { recursive: true, dereference: true });
+  rmSync(join(pruned, 'NOTICE.md'));
+  const prunedRefused = setup(worktree);
+  assert.notEqual(prunedRefused.status, 0);
+  assert.match(prunedRefused.stderr, /left untouched \(partial or foreign copy\).*\.agent.skills.ponytail/s);
+  assert.ok(lstatSync(join(pruned, 'LICENSE.md')).isFile());
+  rmSync(pruned, { recursive: true });
+
   const foreign = join(worktree, '.pi/skills/impeccable');
   const elsewhere = join(base, 'elsewhere');
   mkdirSync(elsewhere);
