@@ -134,7 +134,9 @@ PR a closing relationship to it. Do not link every delivery PR to one unfinished
 umbrella issue: GitHub closes a linked issue on the first default-branch merge,
 not after all linked PRs merge. Keep repository auto-close enabled; no extra bot
 or Actions workflow is needed. Rely on native Project closure-to-Done automation
-only after verifying its configuration and completed-delivery semantics below.
+only after verifying its configuration. Follow the delivery-unit rules above,
+[completion gates](#publication-and-review) and [Project configuration](github.md);
+not-planned closures are not Done.
 
 After the Ready/authorization/ownership checks above, create new branches through
 the issue's native **Development → Create a branch** action or its CLI equivalent.
