@@ -40,6 +40,6 @@ body:
     id: dependencies
     attributes:
       label: Abhängigkeiten und Wiederaufnahme
-      description: Native Vorgänger und externe Voraussetzungen mit Beleg, nächster Aktion und zuständiger Entscheidung. Falls keine bekannt sind, das ausdrücklich schreiben. Kommentarfragen im Haupttext klären und Quellen verlinken; Status und Priority bleiben im Project.
+      description: Voraussetzungen mit Beleg, nächster Aktion und Zuständigkeit; sonst „keine bekannt“. Kommentarfragen im Haupttext klären und Quellen verlinken. Status und Priority bleiben im Project.
     validations:
       required: true
