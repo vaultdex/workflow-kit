@@ -84,4 +84,9 @@ Complexity is justified only by current evidence: a security boundary, data-loss
 
 ## Delivery
 
+Issues and PRs follow the shared
+[planning and PR rules](docs/CONTRIBUTING.md#issue-plans-and-pr-descriptions):
+simple German, concrete purpose/benefit, actionable steps, resolved comment
+questions and verifiable outcomes. PRs explain the actual change, reason and benefit.
+
 Report changed behavior, focused verification, and intentionally skipped scope. Suggest future machinery only with a measurable trigger.

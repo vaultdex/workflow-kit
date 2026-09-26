@@ -1,22 +1,45 @@
-name: Task
-description: Bounded work with acceptance and proof
+name: Aufgabe
+description: Zweck, Nutzen, konkrete Umsetzung und überprüfbares Ergebnis.
 body:
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Wofür brauchen wir das?
+      description: Welches belegte Problem hat welcher Nutzer oder Ablauf? Bei Fehlern Reproduktion und erwartetes Verhalten nennen.
+    validations:
+      required: true
+  - type: textarea
+    id: benefit
+    attributes:
+      label: Was bringt es uns?
+      description: Konkreter Vorteil oder vermiedener Schaden, ohne unbelegte Zeit- oder Kostenversprechen.
+    validations:
+      required: true
   - type: textarea
     id: outcome
     attributes:
-      label: Outcome and scope
-      description: Problem, expected behavior, affected contracts and non-goals.
+      label: Was muss gemacht werden?
+      description: Vollständiges Ergebnis und klare Grenzen. Was gehört ausdrücklich nicht dazu?
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Wie soll es umgesetzt werden?
+      description: Geordnete Schritte mit Dateien, Symbolen, Verträgen und vorhandenen Bausteinen. Betroffene Rechte, Daten, Fehler und Wiederholung erklären. Offene Entscheidungen als Frage mit Empfehlung kennzeichnen.
     validations:
       required: true
   - type: textarea
     id: acceptance
     attributes:
-      label: Acceptance and verification
-      description: Observable result, required checks and limits of evidence.
+      label: Woran erkennen wir, dass es fertig ist?
+      description: Prüffähige Kriterien, passender Test/Befehl oder genauer Prüfweg und erwartetes Ergebnis. Grenzen von Mocks und Live-Nachweisen nennen.
     validations:
       required: true
   - type: textarea
     id: dependencies
     attributes:
-      label: Dependencies and recovery
-      description: Real blockers, authorization and condition for resuming.
+      label: Abhängigkeiten und Wiederaufnahme
+      description: Native Vorgänger und externe Voraussetzungen mit Beleg, nächster Aktion und zuständiger Entscheidung. Falls keine bekannt sind, das ausdrücklich schreiben. Kommentarfragen im Haupttext klären und Quellen verlinken; Status und Priority bleiben im Project.
+    validations:
+      required: true

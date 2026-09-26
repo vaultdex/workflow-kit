@@ -48,6 +48,17 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   const init = (...args) => spawnSync(process.execPath, [installer, fixture, ...args], { encoding: 'utf8' });
   const first = init();
   assert.equal(first.status, 0, first.stderr);
+  const writingTemplates = ['.github/ISSUE_TEMPLATE/task.yml', '.github/PULL_REQUEST_TEMPLATE.md'];
+  for (const name of writingTemplates) {
+    const expected = readFileSync(join(fixture, 'templates', name), 'utf8').replaceAll('\r\n', '\n');
+    assert.equal(readFileSync(join(fixture, name), 'utf8'), expected);
+    // Exercise a template upgrade without pinning editorial wording.
+    writeFileSync(join(fixture, 'templates', name), expected + '\n');
+  }
+  assert.notEqual(init('--existing', '--check').status, 0);
+  assert.equal(init('--existing').status, 0);
+  for (const name of writingTemplates)
+    assert.equal(readFileSync(join(fixture, name), 'utf8'), readFileSync(join(fixture, 'templates', name), 'utf8'));
   for (const link of ['.agents/hooks', ...['.agent', '.agents', '.claude', '.opencode', '.pi'].map(p => `${p}/skills/ponytail`)]) {
     assert.ok(lstatSync(join(fixture, link)).isSymbolicLink(), link);
     assert.equal(spawnSync('git', ['-C', fixture, 'check-ignore', '-q', link]).status, 0, `${link} must be ignored`);
@@ -70,6 +81,12 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   assert.ok(!JSON.parse(readFileSync(join(fixture, '.github/workflow-kit.json'), 'utf8')).files['CONTRIBUTING.md']);
   const checked = init('--check');
   assert.equal(checked.status, 0, checked.stderr);
+  const customTemplate = join(fixture, writingTemplates[0]);
+  const managedTemplate = readFileSync(customTemplate, 'utf8');
+  writeFileSync(customTemplate, 'project-owned form\n');
+  assert.notEqual(init('--existing').status, 0);
+  assert.equal(readFileSync(customTemplate, 'utf8'), 'project-owned form\n');
+  writeFileSync(customTemplate, managedTemplate);
   const previousRules = readFileSync(join(fixture, 'AGENTS.md'), 'utf8');
   const nextRules = readFileSync(join(fixture, 'templates/AGENTS.md'), 'utf8').replaceAll('\r\n', '\n') + '\nUpdated shared rule.\n';
   writeFileSync(join(fixture, 'templates/AGENTS.md'), nextRules);

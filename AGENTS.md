@@ -13,6 +13,13 @@ Assign every issue a milestone, an explicit Project Priority and matching labels
 including Backlog and follow-ups; retain metadata after closure.
 See docs/CONTRIBUTING.md#milestones for scope and the ongoing hotfix milestone.
 
+Write issues and PRs in simple German under
+[issue plans and PR descriptions](docs/CONTRIBUTING.md#issue-plans-and-pr-descriptions).
+Every issue explains purpose, benefit, scope, ordered implementation steps and
+verifiable acceptance; resolve comment questions and mark missing decisions.
+Every PR explains what changed, why and its benefit, with concise proof/limits.
+Apply this to templates, blank issues, API/CLI and agent-created work alike.
+
 New issues start in Backlog. Human-authorized triage may promote feasible issues
 to Ready even while dependencies or external blockers remain. Ready is not proof
 that blockers are resolved; resolve them before any start.
