@@ -5,8 +5,8 @@ import { dirname, join, resolve, sep } from 'node:path';
 
 /**
  * Classifies an existing provider entry. `current` links to `expected`; `stale` is kit-owned and may be
- * replaced: a link to the same bundle path in another checkout (a copied junction/symlink) or a copy whose
- * every file `known(name, bytes)` accepts as unedited generated output. Anything else returns the reason
+ * replaced: a link to the same bundle path in another checkout (a copied junction/symlink) or a non-empty copy
+ * whose every file `known(name, bytes)` accepts as unedited generated output. Anything else returns the reason
  * it stays untouched.
  */
 export function classifyEntry(target, expected, bundlePath, known) {
@@ -17,12 +17,15 @@ export function classifyEntry(target, expected, bundlePath, known) {
     return to.endsWith(sep + bundlePath) ? 'stale' : 'foreign link';
   }
   if (!entry.isDirectory()) return 'foreign file';
+  let verified = 0;
   for (const name of readdirSync(target, { recursive: true })) {
     const kind = lstatSync(join(target, name));
     if (kind.isDirectory()) continue;
     if (!kind.isFile() || !known(name.split(sep).join('/'), readFileSync(join(target, name)))) return 'edited or foreign copy';
+    verified++;
   }
-  return 'stale';
+  // An empty directory proves no kit ownership; it may be a user's own skill namespace.
+  return verified ? 'stale' : 'empty or foreign directory';
 }
 
 /** True when `bytes` equal a generated file, also across a CRLF checkout of the same text. */

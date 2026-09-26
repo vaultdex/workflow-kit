@@ -103,25 +103,23 @@ try {
   directory(dirname(receiptPath));
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   const old = existsSync(receiptPath) ? JSON.parse(text(receiptPath)).files : {};
-  // Unedited copies match the new, the installed, a receipt-recorded or an earlier committed generated file, or the
-  // pinned upstream file itself;
-  // a harness worktree may copy a bundle that an older kit generated in the original checkout.
-  const format = git('rev-parse', '--show-object-format').trim();
-  const hasHistory = spawnSync(binary, ['rev-parse', '--verify', '--quiet', 'HEAD'], gitOptions).status === 0;
-  const history = new Map();
-  const committed = file => {
-    if (!history.has(file)) history.set(file, new Set(hasHistory ? git('log', '--pretty=format:', '--raw', '--no-abbrev', '--', file)
-      .split('\n').map(line => line.split(/\s+/)[3]).filter(id => id && !/^0+$/.test(id)) : []));
-    return history.get(file);
-  };
-  const blob = value => createHash(format).update(`blob ${Buffer.byteLength(value)}\0`).update(value).digest('hex');
+  // Unedited copies match the new or installed generated file, the pinned upstream file, or an output hash that the
+  // current or an earlier committed receipt recorded: a harness worktree may copy a bundle an older kit generated.
+  // Git history alone proves no ownership; only the kit's own receipts do.
+  const generated = new Set(Object.entries(old).map(([file, digest]) => `${file}\0${digest}`));
+  const receiptFile = relative(root, receiptPath).split(sep).join('/');
+  if (spawnSync(binary, ['rev-parse', '--verify', '--quiet', 'HEAD'], gitOptions).status === 0) {
+    for (const commit of git('log', '--format=%H', '--diff-filter=d', '--', receiptFile).split('\n').filter(Boolean)) {
+      let recorded;
+      try { recorded = JSON.parse(git('show', `${commit}:${receiptFile}`)).files; } catch { continue; }
+      for (const [file, digest] of Object.entries(recorded ?? {})) generated.add(`${file}\0${digest}`);
+    }
+  }
   const known = from => (name, bytes) => {
     if (sameFile(join(next, from, name), bytes) || sameFile(join(bundle, from, name), bytes)
       || sameFile(join(source, from.slice('.agents/'.length), name), bytes)) return true;
-    if (!from.startsWith('.agents/skills/')) return false;
-    const value = bytes.toString('utf8').replaceAll('\r\n', '\n');
-    const output = `.github/skills/${from.split('/')[2]}/${name}`;
-    return old[output] === hash(value) || committed(output).has(blob(value));
+    return from.startsWith('.agents/skills/') && generated.has(
+      `.github/skills/${from.split('/')[2]}/${name}\0${hash(bytes.toString('utf8').replaceAll('\r\n', '\n'))}`);
   };
   const stale = [];
   for (const [dest, from] of links) {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync, copyFileSync, cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -35,15 +36,21 @@ test('setup replaces copied or relocated kit entries and protects edited or fore
     if (entry.includes('impeccable') && !entry.startsWith('.claude/')) link(realpathSync(join(original, entry)), join(worktree, entry));
     else cpSync(join(original, entry), join(worktree, entry), { recursive: true, dereference: true });
   }
-  // A copy that an older kit generated equals an earlier committed Copilot output of that skill.
-  const help = '.github/skills/ponytail-help/SKILL.md';
+  // A copy that an older kit generated matches an output hash an earlier committed receipt recorded.
+  // A file that was merely committed, without such a receipt, proves no ownership.
   const git = (...args) => execFileSync('git', ['-C', worktree, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...args]);
-  mkdirSync(dirname(join(worktree, help)), { recursive: true });
-  writeFileSync(join(worktree, help), 'older generated help\n');
-  git('add', help);
-  git('commit', '--quiet', '-m', 'older generated output');
-  git('rm', '--quiet', help);
-  git('commit', '--quiet', '-m', 'retire output');
+  const commitThenRetire = (file, content) => {
+    mkdirSync(dirname(join(worktree, file)), { recursive: true });
+    writeFileSync(join(worktree, file), content);
+    git('add', file);
+    git('commit', '--quiet', '-m', `add ${file}`);
+    git('rm', '--quiet', file);
+    git('commit', '--quiet', '-m', `retire ${file}`);
+  };
+  const sha256 = value => createHash('sha256').update(value).digest('hex');
+  commitThenRetire('.github/skills/ponytail/.workflow-source.json', JSON.stringify({ revision: 'older',
+    files: { '.github/skills/ponytail-help/SKILL.md': sha256('older generated help\n') } }));
+  commitThenRetire('.github/skills/ponytail-review/SKILL.md', 'user review text\n');
   writeFileSync(join(worktree, '.claude/skills/ponytail-help/SKILL.md'), 'older generated help\n');
   // An older kit copied this upstream file before applying its maintainability patch.
   const upstream = '.claude/skills/impeccable/scripts/live-browser-ignores.js';
@@ -63,6 +70,25 @@ test('setup replaces copied or relocated kit entries and protects edited or fore
   assert.match(refused.stderr, /left untouched \(edited or foreign copy\).*ponytail-audit.*rerun setup/s);
   assert.match(readFileSync(join(edited, 'SKILL.md'), 'utf8'), /local note\n$/);
   rmSync(edited, { recursive: true });
+
+  const committedOnly = join(worktree, '.claude/skills/ponytail-review');
+  unlinkSync(committedOnly);
+  mkdirSync(committedOnly);
+  writeFileSync(join(committedOnly, 'SKILL.md'), 'user review text\n');
+  const notOwned = setup(worktree);
+  assert.notEqual(notOwned.status, 0);
+  assert.match(notOwned.stderr, /left untouched \(edited or foreign copy\).*ponytail-review/s);
+  assert.equal(readFileSync(join(committedOnly, 'SKILL.md'), 'utf8'), 'user review text\n');
+  rmSync(committedOnly, { recursive: true });
+
+  const empty = join(worktree, '.opencode/skills/ponytail');
+  unlinkSync(empty);
+  mkdirSync(join(empty, 'nested'), { recursive: true });
+  const emptyRefused = setup(worktree);
+  assert.notEqual(emptyRefused.status, 0);
+  assert.match(emptyRefused.stderr, /left untouched \(empty or foreign directory\)/);
+  assert.ok(lstatSync(join(empty, 'nested')).isDirectory());
+  rmSync(empty, { recursive: true });
 
   const foreign = join(worktree, '.pi/skills/impeccable');
   const elsewhere = join(base, 'elsewhere');
