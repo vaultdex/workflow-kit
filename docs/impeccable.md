@@ -1,8 +1,12 @@
 # Impeccable
 
 Source: `.vendor/impeccable`, pinned to `skill-v4.3.1`. `scripts/impeccable/` owns
-the reviewed launcher patch, engine VERSION and SHA256SUMS. Setup stages upstream
-packages, applies that patch, retains LICENSE/NOTICE and leaves upstream untouched.
+the reviewed launcher and maintainability patches, engine VERSION and SHA256SUMS.
+Setup stages upstream packages, applies those patches, retains LICENSE/NOTICE and
+leaves upstream untouched. The maintainability patch only splits
+`live-browser-ignores.js` into helpers without changing behavior, and it marks the
+file as modified. The pinned upstream `tests/live-browser-ignores.test.mjs` runs
+against the generated file.
 
 From the product root, run `node .vendor/workflow-kit/scripts/setup-skills.mjs .`
 after cloning or a reviewed kit update. Five local providers use links (Windows
