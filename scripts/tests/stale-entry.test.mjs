@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, copyFileSync, cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { appendFileSync, copyFileSync, cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,13 +27,23 @@ test('setup replaces copied or relocated kit entries and protects edited or fore
   ok(original);
 
   const worktree = fixture('worktree');
-  const entries = ['.agents/hooks', ...providers.flatMap(p => [`${p}/skills/ponytail`, `${p}/skills/impeccable`])];
+  const entries = ['.agents/hooks', '.claude/skills/ponytail-help', ...providers.flatMap(p => [`${p}/skills/ponytail`, `${p}/skills/impeccable`])];
   for (const entry of entries) {
     mkdirSync(dirname(join(worktree, entry)), { recursive: true });
     // Ponytail and the hooks arrive as plain copies, Impeccable as links into the original checkout.
     if (entry.includes('impeccable')) link(realpathSync(join(original, entry)), join(worktree, entry));
     else cpSync(join(original, entry), join(worktree, entry), { recursive: true, dereference: true });
   }
+  // A copy that an older kit generated equals an earlier committed Copilot output of that skill.
+  const help = '.github/skills/ponytail-help/SKILL.md';
+  const git = (...args) => execFileSync('git', ['-C', worktree, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...args]);
+  mkdirSync(dirname(join(worktree, help)), { recursive: true });
+  writeFileSync(join(worktree, help), 'older generated help\n');
+  git('add', help);
+  git('commit', '--quiet', '-m', 'older generated output');
+  git('rm', '--quiet', help);
+  git('commit', '--quiet', '-m', 'retire output');
+  writeFileSync(join(worktree, '.claude/skills/ponytail-help/SKILL.md'), 'older generated help\n');
   ok(worktree);
   for (const entry of entries) {
     assert.ok(lstatSync(join(worktree, entry)).isSymbolicLink(), entry);

@@ -2,7 +2,7 @@
 // Nutzen: Ein Bundle fuer alle lokalen Provider; keine kopierte Laufzeitlogik im Produkt.
 // Aufruf: setup-skills bei Einrichtung oder bewusstem Kit-Update, nicht pro Agenten-Turn.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync,
   realpathSync, readdirSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -103,9 +103,24 @@ try {
   directory(dirname(receiptPath));
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   const old = existsSync(receiptPath) ? JSON.parse(text(receiptPath)).files : {};
-  // Unedited copies match the new, the installed or a receipt-recorded generated file.
-  const known = from => (name, bytes) => sameFile(join(next, from, name), bytes) || sameFile(join(bundle, from, name), bytes)
-    || (from.startsWith('.agents/skills/') && old[`.github/skills/${from.split('/')[2]}/${name}`] === hash(bytes.toString('utf8').replaceAll('\r\n', '\n')));
+  // Unedited copies match the new, the installed, a receipt-recorded or an earlier committed generated file;
+  // a harness worktree may copy a bundle that an older kit generated in the original checkout.
+  const format = git('rev-parse', '--show-object-format').trim();
+  const hasHistory = spawnSync(binary, ['rev-parse', '--verify', '--quiet', 'HEAD'], gitOptions).status === 0;
+  const history = new Map();
+  const committed = file => {
+    if (!history.has(file)) history.set(file, new Set(hasHistory ? git('log', '--pretty=format:', '--raw', '--no-abbrev', '--', file)
+      .split('\n').map(line => line.split(/\s+/)[3]).filter(id => id && !/^0+$/.test(id)) : []));
+    return history.get(file);
+  };
+  const blob = value => createHash(format).update(`blob ${Buffer.byteLength(value)}\0`).update(value).digest('hex');
+  const known = from => (name, bytes) => {
+    if (sameFile(join(next, from, name), bytes) || sameFile(join(bundle, from, name), bytes)) return true;
+    if (!from.startsWith('.agents/skills/')) return false;
+    const value = bytes.toString('utf8').replaceAll('\r\n', '\n');
+    const output = `.github/skills/${from.split('/')[2]}/${name}`;
+    return old[output] === hash(value) || committed(output).has(blob(value));
+  };
   const stale = [];
   for (const [dest, from] of links) {
     const target = join(root, dest);
