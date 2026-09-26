@@ -276,6 +276,9 @@ Braucht ein Issue eine menschliche Entscheidung, Freigabe oder Handlung, stehen
 `## Menschliche Mitwirkung nötig` und Label `needs-human-input`. Das gilt bei
 Erstellung, Überarbeitung und neu entdeckten Blockern, auch für Blank-Issues,
 API/CLI und Agenten. Nicht in Umsetzungsschritten oder Kommentaren verstecken.
+Das allgemeine Issue-Formular enthält dafür nur einen Ausfüllhinweis, kein leeres
+Blocker-Feld. Bei echtem Bedarf direkt nach dem Absenden Kopfblock und Label
+ergänzen, bevor das Issue zur Bearbeitung übergeben wird.
 
 Der Kopfblock nennt für jede offene Frage:
 
