@@ -34,7 +34,9 @@ Existing authorization covers review fixes within the same scope, not new tasks.
 
 Before work, check issue, dependencies, current main and competing PRs. Use
 codex/<issue>-<topic>, one driver and linked branch/PR. Assignment is not a lock.
-Create issue-linked branches natively; verify PR/issue links after creation and
+Before branch creation, split separate delivery PRs into complete issues with
+native prerequisite links; keep auto-close enabled and close only each PR's own
+delivered issue(s). Create issue-linked branches natively; verify links after creation and
 before review under docs/CONTRIBUTING.md#issue-branch-and-pr-links.
 Branch names or mentions alone do not prove linkage; partial work must not close issues.
 Resolve separately executable unavailable acceptance before PR creation using
