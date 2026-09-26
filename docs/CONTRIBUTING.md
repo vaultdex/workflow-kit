@@ -117,6 +117,25 @@ Verbrauchervorlagen bewusst angleichen und fremde Anpassungen erhalten.
 
 ## Issue, branch and PR links
 
+Plan delivery units **before creating issue-linked branches**. Each delivery PR
+must satisfy the complete acceptance of its own issue(s). If work needs separate
+delivery PRs, create separate, fully specified issues first, with milestone,
+Project Priority and matching labels. Record prerequisite deliveries with native
+`is blocked by` relationships; references alone are not dependencies. Preserve
+scope authorization, Ready, ownership and execution gates; splitting work grants
+no start permission and removes no acceptance. Reuse compatible existing issues
+instead of creating duplicate tracking tasks.
+
+For example, issue A delivers a kit change and issue B consumes it. B is blocked
+by A. Create the kit branch from A and its PR with `Closes OWNER/REPO#A`; create
+the consumer branch from B only after its execution prerequisites are met, and
+its PR with `Closes OWNER/REPO#B`. Reference the related issue without giving the
+PR a closing relationship to it. Do not link every delivery PR to one unfinished
+umbrella issue: GitHub closes a linked issue on the first default-branch merge,
+not after all linked PRs merge. Keep repository auto-close enabled; no extra bot
+or Actions workflow is needed. Rely on native Project closure-to-Done automation
+only after verifying its configuration and completed-delivery semantics below.
+
 After the Ready/authorization/ownership checks above, create new branches through
 the issue's native **Development → Create a branch** action or its CLI equivalent.
 On GitHub, use explicit repository, issue, branch name and current base:
@@ -135,7 +154,7 @@ of creating duplicates. Link an existing branch through the issue's Development
 control. After an error, inspect remote refs and issue links before retrying;
 branch creation may have succeeded even when the command reported failure.
 
-Decide the delivery boundary **before creating the PR, including a Draft**. When
+Recheck the delivery boundary **before creating the PR, including a Draft**. When
 an acceptance item cannot be performed within this delivery (for example a live
 provider check requiring unavailable credentials), obtain explicit human
 authorization for the changed acceptance/scope before applying a split into a
@@ -153,9 +172,11 @@ the keyword for each issue. A branch name, title, comment or commit-only closing
 keyword does not establish the required PR relationship. GitHub normally converts
 an issue-linked branch into a linked PR when that PR is created; verify the result.
 
-Use `Refs OWNER/REPO#N` without closing keywords only when there is no sensible
-separate delivery unit, for example several PRs contributing to one issue or a
-non-default target branch. State remaining acceptance and delivery steps. A manual
+Use `Refs OWNER/REPO#N` for related/background issues and non-default-branch
+integration PRs; these references do not certify delivery. Several delivery PRs
+must use separate issues as above, not share an unfinished issue with `Refs` as
+a workaround. A non-default target needs an explicit final delivery path to the
+default branch; recheck issue scope and links before that final PR. A manual
 Development closing relationship must be removed through the PR's Development UI;
 removing a keyword only removes a keyword-based link. Do not repeatedly attempt
 body edits to remove a manual relationship. Resolve closure intent before PR
