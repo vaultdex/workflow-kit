@@ -1,9 +1,18 @@
-## Was wurde geändert und warum?
+## Was wurde geändert?
 
-<!-- Kurz auf Deutsch: Anlass, resultierendes Verhalten und Nutzen. Issues verlinken;
-Closes nur bei vollständiger Abnahme. Keine alten Task-Pfade oder Rollenlabels. -->
+<!-- Einfaches Deutsch: tatsächliches Ergebnis, bei Bedarf Vorher/Nachher.
+Issues verlinken; Closes #N nur bei vollständig erfüllter Abnahme. -->
 
-<!-- Optional: Prüfung und Ergebnisse nur bei Problemen oder wesentlichen
-Nachweisgrenzen. Routineergebnisse ins Issue; CI-Status nicht abschreiben.
-Retro nur bei konkreten Befunden mit Behebung oder ausführbarem Folgetask.
-Hinweise und leere Abschnitte vor Veröffentlichung entfernen. -->
+## Warum war das nötig?
+
+<!-- Konkretes Problem oder Anforderung, nicht den Arbeitsverlauf nacherzählen. -->
+
+## Was bringt es uns?
+
+<!-- Sichtbarer Vorteil oder vermiedener Schaden. Keine unbelegten Versprechen. -->
+
+## Prüfung und Grenzen
+
+<!-- Passender Test/Prüfweg, Ergebnis und wesentliche Grenzen. Vorhandene Belege
+im Issue verlinken; keine Logs oder wechselnden CI-Status abschreiben.
+Hinweiskommentare vor Veröffentlichung entfernen; keine leeren Platzhalter. -->

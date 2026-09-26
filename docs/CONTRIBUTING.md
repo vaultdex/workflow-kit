@@ -67,6 +67,54 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   evidence. Old R0–R4 labels and agent-merge exceptions are retired. Human review
   and merge remain default; green checks, labels or board edits grant no authority.
 
+## Issue plans and PR descriptions
+
+Issues und PRs in einfachem Deutsch schreiben. Technische Namen exakt lassen;
+ungewohnte Begriffe kurz erklären. Starke Modelle können planen, kleinere Modelle
+umsetzen: Der Plan muss die nötigen Entscheidungen enthalten, ohne ein bestimmtes
+Modell vorzuschreiben. Wenige Sätze reichen für kleine Änderungen; komplexe Abläufe
+brauchen genaue Schritte. Keine Spekulation, unnötigen Abstraktionen oder Fülltexte.
+
+Jedes neue oder wesentlich überarbeitete Issue beantwortet diese Abschnitte:
+
+| Abschnitt | Erforderlicher Inhalt |
+| --- | --- |
+| Wofür brauchen wir das? | Konkretes Problem, betroffener Nutzer/Ablauf und belegter Istzustand. Bei Fehlern: Reproduktion und erwartetes Verhalten. |
+| Was bringt es uns? | Sichtbarer Vorteil oder vermiedener Schaden. Keine unbelegten Zeit-/Kostenversprechen. |
+| Was muss gemacht werden? | Vollständiges, begrenztes Ergebnis und ausdrücklich ausgeschlossene Arbeiten. |
+| Wie soll es umgesetzt werden? | Geordnete Schritte, konkrete Dateien/Symbole/Verträge, wiederverwendbare Bausteine, Ein-/Ausgaben und nötige Datenänderungen. Rechte, Fehlerfälle, Wiederholung und Recovery beschreiben, soweit betroffen. |
+| Woran erkennen wir, dass es fertig ist? | Prüffähige Kriterien mit bestehendem Test/Befehl oder genauem Prüfweg und erwartetem Ergebnis. Mocks, echte Integration und Live-Anbieterbeleg unterscheiden. |
+| Abhängigkeiten und Wiederaufnahme | Native Vorgänger, externe Voraussetzungen mit Beleg, nächste Aktion und zuständige Entscheidung. Ohne Voraussetzung ausdrücklich „keine bekannt“ nach geprüftem Stand. |
+
+Vor Übergabe müssen Implementierende wissen, wo sie anfangen, was sie in welcher
+Reihenfolge ändern und woran sie Erfolg erkennen. Routineentscheidungen dürfen
+sie selbst treffen; fehlende Produkt-, Architektur-, Datenschutz- oder
+Kostenentscheidungen nicht erraten. Dafür konkrete Frage, Empfehlung und zuständige
+Person festhalten. Vorschlag ist keine Freigabe; Planungsarbeit ist keine gelieferte
+Implementierung. Bestehende Start-, Abnahme- und Scope-Regeln bleiben verbindlich.
+
+Alle vorhandenen Issue-Kommentare auf offene Fragen und spätere Entscheidungen
+prüfen. Belegte Antworten und akzeptierte Entscheidungen in den Haupttext
+übernehmen, Quelle verlinken und nötigenfalls direkt antworten. Veraltete Aussagen
+erkennbar ersetzen, historische Belege erhalten. Fehlgeschlagene oder unzugängliche
+Prüfung als unbekannt benennen, nicht als beseitigten Blocker. Status und Priority
+bleiben im Project; Zuständigkeit getrennt festhalten.
+
+Jeder PR beantwortet **Was wurde geändert? Warum war das nötig? Was bringt es uns?**
+Den tatsächlichen Endstand und seinen Nutzen beschreiben, bei Bedarf mit konkretem
+Vorher/Nachher. Passende Prüfung, Ergebnis und wesentliche Grenzen knapp angeben;
+vorhandene Issue-Belege verlinken, statt Logs oder wechselnden CI-Status zu kopieren.
+Issue-Verknüpfung und Abschlussabsicht folgen dem nächsten Abschnitt. Leere
+Platzhalter und Anleitungskommentare vor Veröffentlichung entfernen.
+
+Diese Pflicht gilt auch für Blank-Issues, API/CLI, Agenten und Follow-ups; ein
+Formular erzwingt sie außerhalb seiner Oberfläche nicht. Autor prüft Vollständigkeit
+vor Übergabe, Reviewer prüft Bedeutung statt bloßer Überschriften. Keine zusätzliche
+Actions-Prüfung, Bots, automatische Startfreigabe oder zweite Aufgabenliste dafür.
+[Kurze und ausführliche Beispiele](task-writing-examples.md) zeigen die passende Tiefe.
+Bei Kit-Updates verwaltete Vorlagen über `init-project` aktualisieren; eigene
+Verbrauchervorlagen bewusst angleichen und fremde Anpassungen erhalten.
+
 ## Issue, branch and PR links
 
 After the Ready/authorization/ownership checks above, create new branches through
