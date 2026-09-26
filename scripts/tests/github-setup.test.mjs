@@ -46,7 +46,7 @@ test('Rejected supplied boards do not poison retries; copied boards survive fail
   // Node acts as the fixture CLI; command names select disposable response scripts.
   writeFileSync(join(checkout, 'repo'), 'console.log(JSON.stringify({viewerPermission:"ADMIN"}));');
   writeFileSync(join(checkout, 'api'), 'console.log("[[]]");');
-  writeFileSync(join(checkout, 'label'), "require('node:fs').appendFileSync('mutations', 'label;');");
+  writeFileSync(join(checkout, 'label'), "require('node:fs').appendFileSync('mutations', process.argv.slice(2).join(' ') + ';');");
   writeFileSync(join(checkout, 'project'), `
     const args = process.argv.slice(2), number = Number(args[1]);
     if (args[0] === 'link') require('node:fs').appendFileSync('mutations', 'link;');
@@ -79,12 +79,20 @@ test('Rejected supplied boards do not poison retries; copied boards survive fail
   assert.equal(JSON.parse(readFileSync(marker)).number, 2, 'Explicit corrected board replaces rejected saved selection');
   assert.equal(JSON.parse(readFileSync(marker)).start, 'ready', 'Project-owned start policy survives setup');
   const acceptedWrites = readFileSync(mutations, 'utf8');
-  assert.equal(acceptedWrites, 'link;label;label;label;label;label;');
+  assert.equal(acceptedWrites.split(';').filter(Boolean).length, 7, 'Link plus six missing labels');
+  assert.ok(acceptedWrites.includes('create needs-human-input --repo test/example --color d93f0b;'));
+  writeFileSync(join(checkout, 'api'), 'console.log(JSON.stringify([[{name:"needs-human-input",color:"abcdef",description:"Owner text"}]]));');
+  writeFileSync(mutations, '');
+  const existingLabel = run('2');
+  assert.equal(existingLabel.status, 0, existingLabel.stderr);
+  const preservedWrites = readFileSync(mutations, 'utf8');
+  assert.equal(preservedWrites.split(';').filter(Boolean).length, 6, 'Link plus five other missing labels');
+  assert.equal(preservedWrites.includes('needs-human-input'), false, 'Existing label is not changed');
   for (const number of ['4', '5', '6', '7']) {
     const legacy = run(number);
     assert.notEqual(legacy.status, 0);
     assert.match(legacy.stderr, /exactly the six workflow states in order/);
     assert.equal(JSON.parse(readFileSync(marker)).number, 2, 'Rejected review schema preserves the saved board');
-    assert.equal(readFileSync(mutations, 'utf8'), acceptedWrites, 'Rejected review schema has no remote writes');
+    assert.equal(readFileSync(mutations, 'utf8'), preservedWrites, 'Rejected review schema has no remote writes');
   }
 });

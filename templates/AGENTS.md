@@ -20,6 +20,9 @@ ordered implementation steps and verifiable acceptance; resolve comment question
 and mark missing decisions.
 Every PR explains what changed, why and its benefit, with concise proof/limits.
 Apply this to templates, blank issues, API/CLI and agent-created work alike.
+Missing human input goes first in the issue body with `needs-human-input` under
+[human input](.vendor/workflow-kit/docs/CONTRIBUTING.md#human-input). Accept issue or harness-chat answers;
+record the decision/source in the issue before continuing dependent work.
 
 New issues start in Backlog. Human-authorized triage may promote feasible issues
 to Ready even while dependencies or external blockers remain. Ready is not proof

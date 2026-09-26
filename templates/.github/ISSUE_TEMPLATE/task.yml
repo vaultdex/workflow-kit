@@ -2,6 +2,14 @@ name: Aufgabe
 description: Zweck, Nutzen, konkrete Umsetzung und überprüfbares Ergebnis.
 body:
   - type: textarea
+    id: human-input
+    attributes:
+      label: Menschliche Mitwirkung nötig
+      description: Nur bei nötiger menschlicher Entscheidung oder Handlung ausfüllen und needs-human-input setzen. Sonst leer lassen und leeren Abschnitt vor Übergabe entfernen.
+      placeholder: "Wer? Konkrete Frage/Handlung, Optionen und Empfehlung? Was blockiert, was bleibt möglich? Antwort hier oder im Agent-Chat; danach hält der Agent Entscheidung und Herkunft im Issue fest."
+    validations:
+      required: false
+  - type: textarea
     id: purpose
     attributes:
       label: Wofür brauchen wir das?
