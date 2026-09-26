@@ -21,7 +21,7 @@ function trustedGit() {
 test("Copilot discovery assets were generated for the pinned submodule and setup", () => {
   const git = trustedGit();
   const revision = execFileSync(git, ["rev-parse", "HEAD:.vendor/impeccable"], { encoding: "utf8" }).trim();
-  const files = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/impeccable/launchers.patch",
+  const files = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/stale-entry.mjs", "scripts/impeccable/launchers.patch",
     "scripts/impeccable/maintainability.patch", "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
   const inputs = createHash("sha256").update(files.map((file) => readFileSync(file, "utf8")
     .replaceAll("\r\n", "\n")).join("\0")).digest("hex");
