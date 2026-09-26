@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkoutRoot } from "./checkout-root.mjs";
-import { classifyEntry, listing, removeStale, sameFile } from "./stale-entry.mjs";
+import { classifyEntry, directoryState, removeStale } from "./stale-entry.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,6 +57,9 @@ function companionFiles(base) {
         .map((name) => `${directory}/${name}`) : []));
 }
 
+// Patches were added over time, so each earlier kit generation applied a prefix of this ordered list.
+const patches = ["launchers.patch", "maintainability.patch"];
+
 function copyTracked(from, to) {
   const files = git("-C", source, "ls-files", "-z", "--", from).split("\0").filter(Boolean);
   assert.ok(files.length, `Missing upstream files: ${from}`);
@@ -74,6 +77,22 @@ function copyTracked(from, to) {
       writeFileSync(target, content);
     }
   }
+}
+
+// One provider package from the pinned upstream with the given kit patches.
+function generateSkill(skill, to, applied) {
+  // Ignored local binaries/caches must never enter the pinned installation.
+  copyTracked(skill, to);
+  // Release archives add these root attribution files to every provider package.
+  for (const file of ["LICENSE", "NOTICE.md"])
+    writeFileSync(join(to, file), text(join(source, file)));
+  // Git for Windows may check upstream out as CRLF. Shell scripts and the LF patches need LF.
+  for (const name of ["impeccable", "impeccable.cmd", "live-browser-ignores.js"])
+    writeFileSync(join(to, "scripts", name), text(join(to, "scripts", name)));
+  for (const patch of applied)
+    git("apply", "--whitespace=error-all", `--directory=${relative(root, to).split(sep).join("/")}`, join(security, patch));
+  copyFileSync(join(security, "SHA256SUMS"), join(to, "scripts/SHA256SUMS"));
+  chmodSync(join(to, "scripts/impeccable"), 0o755);
 }
 
 localDirectory(state);
@@ -100,19 +119,7 @@ try {
   for (const skill of skills) {
     assert.equal(text(join(source, skill, "scripts/VERSION")).trim(), version,
       "Upstream engine changed: review VERSION, SHA256SUMS and fixed hook definitions together");
-    // Ignored local binaries/caches must never enter the pinned installation.
-    copyTracked(skill, join(next, skill));
-    // Release archives add these root attribution files to every provider package.
-    for (const file of ["LICENSE", "NOTICE.md"])
-      writeFileSync(join(next, skill, file), text(join(source, file)));
-    // Git for Windows may check upstream out as CRLF. Shell scripts and the LF patches need LF.
-    for (const name of ["impeccable", "impeccable.cmd", "live-browser-ignores.js"])
-      writeFileSync(join(next, skill, "scripts", name), text(join(next, skill, "scripts", name)));
-    for (const patch of ["launchers.patch", "maintainability.patch"])
-      git("apply", "--whitespace=error-all", `--directory=${relative(root, join(next, skill)).split(sep).join("/")}`,
-        join(security, patch));
-    copyFileSync(join(security, "SHA256SUMS"), join(next, skill, "scripts/SHA256SUMS"));
-    chmodSync(join(next, skill, "scripts/impeccable"), 0o755);
+    generateSkill(skill, join(next, skill), patches);
   }
   for (const directory of [".claude/agents", ".github/agents", ".opencode/commands"])
     copyTracked(directory, join(next, directory));
@@ -130,16 +137,24 @@ try {
   const trackedCopilot = new Set(git("ls-files", "-z", "--", ".github/skills/impeccable",
     ".github/agents/impeccable*").split("\0").filter(Boolean));
   // Preflight every destination before replacing any working installation.
-  // Unedited copies match the new or installed generated skill, or the pinned upstream file an older kit copied before
-  // its patches (the clean submodule is that revision). Links to this bundle path elsewhere are stale.
+  // Unedited copies equal one known generated state: the new or installed skill, or what an earlier kit generation
+  // (a shorter patch prefix) produced from this pinned upstream. Built only when a copy needs classification.
+  // Links to this bundle path elsewhere are stale.
+  const generations = new Map();
+  const earlier = skill => patches.slice(1).map((_, index) => {
+    const to = join(stage, `generation-${index + 1}`, skill);
+    if (!generations.has(to)) { generateSkill(skill, to, patches.slice(0, index + 1)); generations.set(to, true); }
+    return directoryState(to);
+  });
   const stale = [];
   for (const skill of linkedSkills) {
     const target = join(root, skill);
     localDirectory(dirname(target));
     if (!present(target)) continue;
+    const current = [directoryState(join(next, skill)), directoryState(join(bundle, skill))];
+    const copy = lstatSync(target).isDirectory() && !lstatSync(target).isSymbolicLink();
     const kind = classifyEntry(target, join(bundle, skill), relative(root, join(bundle, skill)),
-      (name, bytes) => [next, bundle, source].some(base => sameFile(join(base, skill, name), bytes)),
-      [listing(join(next, skill)), listing(join(bundle, skill))]);
+      copy ? [...current, ...earlier(skill)] : current);
     if (kind === "stale") stale.push(target);
     else assert.equal(kind, "current", `Existing skill left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
   }

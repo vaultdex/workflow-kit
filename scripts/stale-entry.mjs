@@ -9,13 +9,25 @@ export function listing(path) {
   return new Set(readdirSync(path, { recursive: true }).map(name => name.split(sep).join('/')));
 }
 
+/** True when `bytes` equal a generated file, also across a CRLF checkout of the same text. */
+export function sameFile(path, bytes) {
+  if (!lstatSync(path, { throwIfNoEntry: false })?.isFile()) return false;
+  const expected = readFileSync(path);
+  return expected.equals(bytes) || expected.toString('utf8').replaceAll('\r\n', '\n') === bytes.toString('utf8').replaceAll('\r\n', '\n');
+}
+
+/** A known generated directory as a state: its complete listing and its files' contents. */
+export const directoryState = path => ({ names: listing(path), matches: (name, bytes) => sameFile(join(path, name), bytes) });
+
+const equal = (a, b) => a.size === b.size && [...a].every(name => b.has(name));
+
 /**
  * Classifies an existing provider entry. `current` links to `expected`; `stale` is kit-owned and may be
- * replaced: a link to the same bundle path in another checkout (a copied junction/symlink) or a copy whose
- * complete listing equals one of the `manifests` (known generated directories) and whose every file
- * `known(name, bytes)` accepts as unedited generated output. Anything else returns the reason it stays untouched.
+ * replaced: a link to the same bundle path in another checkout (a copied junction/symlink) or a copy equal to
+ * one single known generated state, i.e. the same complete listing and every file matching that state. A copy
+ * assembled from several states, pruned or extended, stays untouched with the returned reason.
  */
-export function classifyEntry(target, expected, bundlePath, known, manifests) {
+export function classifyEntry(target, expected, bundlePath, states) {
   const entry = lstatSync(target);
   if (entry.isSymbolicLink()) {
     const to = resolve(dirname(target), readlinkSync(target));
@@ -27,20 +39,11 @@ export function classifyEntry(target, expected, bundlePath, known, manifests) {
   const files = [...names].filter(name => !lstatSync(join(target, name)).isDirectory());
   // An empty directory proves no kit ownership; it may be a user's own skill namespace.
   if (!files.length) return 'empty or foreign directory';
-  // Pruned or extended copies are edits even when every remaining file is generated.
-  if (!manifests.some(manifest => manifest?.size === names.size && [...names].every(name => manifest.has(name))))
-    return 'partial or foreign copy';
-  for (const name of files) {
-    if (!lstatSync(join(target, name)).isFile() || !known(name, readFileSync(join(target, name)))) return 'edited or foreign copy';
-  }
-  return 'stale';
-}
-
-/** True when `bytes` equal a generated file, also across a CRLF checkout of the same text. */
-export function sameFile(path, bytes) {
-  if (!lstatSync(path, { throwIfNoEntry: false })?.isFile()) return false;
-  const expected = readFileSync(path);
-  return expected.equals(bytes) || expected.toString('utf8').replaceAll('\r\n', '\n') === bytes.toString('utf8').replaceAll('\r\n', '\n');
+  if (files.some(name => !lstatSync(join(target, name)).isFile())) return 'edited or foreign copy';
+  const candidates = states.filter(state => state.names && equal(state.names, names));
+  if (!candidates.length) return 'partial or foreign copy';
+  const contents = new Map(files.map(name => [name, readFileSync(join(target, name))]));
+  return candidates.some(state => files.every(name => state.matches(name, contents.get(name)))) ? 'stale' : 'edited or foreign copy';
 }
 
 /** Removes an entry that classifyEntry reported as stale: only the link itself, or the verified copy. */

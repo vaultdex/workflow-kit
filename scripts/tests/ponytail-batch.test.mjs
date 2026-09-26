@@ -176,6 +176,25 @@ for (const changed of ['cloud', 'local', 'foreign-file', 'foreign-link', 'receip
     assert.deepEqual(readdirSync(join(f.root, '.workflow-kit')), ['ponytail']);
   });
 
+// #38: a harness worktree may hold a retired skill as a plain copy instead of a link.
+for (const edited of [false, true]) test(`retirement ${edited ? 'keeps an edited' : 'removes an unedited'} copied provider entry`, t => {
+  const f = fixture(t); succeeds(f.run());
+  const copy = join(f.root, '.claude/skills/ponytail-audit');
+  const content = readFileSync(join(copy, 'SKILL.md'));
+  unlinkSync(copy);
+  write(join(copy, 'SKILL.md'), edited ? 'User note\n' : content);
+  rmSync(join(f.source, 'skills/ponytail-audit'), { recursive: true }); f.pin();
+  const result = f.run();
+  if (edited) {
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Foreign retired provider link; preserved \(edited or foreign copy\)/);
+    assert.equal(readFileSync(join(copy, 'SKILL.md'), 'utf8'), 'User note\n');
+  } else {
+    succeeds(result);
+    assert.equal(lstatSync(copy, { throwIfNoEntry: false }), undefined);
+  }
+});
+
 test('an already missing retired cloud directory does not block provider cleanup', t => {
   const f = fixture(t); succeeds(f.run());
   const skill = 'ponytail-audit';

@@ -90,6 +90,17 @@ test('setup replaces copied or relocated kit entries and protects edited or fore
   assert.ok(lstatSync(join(empty, 'nested')).isDirectory());
   rmSync(empty, { recursive: true });
 
+  // Each file matches some kit generation (unpatched launcher, patched waiver script), but no single one.
+  const mixed = join(worktree, '.claude/skills/impeccable');
+  unlinkSync(mixed);
+  cpSync(join(original, '.claude/skills/impeccable'), mixed, { recursive: true, dereference: true });
+  copyFileSync(join(kit, '.vendor/impeccable/.claude/skills/impeccable/scripts/impeccable'), join(mixed, 'scripts/impeccable'));
+  const mixedRefused = setup(worktree);
+  assert.notEqual(mixedRefused.status, 0);
+  assert.match(mixedRefused.stderr, /left untouched \(edited or foreign copy\).*\.claude.skills.impeccable/s);
+  assert.ok(lstatSync(join(mixed, 'scripts/impeccable')).isFile());
+  rmSync(mixed, { recursive: true });
+
   // Every remaining file is generated, but a deleted one makes the copy a user edit.
   const pruned = join(worktree, '.agent/skills/ponytail');
   unlinkSync(pruned);
