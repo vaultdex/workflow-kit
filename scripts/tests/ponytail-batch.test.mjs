@@ -42,6 +42,7 @@ function fixture(t) {
     + '@@ -1,3 +1,3 @@\n # ponytail\n-base\n+patched\n Grüße 🎴\n');
   copyFileSync(setup, join(kit, 'scripts/setup-ponytail.mjs'));
   copyFileSync(new URL('../checkout-root.mjs', import.meta.url), join(kit, 'scripts/checkout-root.mjs'));
+  copyFileSync(new URL('../stale-entry.mjs', import.meta.url), join(kit, 'scripts/stale-entry.mjs'));
   const trace = join(base, 'git-events.jsonl');
   const run = () => {
     writeFileSync(trace, '');

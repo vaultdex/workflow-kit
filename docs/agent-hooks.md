@@ -32,12 +32,17 @@ When the user requests initial setup, the agent can run the installers from the
 reviewed product root. These are explicit setup commands, never automatic hook bodies:
 
 ```sh
+node .vendor/workflow-kit/scripts/setup-skills.mjs .
 node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .
 node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .
 ```
 
 The final `.` selects this project. Inside the kit itself use `node scripts/... .`
-instead. No consumer forwarding scripts are needed. After installation,
+instead. The hook installers need the generated skills and hooks, so run `setup-skills.mjs`
+first on a new checkout or worktree. Setup replaces kit-owned leftovers at provider
+skill/hook paths: unedited copies (a harness worktree may copy ignored links as
+folders) and links to the same bundle path in another checkout. Edited or foreign
+entries stay untouched; the error names the path and the next step. No consumer forwarding scripts are needed. After installation,
 review/enable native hook definitions. One integration's setup does not initialize
 the other. Impeccable's missing-engine hint belongs at SessionStart; quiet missing
 edit/Stop hooks do not certify successful analysis. Existing engine failures remain errors.

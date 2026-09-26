@@ -9,6 +9,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkoutRoot } from './checkout-root.mjs';
+import { classifyEntry, removeStale, sameFile } from './stale-entry.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
@@ -98,19 +99,25 @@ try {
   writeFileSync(join(next, '.owner'), 'vaultdex-workflow-kit\n');
   const links = ['.agent', '.agents', '.claude', '.opencode', '.pi'].flatMap(p => skills.map(s => [`${p}/skills/${s}`, `.agents/skills/${s}`]));
   links.push(['.agents/hooks', '.agents/hooks']);
-  for (const [dest, from] of links) {
-    const target = join(root, dest);
-    directory(dirname(target));
-    if (present(target)) assert.ok(present(target).isSymbolicLink()
-      && resolve(dirname(target), readlinkSync(target)) === join(bundle, from), `Existing skill/hook left untouched: ${target}`);
-  }
-  const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
-    ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
-    .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
   const receiptPath = join(root, '.github/skills/ponytail/.workflow-source.json');
   directory(dirname(receiptPath));
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   const old = existsSync(receiptPath) ? JSON.parse(text(receiptPath)).files : {};
+  // Unedited copies match the new, the installed or a receipt-recorded generated file.
+  const known = from => (name, bytes) => sameFile(join(next, from, name), bytes) || sameFile(join(bundle, from, name), bytes)
+    || (from.startsWith('.agents/skills/') && old[`.github/skills/${from.split('/')[2]}/${name}`] === hash(bytes.toString('utf8').replaceAll('\r\n', '\n')));
+  const stale = [];
+  for (const [dest, from] of links) {
+    const target = join(root, dest);
+    directory(dirname(target));
+    if (!present(target)) continue;
+    const kind = classifyEntry(target, join(bundle, from), relative(root, join(bundle, from)), known(from));
+    if (kind === 'stale') stale.push(target);
+    else assert.equal(kind, 'current', `Existing skill/hook left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
+  }
+  const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
+    ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
+    .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
   // Receipts authorize only these generated outputs, never arbitrary checkout paths.
   const retired = [], retiredLinks = [], retiredDirectories = new Set();
   for (const [file, digest] of Object.entries(old)) {
@@ -165,6 +172,7 @@ try {
     if (existsSync(previous)) renameSync(previous, bundle);
     throw error;
   }
+  for (const target of stale) removeStale(target);
   for (const [dest, from] of links) {
     const target = join(root, dest);
     if (!present(target)) symlinkSync(process.platform === 'win32' ? join(bundle, from) : relative(dirname(target), join(bundle, from)),

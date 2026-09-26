@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
-  readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync,
+  readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync,
   unlinkSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkoutRoot } from "./checkout-root.mjs";
+import { classifyEntry, removeStale, sameFile } from "./stale-entry.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -117,7 +118,7 @@ try {
     copyTracked(directory, join(next, directory));
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
-  const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/impeccable/launchers.patch",
+  const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/stale-entry.mjs", "scripts/impeccable/launchers.patch",
     "scripts/impeccable/maintainability.patch", "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
   const inputs = createHash("sha256").update(inputFiles.map((file) => text(join(kit, file))).join("\0")).digest("hex");
   const recorded = existsSync(join(root, receipt)) ? JSON.parse(text(join(root, receipt))) : null;
@@ -129,14 +130,16 @@ try {
   const trackedCopilot = new Set(git("ls-files", "-z", "--", ".github/skills/impeccable",
     ".github/agents/impeccable*").split("\0").filter(Boolean));
   // Preflight every destination before replacing any working installation.
+  // Unedited copies match the new or the installed generated skill; links to this bundle path elsewhere are stale.
+  const stale = [];
   for (const skill of linkedSkills) {
     const target = join(root, skill);
     localDirectory(dirname(target));
-    if (present(target)) {
-      assert.ok(lstatSync(target).isSymbolicLink(), `Existing skill left untouched: ${target}`);
-      assert.equal(resolve(dirname(target), readlinkSync(target)), join(bundle, skill),
-        `Foreign skill link left untouched: ${target}`);
-    }
+    if (!present(target)) continue;
+    const kind = classifyEntry(target, join(bundle, skill), relative(root, join(bundle, skill)),
+      (name, bytes) => sameFile(join(next, skill, name), bytes) || sameFile(join(bundle, skill, name), bytes));
+    if (kind === "stale") stale.push(target);
+    else assert.equal(kind, "current", `Existing skill left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
   }
   for (const file of new Set([...oldFiles, ...newFiles, ...trackedCopilot])) {
     const target = join(root, file);
@@ -158,6 +161,7 @@ try {
     if (existsSync(previous)) renameSync(previous, bundle);
     throw error;
   }
+  for (const target of stale) removeStale(target);
   for (const skill of linkedSkills) {
     const target = join(root, skill);
     if (!present(target)) symlinkSync(process.platform === "win32" ? join(bundle, skill)
