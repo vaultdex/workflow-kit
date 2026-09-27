@@ -29,8 +29,10 @@ Codex: https://learn.chatgpt.com/docs/third-party/github
 Dependabot: https://docs.github.com/en/code-security/concepts/supply-chain-security/about-the-dependabot-yml-file
 Renovate: https://docs.renovatebot.com/modules/manager/git-submodules/
 
-Default labels: ci, documentation, testing, security, dependencies. Existing label
-colors/descriptions are preserved. Add product-specific areas in the consumer.
+Default labels: ci, documentation, testing, security, dependencies, needs-human-input.
+Existing label colors/descriptions are preserved. Add product-specific areas in
+the consumer. For required human decisions/actions, apply `needs-human-input`
+with the first issue section under [human input](CONTRIBUTING.md#human-input).
 
 For server enforcement, configure a GitHub ruleset requiring PRs, human approval
 and the project's verified checks. Never require a path-filtered check that can

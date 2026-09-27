@@ -92,6 +92,7 @@ sie selbst treffen; fehlende Produkt-, Architektur-, Datenschutz- oder
 Kostenentscheidungen nicht erraten. Dafür konkrete Frage, Empfehlung und zuständige
 Person festhalten. Vorschlag ist keine Freigabe; Planungsarbeit ist keine gelieferte
 Implementierung. Bestehende Start-, Abnahme- und Scope-Regeln bleiben verbindlich.
+Fehlende menschliche Mitwirkung folgt zusätzlich [dieser Kennzeichnung](#human-input).
 
 Alle vorhandenen Issue-Kommentare auf offene Fragen und spätere Entscheidungen
 prüfen. Belegte Antworten und akzeptierte Entscheidungen in den Haupttext
@@ -265,7 +266,69 @@ This is a contributor obligation, not a server-enforced required-field check.
 ## Labels
 
 Use native issue forms and explicit labels on CLI-created issues/PRs. Labels describe
-scope, never approval, priority, checks or merge authority. Preserve existing labels.
+scope or a concrete need for human input, never approval, priority, checks or merge
+authority. Preserve existing labels.
+
+## Human input
+
+Braucht ein Issue eine menschliche Entscheidung, Freigabe oder Handlung, stehen
+**beide** Hinweise sofort fest: erster sichtbarer Abschnitt im Haupttext
+`## Menschliche Mitwirkung nötig` und Label `needs-human-input`. Das gilt bei
+Erstellung, Überarbeitung und neu entdeckten Blockern, auch für Blank-Issues,
+API/CLI und Agenten. Nicht in Umsetzungsschritten oder Kommentaren verstecken.
+Das allgemeine Issue-Formular enthält dafür nur einen Ausfüllhinweis, kein leeres
+Blocker-Feld. Bei echtem Bedarf direkt nach dem Absenden Kopfblock und Label
+ergänzen, bevor das Issue zur Bearbeitung übergeben wird.
+
+Der Kopfblock nennt für jede offene Frage:
+
+- **Wer:** zuständige Person oder Rolle; unklare Zuständigkeit ausdrücklich nennen.
+- **Was fehlt:** konkrete Frage oder Handlung, bei Entscheidungen Optionen und
+  begründete Empfehlung. Routineentscheidungen trifft der Agent selbst.
+- **Wirkung:** blockierte Umsetzung/Abnahme und unabhängig ausführbare Arbeit.
+- **Antwortweg:** Issue-Kommentar oder direkte Antwort im Harness-/Agent-Chat;
+  erforderliches Ergebnis und nächster Schritt des Agenten.
+
+Beispiel für eine noch offene Produktentscheidung:
+
+> ## Menschliche Mitwirkung nötig
+> - **Wer:** Produkt-Owner.
+> - **Frage:** Sollen abgelehnte Datensätze eigene Reviewfälle bleiben?
+> - **Empfehlung A:** Nur Identitätsfälle anzeigen; Datensatzbelege behalten.
+>   **Alternative B:** Datensatzfälle anzeigen und bei Auflösung mit schließen.
+> - **Blockiert:** Umsetzung und Abnahme der Bereinigung. Reproduktion ist möglich.
+> - **Antwort:** A oder B im Issue oder Agent-Chat. Danach konkretisiert der Agent
+>   Umsetzung und Tests im Issue.
+
+Kommentar und Chat sind gleichwertige Antwortwege; Menschen müssen Antworten
+nicht doppelt eintragen. Vor abhängiger Arbeit übernimmt der Agent die ausdrückliche
+Entscheidung, deren Geltungsbereich und Herkunft in den Issue-Haupttext und passt
+Plan, Abnahme und Wiederaufnahme an. Quelle: Kommentarlink oder bei einer
+Chat-Antwort Datum, antwortende Person und verfügbare Sitzungsreferenz. Fehlt ein
+teilbarer Link, genügt eine eindeutige Sitzungskennung; keine privaten Transkripte
+veröffentlichen. Nur entscheidungsrelevante, zur Veröffentlichung geeignete Inhalte
+übernehmen; Geheimnisse bleiben in vorgesehenen privaten Eingabewegen.
+
+Teilantworten lösen nur beantwortete Punkte. Widerspruch, unklare Antwort oder
+fehlende Entscheidungsbefugnis bleiben offen und werden gezielt geklärt.
+Empfehlung, Schweigen und Zeitablauf sind keine Freigabe. Erledigte Punkte mit
+Quelle unter „Abhängigkeiten und Wiederaufnahme“ erhalten und aus dem aktiven
+Kopfblock entfernen. Erst wenn **alle** menschlichen Punkte geklärt und erforderliche
+Handlungen belegt sind, Kopfblock und Label entfernen. Bei erneutem Bedarf beide
+wieder setzen. Leere Formularabschnitte vor Übergabe entfernen.
+
+Label und Kopfblock gelten unabhängig vom Project-Status. Sie ändern weder
+Priorität noch Ownership und ersetzen keine nativen Abhängigkeiten. Normale
+offene Vorgänger oder die reguläre PR-Abnahme in Human review allein brauchen
+dieses Label nicht. Ein zusätzlicher konkreter Entscheidungsbedarf dort schon.
+Nach Klärung Start-, Scope-, Ownership- und Review-Gates erneut prüfen; keine
+automatische Backlog-Promotion, kein automatischer Merge. Unabhängige Arbeit nur
+innerhalb bestehender Autorisierung fortführen.
+
+`setup-github.mjs` legt das fehlende Label bei der Einrichtung an und erhält
+vorhandene Labels. Bestehende Projekte ergänzen nur das fehlende Label nativ,
+ohne vollständiges Setup erneut auszuführen. Autoren/Agenten halten Text und
+Label gemeinsam aktuell; keine neue Automation, Chat-Brücke oder Polling-Schleife.
 
 ## Recovery, scope and findings
 

@@ -8,3 +8,6 @@ Write issues and PRs in simple German using the shared
 [planning and PR rules](.vendor/workflow-kit/docs/CONTRIBUTING.md#issue-plans-and-pr-descriptions),
 including work created without a template. Keep project-owned templates aligned
 when updating the kit; generated templates use the existing `init-project` path.
+Put missing [human input](.vendor/workflow-kit/docs/CONTRIBUTING.md#human-input)
+first in the issue and set `needs-human-input`; record answers from comments or
+harness chat in the issue before continuing dependent work.
