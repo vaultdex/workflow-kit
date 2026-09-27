@@ -6,11 +6,28 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { classifyEntry, listing } from '../stale-entry.mjs';
+import { classifyEntry, directoryState, listing } from '../stale-entry.mjs';
 
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
 const link = (to, at) => symlinkSync(to, at, process.platform === 'win32' ? 'junction' : 'dir');
+
+for (const directory of [false, true]) test(`copy matching preserves ${directory ? 'directory' : 'file'} path types`, t => {
+  const base = mkdtempSync(join(tmpdir(), 'typed copy '));
+  t.after(() => { assert.equal(dirname(base), tmpdir()); rmSync(base, { recursive: true, force: true }); });
+  const generated = join(base, 'generated'), copy = join(base, 'copy');
+  mkdirSync(generated);
+  writeFileSync(join(generated, 'LICENSE.md'), 'Generated license\n');
+  if (directory) mkdirSync(join(generated, 'reference'));
+  else writeFileSync(join(generated, 'SKILL.md'), 'Generated skill\n');
+  cpSync(generated, copy, { recursive: true });
+  const changed = join(copy, directory ? 'reference' : 'SKILL.md');
+  rmSync(changed, { recursive: true });
+  if (directory) writeFileSync(changed, 'Local note\n');
+  else mkdirSync(changed);
+  assert.match(classifyEntry(copy, '', '', [directoryState(generated)], () => false), /^(partial|edited) or foreign copy$/);
+  assert.equal(lstatSync(changed).isDirectory(), !directory);
+});
 
 test('classifying a copy never traverses its nested directory links', t => {
   const base = mkdtempSync(join(tmpdir(), 'linked copy '));

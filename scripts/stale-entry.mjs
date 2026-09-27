@@ -3,7 +3,7 @@
 import { lstatSync, readdirSync, readFileSync, readlinkSync, rmSync, unlinkSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
-/** All files and directories below `path` as POSIX paths, or null when it is no directory. */
+/** Complete POSIX paths, with a trailing slash for directories; null when `path` is no directory. */
 export function listing(path) {
   if (!lstatSync(path, { throwIfNoEntry: false })?.isDirectory()) return null;
   // Native recursive readdir also follows Windows junctions, even with Dirents.
@@ -12,8 +12,9 @@ export function listing(path) {
     const directory = pending.pop();
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const child = join(directory, entry.name);
-      names.add(relative(path, child).split(sep).join('/'));
-      if (entry.isDirectory() && !entry.isSymbolicLink()) pending.push(child);
+      const isDirectory = entry.isDirectory() && !entry.isSymbolicLink();
+      names.add(relative(path, child).split(sep).join('/') + (isDirectory ? '/' : ''));
+      if (isDirectory) pending.push(child);
     }
   }
   return names;
@@ -29,6 +30,7 @@ export function sameFile(path, bytes) {
 /** A known generated directory as a state: its complete listing and its files' contents. */
 export const directoryState = path => ({ names: listing(path), matches: (name, bytes) => sameFile(join(path, name), bytes) });
 
+/** Compare complete path manifests, including path types and empty directories. */
 const equal = (a, b) => a.size === b.size && [...a].every(name => b.has(name));
 
 /**

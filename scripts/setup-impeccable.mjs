@@ -31,6 +31,7 @@ assert.ok(gitBinary, "Install Git in an absolute PATH directory outside this che
 const git = (...args) => execFileSync(gitBinary, args, { cwd: root, encoding: "utf8",
   env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: "1" } });
 const present = (path) => lstatSync(path, { throwIfNoEntry: false });
+/** Identify a kit bundle by its regular ownership marker, without trusting its contents. */
 const owned = path => present(join(path, '.owner'))?.isFile() && text(join(path, '.owner')).trim() === 'vaultdex-impeccable';
 const digest = path => createHash("sha256").update(text(path)).digest("hex");
 
@@ -80,7 +81,7 @@ function copyTracked(from, to) {
   }
 }
 
-// One provider package from the pinned upstream with the given kit patches.
+/** Build one provider package from pinned upstream with the given ordered patch prefix. */
 function generateSkill(skill, to, applied) {
   // Ignored local binaries/caches must never enter the pinned installation.
   copyTracked(skill, to);
@@ -141,6 +142,7 @@ try {
   // (a shorter patch prefix) produced from this pinned upstream. Built only when a copy needs classification.
   // Links to this bundle path elsewhere are stale only with the kit's ownership marker.
   const generations = new Map();
+  /** Reconstruct earlier pinned generations, caching each within this setup. */
   const earlier = skill => patches.slice(1).map((_, index) => {
     const to = join(stage, `generation-${index + 1}`, skill);
     if (!generations.has(to)) { generateSkill(skill, to, patches.slice(0, index + 1)); generations.set(to, true); }

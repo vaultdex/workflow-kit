@@ -18,6 +18,7 @@ const state = join(root, '.workflow-kit');
 const bundle = join(state, 'ponytail');
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
+/** Identify a kit bundle by its regular ownership marker, without trusting its contents. */
 const owned = path => present(join(path, '.owner'))?.isFile() && text(join(path, '.owner')) === 'vaultdex-workflow-kit\n';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const checkouts = [root, kit, process.cwd()].map(p => checkoutRoot(p));
@@ -113,6 +114,7 @@ try {
       try { receipts.push(JSON.parse(git('show', `${commit}:${receiptFile}`)).files ?? {}); } catch { /* not a receipt */ }
     }
   }
+  /** Complete skill manifests backed by current or committed kit receipts. */
   const recorded = skill => receipts.map(files => {
     const prefix = `.github/skills/${skill}/`;
     const entries = Object.entries(files).filter(([file]) => file.startsWith(prefix)).map(([file, digest]) => [file.slice(prefix.length), digest]);
@@ -120,6 +122,7 @@ try {
     return { names: entries.length ? new Set(digests.keys()) : null,
       matches: (name, bytes) => digests.get(name) === hash(bytes.toString('utf8').replaceAll('\r\n', '\n')) };
   });
+  /** Only generated or recorded manifests authorize copies; installed bundles are mutable. */
   const states = from => [directoryState(join(next, from)),
     ...(from.startsWith('.agents/skills/') ? recorded(from.split('/')[2]) : [])];
   const stale = [];
