@@ -54,6 +54,12 @@ review/enable native hook definitions. One integration's setup does not initiali
 the other. Impeccable's missing-engine hint belongs at SessionStart; quiet missing
 edit/Stop hooks do not certify successful analysis. Existing engine failures remain errors.
 
+Run setup once at a time per checkout; do not edit or replace its generated bundles
+or provider entries while it runs. This explicit local setup assumes a stable
+filesystem during inspection and publication. It does not protect against a
+concurrent process swapping paths between filesystem operations. Revisit that
+boundary if setup becomes automated or runs in a shared writable checkout.
+
 - **Codex CLI:** open `/hooks` to review, enable and trust the named definitions.
 - **Codex Desktop:** use the hook management view in the app's settings; `/hooks`
   is a CLI command, not a desktop chat command. For either Codex host, start a fresh
