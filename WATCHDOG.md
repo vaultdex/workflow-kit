@@ -1,5 +1,6 @@
 # Watchdog
 
+Use [shared agent rules](AGENT_RULES.md); read this detail for behavior changes.
 Understand the affected flow, then ship the smallest correct change.
 
 ## Decision ladder
@@ -42,9 +43,9 @@ without waiting for another request, a linked actionable follow-up under
 [the contribution workflow](docs/CONTRIBUTING.md#recovery-scope-and-findings).
 Check relevant open/closed issues, board items and PRs first; extend compatible
 existing work and coordinate foreign active scope instead of duplicating it.
-New follow-ups enter the configured GitHub Project as unassigned Backlog issues with a milestone, explicit Project Priority, matching labels,
-reproduction or durable evidence, impact and urgency, bounded scope, acceptance
-and verification; include known blockers. Unconfirmed signals need a concrete
+Follow-ups use the contribution workflow's metadata, Backlog and ownership rules.
+Include reproduction or durable evidence, impact/urgency, bounded scope, acceptance,
+verification and known blockers. Unconfirmed signals need a concrete
 investigation question and evidence needed, never a claim of a proven defect.
 Surface critical security, data-loss or availability risks immediately without
 exposing secrets. Link dispositions in delivery; task creation grants no authority
@@ -61,10 +62,10 @@ silencing messages alone is not a fix.
 
 If a fix is not straightforward or exceeds authorized scope, create or reuse a
 linked actionable issue with the message/source, impact, remediation, acceptance
-and verification. If remediation is currently impossible, durably document the
-concrete blocker, supporting evidence and condition for revisiting it in the owning
-issue or documentation. Before delivery, account for every encountered warning or
-deprecation with its verified fix, follow-up issue or documented impossibility.
+and verification. If remediation is currently impossible, record the concrete blocker,
+supporting evidence and revisit condition in the linked owning/follow-up issue.
+Before delivery, account for every encountered warning or deprecation with its
+verified fix or linked disposition; documentation alone does not replace an actionable issue.
 
 ## Change test
 
