@@ -42,8 +42,9 @@ Product-specific build, database and integration tests remain with the product.
 For an existing project use `init-project.mjs . --existing`: managed hooks and
 ignored generated paths are integrated; previously managed template files are
 updated if unedited. Unmanaged contribution rules, issue forms, update bots and
-product CI remain yours. Link [shared agent rules](AGENT_RULES.md) from a short root
-AGENTS.md containing only local contracts/exceptions. The shared entry routes to
+product CI remain yours. In the consumer's short root AGENTS.md, link
+`.vendor/workflow-kit/AGENT_RULES.md` ([shared entry here](AGENT_RULES.md)) and keep
+only local contracts/exceptions. The shared entry routes to
 details when needed; do not load every linked guide or the kit-maintainer AGENTS.md.
 Existing conflicting files are refused, never force-overwritten.
 

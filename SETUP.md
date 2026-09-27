@@ -82,7 +82,7 @@ generated Cloud Discovery; leave local bundles uncommitted. The initializer
 updates kit-managed hook files and protects edited or unmanaged content; resolve
 reported conflicts instead of overwriting them.
 
-Existing-project mode preserves unmanaged files. Link the shared AGENT_RULES.md
+Existing-project mode preserves unmanaged files. Link `.vendor/workflow-kit/AGENT_RULES.md`
 from a short root AGENTS.md, retaining project-specific
 rules, architecture, build/test commands and required checks. For new projects,
 ask about language/runtime and checks only if the repository provides no evidence;

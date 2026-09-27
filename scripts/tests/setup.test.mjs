@@ -45,9 +45,19 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   mkdirSync(dirname(installer), { recursive: true });
   copyFileSync(join(kit, 'scripts/init-project.mjs'), installer);
   cpSync(join(kit, 'templates'), join(fixture, 'templates'), { recursive: true });
+  const sharedEntry = join(fixture, '.vendor/workflow-kit/AGENT_RULES.md');
+  mkdirSync(dirname(sharedEntry), { recursive: true });
+  copyFileSync(join(kit, 'AGENT_RULES.md'), sharedEntry);
+  const assertSharedEntry = () => {
+    const rules = readFileSync(join(fixture, 'AGENTS.md'), 'utf8');
+    const link = rules.match(/\]\(([^)]+\/AGENT_RULES\.md)\)/);
+    assert.ok(link, 'Consumer AGENTS must link the shared entry');
+    assert.equal(readFileSync(join(fixture, link[1]), 'utf8'), readFileSync(sharedEntry, 'utf8'));
+  };
   const init = (...args) => spawnSync(process.execPath, [installer, fixture, ...args], { encoding: 'utf8' });
   const first = init();
   assert.equal(first.status, 0, first.stderr);
+  assertSharedEntry();
   const writingTemplates = ['.github/ISSUE_TEMPLATE/task.yml', '.github/PULL_REQUEST_TEMPLATE.md'];
   for (const name of writingTemplates) {
     const expected = readFileSync(join(fixture, 'templates', name), 'utf8').replaceAll('\r\n', '\n');
@@ -57,6 +67,7 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   }
   assert.notEqual(init('--existing', '--check').status, 0);
   assert.equal(init('--existing').status, 0);
+  assertSharedEntry();
   for (const name of writingTemplates)
     assert.equal(readFileSync(join(fixture, name), 'utf8'), readFileSync(join(fixture, 'templates', name), 'utf8'));
   for (const link of ['.agents/hooks', ...['.agent', '.agents', '.claude', '.opencode', '.pi'].map(p => `${p}/skills/ponytail`)]) {
@@ -95,6 +106,7 @@ test('portable setup preserves foreign configuration, rejects edited skills and 
   const updated = init('--existing');
   assert.equal(updated.status, 0, updated.stderr);
   assert.equal(readFileSync(join(fixture, 'AGENTS.md'), 'utf8'), nextRules);
+  assertSharedEntry();
   writeFileSync(join(fixture, 'AGENTS.md'), 'project-specific rule\n');
   assert.notEqual(init('--check').status, 0);
   assert.notEqual(init().status, 0);

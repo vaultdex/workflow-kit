@@ -42,7 +42,7 @@ take precedence within system, permission and safety boundaries.
 
 | Step | Required detail |
 | --- | --- |
-| Take or create work | [Board/ownership](docs/CONTRIBUTING.md#board-and-ownership), [issue plan](docs/CONTRIBUTING.md#issue-plans-and-pr-descriptions), [metadata](docs/CONTRIBUTING.md#priority-and-issue-metadata) |
+| Take or create work | [Board/ownership](docs/CONTRIBUTING.md#board-and-ownership), [issue plan](docs/CONTRIBUTING.md#issue-plans-and-pr-descriptions), [milestones](docs/CONTRIBUTING.md#milestones), [metadata](docs/CONTRIBUTING.md#priority-and-issue-metadata) |
 | Branch, PR or scope boundary | [Issue/branch/PR links](docs/CONTRIBUTING.md#issue-branch-and-pr-links), [blockers and findings](docs/CONTRIBUTING.md#recovery-scope-and-findings) |
 | Change behavior | Affected project architecture/contracts and [Watchdog](WATCHDOG.md) |
 | Publish or rework | [Publication/review](docs/CONTRIBUTING.md#publication-and-review); local test commands and final gates |
