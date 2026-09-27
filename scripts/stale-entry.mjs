@@ -1,12 +1,22 @@
 // Zweck: Kit-eigene Altstände an Skill-/Hook-Zielen erkennen, fremde Inhalte schützen.
 // Nutzen: Kopierte Worktrees und ältere Checkouts werden ohne Handarbeit eingerichtet (#38).
 import { lstatSync, readdirSync, readFileSync, readlinkSync, rmSync, unlinkSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 /** All files and directories below `path` as POSIX paths, or null when it is no directory. */
 export function listing(path) {
   if (!lstatSync(path, { throwIfNoEntry: false })?.isDirectory()) return null;
-  return new Set(readdirSync(path, { recursive: true }).map(name => name.split(sep).join('/')));
+  // Native recursive readdir also follows Windows junctions, even with Dirents.
+  const names = new Set(), pending = [path];
+  while (pending.length) {
+    const directory = pending.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const child = join(directory, entry.name);
+      names.add(relative(path, child).split(sep).join('/'));
+      if (entry.isDirectory() && !entry.isSymbolicLink()) pending.push(child);
+    }
+  }
+  return names;
 }
 
 /** True when `bytes` equal a generated file, also across a CRLF checkout of the same text. */

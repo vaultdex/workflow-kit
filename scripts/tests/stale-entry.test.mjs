@@ -6,10 +6,23 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { classifyEntry, listing } from '../stale-entry.mjs';
 
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
 const link = (to, at) => symlinkSync(to, at, process.platform === 'win32' ? 'junction' : 'dir');
+
+test('classifying a copy never traverses its nested directory links', t => {
+  const base = mkdtempSync(join(tmpdir(), 'linked copy '));
+  t.after(() => { assert.equal(dirname(base), tmpdir()); rmSync(base, { recursive: true, force: true }); });
+  const copy = join(base, 'copy'), outside = join(base, 'outside');
+  mkdirSync(copy); mkdirSync(outside);
+  writeFileSync(join(outside, 'private.txt'), 'Untouched\n');
+  link(outside, join(copy, 'nested'));
+  assert.deepEqual(listing(copy), new Set(['nested']));
+  assert.equal(classifyEntry(copy, '', '', [], () => false), 'edited or foreign copy');
+  assert.equal(readFileSync(join(outside, 'private.txt'), 'utf8'), 'Untouched\n');
+});
 
 // #38: a harness worktree copies ignored provider entries as plain folders or keeps links to the
 // original checkout. Setup replaces such kit-owned leftovers and still protects edited or foreign content.
