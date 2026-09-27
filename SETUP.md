@@ -76,10 +76,11 @@ database, API and runtime proofs stay in the product, not in this generic kit.
 
 To refresh stale consumer copies after updating the kit pin, rerun
 `node .vendor/workflow-kit/scripts/init-project.mjs . --existing` from the consumer
-root, review and commit its generated changes, then rerun
-`node .vendor/workflow-kit/scripts/setup-skills.mjs .`. The initializer updates
-kit-managed hook files and protects edited or unmanaged content; resolve reported
-conflicts instead of overwriting them.
+root, then rerun `node .vendor/workflow-kit/scripts/setup-skills.mjs .`. Review
+generated changes after both commands. Commit intended source/configuration and
+generated Cloud Discovery; leave local bundles uncommitted. The initializer
+updates kit-managed hook files and protects edited or unmanaged content; resolve
+reported conflicts instead of overwriting them.
 
 Existing-project mode preserves unmanaged files. Integrate links to the shared
 CONTRIBUTING.md and WATCHDOG.md into its root AGENTS.md, retaining project-specific
