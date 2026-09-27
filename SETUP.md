@@ -74,6 +74,14 @@ unchanged managed wrappers; update bootstrap callers, CI, tests and documentatio
 in the same migration. Edited or unmanaged files are not removed. Product-specific
 database, API and runtime proofs stay in the product, not in this generic kit.
 
+To refresh stale consumer copies after updating the kit pin, rerun
+`node .vendor/workflow-kit/scripts/init-project.mjs . --existing` from the consumer
+root, then rerun `node .vendor/workflow-kit/scripts/setup-skills.mjs .`. Review
+generated changes after both commands. Commit intended source/configuration and
+generated Cloud Discovery; leave local bundles uncommitted. The initializer
+updates kit-managed hook files and protects edited or unmanaged content; resolve
+reported conflicts instead of overwriting them.
+
 Existing-project mode preserves unmanaged files. Integrate links to the shared
 CONTRIBUTING.md and WATCHDOG.md into its root AGENTS.md, retaining project-specific
 rules, architecture, build/test commands and required checks. For new projects,
@@ -134,11 +142,11 @@ personal hooks when the user selected only one agent.
 
 Read [hook preflight](docs/agent-hooks.md) and the pinned integration documentation.
 Explain any known blocking security findings before activation. In particular,
-[Ponytail PATH hardening](https://github.com/vaultdex/workflow-kit/issues/3) is an
-open inherited risk until its actual resolution; do not treat Impeccable's hostile
-checkout proof as evidence for Ponytail's native start commands. Keep affected
-automatic Ponytail hooks disabled while that start boundary is unresolved; manual
-skill use and the rest of setup can continue.
+[Ponytail PATH hardening](https://github.com/vaultdex/workflow-kit/issues/3) was fixed
+by [PR #25](https://github.com/vaultdex/workflow-kit/pull/25). Its verified native
+launcher snapshot `4.10.0-8` is documented in [docs/ponytail.md](docs/ponytail.md).
+The launcher protects Node startup from checkout-local PATH executables; review
+provider hook definitions before enabling them.
 
 For supported, reviewed hooks use the provided explicit installers from the product root:
 
