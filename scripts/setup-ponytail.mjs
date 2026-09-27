@@ -2,13 +2,14 @@
 // Nutzen: Ein Bundle fuer alle lokalen Provider; keine kopierte Laufzeitlogik im Produkt.
 // Aufruf: setup-skills bei Einrichtung oder bewusstem Kit-Update, nicht pro Agenten-Turn.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync,
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
   realpathSync, readdirSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkoutRoot } from './checkout-root.mjs';
+import { classifyEntry, directoryState, removeStale } from './stale-entry.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
@@ -17,6 +18,8 @@ const state = join(root, '.workflow-kit');
 const bundle = join(state, 'ponytail');
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
+/** Identify a kit bundle by its regular ownership marker, without trusting its contents. */
+const owned = path => present(join(path, '.owner'))?.isFile() && text(join(path, '.owner')) === 'vaultdex-workflow-kit\n';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const checkouts = [root, kit, process.cwd()].map(p => checkoutRoot(p));
 const outside = p => checkouts.every(base => p !== base && !p.startsWith(base + sep));
@@ -40,8 +43,7 @@ function directory(p) {
 directory(state);
 assert.ok(!present(bundle)?.isSymbolicLink(), 'Generated Ponytail bundle must not be a link');
 if (existsSync(bundle)) {
-  const owner = join(bundle, '.owner');
-  assert.ok(present(owner)?.isFile() && text(owner) === 'vaultdex-workflow-kit\n',
+  assert.ok(owned(bundle),
     'Refusing to replace an unknown .workflow-kit/ponytail directory');
 }
 if (existsSync(join(source, '.git'))) assert.equal(git('-C', source, 'status', '--porcelain', '--untracked-files=all').trim(), '', 'Ponytail source has local changes');
@@ -98,19 +100,44 @@ try {
   writeFileSync(join(next, '.owner'), 'vaultdex-workflow-kit\n');
   const links = ['.agent', '.agents', '.claude', '.opencode', '.pi'].flatMap(p => skills.map(s => [`${p}/skills/${s}`, `.agents/skills/${s}`]));
   links.push(['.agents/hooks', '.agents/hooks']);
-  for (const [dest, from] of links) {
-    const target = join(root, dest);
-    directory(dirname(target));
-    if (present(target)) assert.ok(present(target).isSymbolicLink()
-      && resolve(dirname(target), readlinkSync(target)) === join(bundle, from), `Existing skill/hook left untouched: ${target}`);
-  }
-  const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
-    ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
-    .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
   const receiptPath = join(root, '.github/skills/ponytail/.workflow-source.json');
   directory(dirname(receiptPath));
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   const old = existsSync(receiptPath) ? JSON.parse(text(receiptPath)).files : {};
+  // Known generated states of a provider directory: the freshly generated bundle, plus every skill state that
+  // the current or an earlier committed receipt recorded (a harness worktree may copy what an older kit generated).
+  // Git history alone proves no ownership; only the kit's own receipts do.
+  const receipts = [old];
+  const receiptFile = relative(root, receiptPath).split(sep).join('/');
+  if (spawnSync(binary, ['rev-parse', '--verify', '--quiet', 'HEAD'], gitOptions).status === 0) {
+    for (const commit of git('log', '--format=%H', '--diff-filter=d', '--', receiptFile).split('\n').filter(Boolean)) {
+      try { receipts.push(JSON.parse(git('show', `${commit}:${receiptFile}`)).files ?? {}); } catch { /* not a receipt */ }
+    }
+  }
+  /** Complete skill manifests backed by current or committed kit receipts. */
+  const recorded = skill => receipts.map(files => {
+    const prefix = `.github/skills/${skill}/`;
+    const entries = Object.entries(files).filter(([file]) => file.startsWith(prefix)).map(([file, digest]) => [file.slice(prefix.length), digest]);
+    const digests = new Map(entries);
+    return { names: entries.length ? new Set(digests.keys()) : null,
+      matches: (name, bytes) => digests.get(name) === hash(bytes.toString('utf8').replaceAll('\r\n', '\n')) };
+  });
+  /** Only generated or recorded manifests authorize copies; installed bundles are mutable. */
+  const states = from => [directoryState(join(next, from)),
+    ...(from.startsWith('.agents/skills/') ? recorded(from.split('/')[2]) : [])];
+  const stale = [];
+  for (const [dest, from] of links) {
+    const target = join(root, dest);
+    directory(dirname(target));
+    if (!present(target)) continue;
+    const kind = classifyEntry(target, join(bundle, from), relative(root, join(bundle, from)), states(from),
+      to => owned(resolve(to, relative(join(bundle, from), bundle))));
+    if (kind === 'stale') stale.push(target);
+    else assert.equal(kind, 'current', `Existing skill/hook left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
+  }
+  const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
+    ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
+    .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
   // Receipts authorize only these generated outputs, never arbitrary checkout paths.
   const retired = [], retiredLinks = [], retiredDirectories = new Set();
   for (const [file, digest] of Object.entries(old)) {
@@ -146,7 +173,10 @@ try {
       const link = join(root, provider, 'skills', skill);
       directory(dirname(link));
       if (!present(link)) continue;
-      assert.ok(present(link).isSymbolicLink() && resolve(dirname(link), readlinkSync(link)) === local, `Foreign retired provider link; preserved: ${link}`);
+      // Copied or relocated entries of a retired skill are kit output too, under the same verification.
+      const kind = classifyEntry(link, local, relative(root, local), recorded(skill),
+        to => owned(resolve(to, relative(local, bundle))));
+      assert.ok(kind === 'current' || kind === 'stale', `Foreign retired provider link; preserved (${kind}): ${link}`);
       retiredLinks.push(link);
     }
   }
@@ -165,13 +195,14 @@ try {
     if (existsSync(previous)) renameSync(previous, bundle);
     throw error;
   }
+  for (const target of stale) removeStale(target);
   for (const [dest, from] of links) {
     const target = join(root, dest);
     if (!present(target)) symlinkSync(process.platform === 'win32' ? join(bundle, from) : relative(dirname(target), join(bundle, from)),
       target, process.platform === 'win32' ? 'junction' : 'dir');
   }
   for (const [file, bytes] of Object.entries(outputs)) writeFileSync(join(root, file), bytes);
-  for (const path of retiredLinks) unlinkSync(path);
+  for (const path of retiredLinks) removeStale(path);
   for (const path of retired) if (present(path)) unlinkSync(path);
   for (const skill of retiredDirectories) {
     const path = join(root, '.github/skills', skill);

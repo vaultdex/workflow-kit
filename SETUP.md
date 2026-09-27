@@ -143,6 +143,7 @@ skill use and the rest of setup can continue.
 For supported, reviewed hooks use the provided explicit installers from the product root:
 
 ```sh
+node .vendor/workflow-kit/scripts/setup-skills.mjs .
 node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .
 node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .
 ```
