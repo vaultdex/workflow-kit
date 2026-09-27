@@ -42,9 +42,10 @@ Product-specific build, database and integration tests remain with the product.
 For an existing project use `init-project.mjs . --existing`: managed hooks and
 ignored generated paths are integrated; previously managed template files are
 updated if unedited. Unmanaged contribution rules, issue forms, update bots and
-product CI remain yours. Add links to the shared
-[contribution workflow](docs/CONTRIBUTING.md) and [Watchdog](WATCHDOG.md) in your root
-AGENTS.md. Existing conflicting files are refused, never force-overwritten.
+product CI remain yours. Link [shared agent rules](AGENT_RULES.md) from a short root
+AGENTS.md containing only local contracts/exceptions. The shared entry routes to
+details when needed; do not load every linked guide or the kit-maintainer AGENTS.md.
+Existing conflicting files are refused, never force-overwritten.
 
 `.github/workflow-kit.json` records hashes of managed consumer files and individual
 hook handlers, plus the top-level hook metadata owned by the kit. It is not a copy
@@ -77,7 +78,8 @@ in that agent's settings; this kit preserves personal installations.
 
 CodeRabbit configuration is included for new projects; authorize its GitHub App.
 Connect the repository in Codex Cloud and enable automatic reviews in Codex settings.
-`AGENTS.md` supplies shared review rules. Existing organization-wide App access is
+The shared entry supplies review rules through the project's `AGENTS.md`.
+Existing organization-wide App access is
 reused. Paid plans/quotas are never enabled by setup. Sonar remains optional and
 project-specific; do not copy another project's key or credentials.
 
@@ -113,6 +115,15 @@ Submodule proposals alone do not regenerate files or update a developer's checko
 Changed hook snapshots need explicit installation and renewed host trust.
 
 ## Verification and budget
+
+Keep the shared mandatory entry (`AGENT_RULES.md` plus starter `AGENTS.md`)
+within 1,000 `o200k_base` tokens. Measure normalized UTF-8 text after changes;
+project-specific additions, applicable detail sections, skills and harness/system
+injections are separate. Compare the same required sections for representative
+documentation and behavior-change deliveries; do not equate file counts with
+context cost or static token counts with measured agent/runtime savings.
+Record measurements in the owning issue; no tokenizer dependency or monitoring
+workflow belongs in the project. Local entries target 20–40 lines or fewer.
 
 The following commands are for contributors working in the kit itself, not a consumer.
 Setup accepts an explicit target checkout, including one outside the current working

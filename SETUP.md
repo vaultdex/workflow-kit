@@ -82,8 +82,8 @@ generated Cloud Discovery; leave local bundles uncommitted. The initializer
 updates kit-managed hook files and protects edited or unmanaged content; resolve
 reported conflicts instead of overwriting them.
 
-Existing-project mode preserves unmanaged files. Integrate links to the shared
-CONTRIBUTING.md and WATCHDOG.md into its root AGENTS.md, retaining project-specific
+Existing-project mode preserves unmanaged files. Link the shared AGENT_RULES.md
+from a short root AGENTS.md, retaining project-specific
 rules, architecture, build/test commands and required checks. For new projects,
 ask about language/runtime and checks only if the repository provides no evidence;
 do not claim the kit integration check validates the application itself.

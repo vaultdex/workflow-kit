@@ -1,7 +1,8 @@
 # Contributing
 
-Read applicable `AGENTS.md`, this guide and [WATCHDOG.md](../WATCHDOG.md) once;
-refresh changed rules/state and reuse valid evidence. User instructions override
+Start with local `AGENTS.md` and [shared agent rules](../AGENT_RULES.md).
+Read only this guide's sections required for the current step; reuse unchanged
+rules/evidence, refresh changed rules and live state. User instructions override
 skill guidelines within higher-priority/permission boundaries. If a rule blocks
 work, cite its file/text and continue unaffected authorized work.
 
@@ -16,7 +17,7 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 | Backlog | Newly proposed, awaiting human triage, or still infeasible after blockers resolve; record reasons. |
 | Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement authorizes a start only under `"start": "ready"` (start policy below). |
 | In progress | Taken from Ready under the start policy after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
-| Automated review | Ready PR, passed selected checks, disclosed evidence limits; automatic reviews of the delivered revision are running or awaiting disposition. |
+| Automated review | Ready PR with focused local checks passed; selected CI and automatic reviews run together. Disclose pending project-defined final proof. |
 | Human review | Ready for human acceptance: selected checks passed, automatic reviews finished and every finding fixed or linked to an actionable follow-up; disclose confirmed unavailable reviews under the exception below. |
 | Done | Acceptance satisfied; delivered repository work actually merged. |
 
@@ -69,79 +70,48 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 
 ## Issue plans and PR descriptions
 
-Issues und PRs in einfachem Deutsch schreiben. Technische Namen exakt lassen;
-ungewohnte Begriffe kurz erklären. Starke Modelle können planen, kleinere Modelle
-umsetzen: Der Plan muss die nötigen Entscheidungen enthalten, ohne ein bestimmtes
-Modell vorzuschreiben. Wenige Sätze reichen für kleine Änderungen; komplexe Abläufe
-brauchen genaue Schritte. Keine Spekulation, unnötigen Abstraktionen oder Fülltexte.
+Issues und PRs in einfachem Deutsch, technische Namen exakt. Kleine Aufgaben
+bleiben kurz; komplexe brauchen konkrete Schritte, Dateien/Verträge, Ein-/Ausgaben
+und betroffene Rechte, Fehlerfälle, Wiederholung, Datenänderungen und Recovery.
+Keine Spekulation, Modellvorgaben oder Fülltexte.
 
-Jedes neue oder wesentlich überarbeitete Issue beantwortet diese Abschnitte:
+Jedes neue oder wesentlich überarbeitete Issue erklärt:
 
-| Abschnitt | Erforderlicher Inhalt |
+| Inhalt | Prüffrage |
 | --- | --- |
-| Wofür brauchen wir das? | Konkretes Problem, betroffener Nutzer/Ablauf und belegter Istzustand. Bei Fehlern: Reproduktion und erwartetes Verhalten. |
-| Was bringt es uns? | Sichtbarer Vorteil oder vermiedener Schaden. Keine unbelegten Zeit-/Kostenversprechen. |
-| Was muss gemacht werden? | Vollständiges, begrenztes Ergebnis und ausdrücklich ausgeschlossene Arbeiten. |
-| Wie soll es umgesetzt werden? | Geordnete Schritte, konkrete Dateien/Symbole/Verträge, wiederverwendbare Bausteine, Ein-/Ausgaben und nötige Datenänderungen. Rechte, Fehlerfälle, Wiederholung und Recovery beschreiben, soweit betroffen. |
-| Woran erkennen wir, dass es fertig ist? | Prüffähige Kriterien mit bestehendem Test/Befehl oder genauem Prüfweg und erwartetem Ergebnis. Mocks, echte Integration und Live-Anbieterbeleg unterscheiden. |
-| Abhängigkeiten und Wiederaufnahme | Native Vorgänger, externe Voraussetzungen mit Beleg, nächste Aktion und zuständige Entscheidung. Ohne Voraussetzung ausdrücklich „keine bekannt“ nach geprüftem Stand. |
+| Zweck und Istzustand | Welches belegte Problem betrifft wen? Bei Fehlern: Reproduktion und Erwartung. |
+| Nutzen | Welcher sichtbare Vorteil oder vermiedene Schaden, ohne unbelegte Zeit-/Kostenversprechen? |
+| Umfang und Umsetzung | Welches vollständige Ergebnis, welche Nichtziele und geordneten Schritte mit vorhandenen Bausteinen? |
+| Abnahme | Welche Kriterien, bestehenden Tests/Befehle/Prüfwege und Ergebnisse? Mock, echte Integration und Live-Beleg unterscheiden. |
+| Abhängigkeiten/Wiederaufnahme | Welche nativen Vorgänger oder externen Voraussetzungen mit Beleg, nächster Aktion und Zuständigkeit? Sonst nach Prüfung „keine bekannt“. |
 
-Vor Übergabe müssen Implementierende wissen, wo sie anfangen, was sie in welcher
-Reihenfolge ändern und woran sie Erfolg erkennen. Routineentscheidungen dürfen
-sie selbst treffen; fehlende Produkt-, Architektur-, Datenschutz- oder
-Kostenentscheidungen nicht erraten. Dafür konkrete Frage, Empfehlung und zuständige
-Person festhalten. Vorschlag ist keine Freigabe; Planungsarbeit ist keine gelieferte
-Implementierung. Bestehende Start-, Abnahme- und Scope-Regeln bleiben verbindlich.
-Fehlende menschliche Mitwirkung folgt zusätzlich [dieser Kennzeichnung](#human-input).
+Routineentscheidungen treffen Implementierende selbst. Fehlende Produkt-,
+Architektur-, Datenschutz- oder Kostenentscheidungen nach [Human input](#human-input)
+klären; Vorschlag und Planungsarbeit sind keine Freigabe oder Implementierung.
+Offene Fragen und spätere Entscheidungen aus allen Issue-Kommentaren in den
+Haupttext übernehmen: Quelle nennen, nötigenfalls antworten, veraltete Aussagen
+erkennbar ersetzen und historische Belege erhalten. Fehlgeschlagene/unzugängliche
+Prüfung bleibt unbekannt. Status/Priority gehören ins Project, Ownership getrennt.
 
-Alle vorhandenen Issue-Kommentare auf offene Fragen und spätere Entscheidungen
-prüfen. Belegte Antworten und akzeptierte Entscheidungen in den Haupttext
-übernehmen, Quelle verlinken und nötigenfalls direkt antworten. Veraltete Aussagen
-erkennbar ersetzen, historische Belege erhalten. Fehlgeschlagene oder unzugängliche
-Prüfung als unbekannt benennen, nicht als beseitigten Blocker. Status und Priority
-bleiben im Project; Zuständigkeit getrennt festhalten.
-
-Jeder PR beantwortet **Was wurde geändert? Warum war das nötig? Was bringt es uns?**
-Den tatsächlichen Endstand und seinen Nutzen beschreiben, bei Bedarf mit konkretem
-Vorher/Nachher. Passende Prüfung, Ergebnis und wesentliche Grenzen knapp angeben;
-vorhandene Issue-Belege verlinken, statt Logs oder wechselnden CI-Status zu kopieren.
-Issue-Verknüpfung und Abschlussabsicht folgen dem nächsten Abschnitt. Leere
-Platzhalter und Anleitungskommentare vor Veröffentlichung entfernen.
-
-Diese Pflicht gilt auch für Blank-Issues, API/CLI, Agenten und Follow-ups; ein
-Formular erzwingt sie außerhalb seiner Oberfläche nicht. Autor prüft Vollständigkeit
-vor Übergabe, Reviewer prüft Bedeutung statt bloßer Überschriften. Keine zusätzliche
-Actions-Prüfung, Bots, automatische Startfreigabe oder zweite Aufgabenliste dafür.
-[Kurze und ausführliche Beispiele](task-writing-examples.md) zeigen die passende Tiefe.
-Bei Kit-Updates verwaltete Vorlagen über `init-project` aktualisieren; eigene
-Verbrauchervorlagen bewusst angleichen und fremde Anpassungen erhalten.
+PRs erklären tatsächliche Änderung, Grund und Nutzen, bei Bedarf Vorher/Nachher;
+passende Prüfung und wesentliche Grenzen knapp nennen. Issue-Belege verlinken
+statt Logs/wechselnde CI-Status kopieren. Leere Platzhalter/Hinweise entfernen.
+Dies gilt auch für Blank-Issues, API/CLI, Agenten und Follow-ups: Autor prüft Inhalt
+vor Übergabe, Reviewer Bedeutung statt Überschriften. Keine zusätzliche Automation,
+Startfreigabe oder zweite Aufgabenliste. [Beispiele](task-writing-examples.md) nur
+bei Bedarf. Kit-Updates aktualisieren verwaltete Vorlagen über `init-project`;
+eigene Verbrauchervorlagen bewusst angleichen, fremde Anpassungen erhalten.
 
 ## Issue, branch and PR links
 
-Plan delivery units **before creating issue-linked branches**. Each delivery PR
-must satisfy the complete acceptance of its own issue(s). If work needs separate
-delivery PRs, create separate, fully specified issues first, with milestone,
-Project Priority and matching labels. Record prerequisite deliveries with native
-`is blocked by` relationships; references alone are not dependencies. Preserve
-scope authorization, Ready, ownership and execution gates; splitting work grants
-no start permission and removes no acceptance. Reuse compatible existing issues
-instead of creating duplicate tracking tasks.
+Before branching, define complete delivery units: each PR closes only its own
+fully delivered issue(s), each with milestone, Priority and labels. Reuse compatible
+issues; record real prerequisites with native `blocked by` links. Splitting work
+grants no start/scope permission. A kit delivery and its consumer update need
+separate issues/PRs; the consumer starts only after its prerequisite is satisfied.
 
-For example, issue A delivers a kit change and issue B consumes it. B is blocked
-by A. Create the kit branch from A and its PR with `Closes OWNER/REPO#A`; create
-the consumer branch from B only after its execution prerequisites are met, and
-its PR with `Closes OWNER/REPO#B`. Reference the related issue without giving the
-PR a closing relationship to it. Do not link every delivery PR to one unfinished
-umbrella issue: GitHub closes a linked issue on the first default-branch merge,
-not after all linked PRs merge. Keep repository auto-close enabled; no extra bot
-or Actions workflow is needed. Rely on native Project closure-to-Done automation
-only after verifying its configuration. Follow the delivery-unit rules above,
-[completion gates](#publication-and-review) and [Project configuration](github.md);
-not-planned closures are not Done.
-
-After the Ready/authorization/ownership checks above, create new branches through
-the issue's native **Development → Create a branch** action or its CLI equivalent.
-On GitHub, use explicit repository, issue, branch name and current base:
+After Ready, authorization and ownership checks, create the issue-linked branch
+through Development or the native CLI, using the actual approved base:
 
 ```sh
 gh issue develop ISSUE --repo OWNER/REPO --list
@@ -149,67 +119,43 @@ gh issue develop ISSUE --repo OWNER/REPO --name codex/ISSUE-topic --base main
 gh issue develop ISSUE --repo OWNER/REPO --list
 ```
 
-Replace placeholders and use the repository's actual approved base. Fetch the
-created remote branch into the intended checkout/worktree; add `--checkout` only
-when switching the current checkout is safe. Verify the expected branch/repository
-in the returned list before editing. Reuse compatible owned branches/PRs instead
-of creating duplicates. Link an existing branch through the issue's Development
-control. After an error, inspect remote refs and issue links before retrying;
-branch creation may have succeeded even when the command reported failure.
+Fetch into the intended checkout; use `--checkout` only when switching is safe.
+Reuse compatible owned branches/PRs; link existing branches through Development.
+After an error inspect remote refs and issue links before retrying: creation may
+have succeeded. Verify branch/repository before editing.
 
-Recheck the delivery boundary **before creating the PR, including a Draft**. When
-an acceptance item cannot be performed within this delivery (for example a live
-provider check requiring unavailable credentials), obtain explicit human
-authorization for the changed acceptance/scope before applying a split into a
-follow-up under [scope and findings](#recovery-scope-and-findings). An existing
-explicit human instruction covering that split is sufficient; cite it instead
-of asking again. Without that authorization, preserve the accepted scope and blocker.
-Record the split and remaining limits in the original issue first. The delivery PR
-uses `Closes #N` for the original issue's resulting, fully delivered scope; it does
-not close the follow-up or claim its missing acceptance passed.
+Before any PR, including Draft, resolve unavailable acceptance under
+[scope and findings](#recovery-scope-and-findings): explicit human authorization,
+complete follow-up metadata/dependency, and recorded resulting scope. Existing
+authorization suffices; do not ask twice or silently drop acceptance. Only the
+fully delivered resulting scope closes. Project-defined final proof may remain
+explicitly pending during automatic review, but must pass before Human review/merge.
+Missing access or unperformable acceptance is still a blocker, not a scheduled gate.
 
-Every PR description must identify all delivered issues from its first publication,
-including Drafts. For complete issue scope targeting the default branch, put
-`Closes #N` in the PR body (`Closes OWNER/REPO#N` across repositories), repeating
-the keyword for each issue. A branch name, title, comment or commit-only closing
-keyword does not establish the required PR relationship. GitHub normally converts
-an issue-linked branch into a linked PR when that PR is created; verify the result.
+Put `Closes #N` (cross-repo: `Closes OWNER/REPO#N`) for every delivered issue in
+the PR body from first publication. Branch names, titles, comments and commits
+do not establish closing links. Keep auto-close enabled; never attach multiple
+deliveries to one unfinished umbrella issue. Use `Refs OWNER/REPO#N` for background
+or non-default-branch integration; it grants no completion. Non-default targets
+ignore closing keywords and need an explicit final delivery to the default branch.
 
-Use `Refs OWNER/REPO#N` for related/background issues and non-default-branch
-integration PRs; these references do not certify delivery. Several delivery PRs
-must use separate issues as above, not share an unfinished issue with `Refs` as
-a workaround. A non-default target needs an explicit final delivery path to the
-default branch; recheck issue scope and links before that final PR. A manual
-Development closing relationship must be removed through the PR's Development UI;
-removing a keyword only removes a keyword-based link. Do not repeatedly attempt
-body edits to remove a manual relationship. Resolve closure intent before PR
-creation to avoid an unnecessary later UI handoff. For non-default targets, closing
-keywords are ignored; recheck closure intent when the base or scope changes.
-A scope split is not a way to waive required security, integrity or merge gates.
-
-Immediately after PR creation/body or base changes, and before Ready for Review
-or Human review, read back the saved description and actual GitHub relationships:
+After creation/body/base changes and before review handoff, read saved relationships:
 
 ```sh
 gh pr view PR --repo OWNER/REPO --json url,body,baseRefName,closingIssuesReferences
 ```
 
-For complete default-branch deliveries, verify every intended issue appears in
-`closingIssuesReferences` (or the Development UI) and no unrelated/partial issue
-will close. For partial/non-default deliveries, verify references in the saved
-body and the issue's cross-reference activity, plus absence of unintended closing
-links. A `Refs` mention is traceability, not a closing link. GitHub may replace the
-branch link with the PR link, so an empty branch list after PR creation is not
-itself a failure. Repair missing/wrong links on the same PR before review handoff;
-missing access or unverifiable linkage stays an explicit blocker, never claimed
-as linked. Record verification in the owning issue; no separate ledger or job.
+Verify intended closures only; for references verify body/cross-reference activity
+and no unintended closure. Record proof in the owning issue. A PR may replace its
+branch link; an empty branch list then is not failure. Repair links on the same PR;
+unknown/inaccessible linkage remains a blocker. Manual Development closing links
+must be removed in Development UI, not repeated body edits. Recheck closure intent
+after base/scope changes. Verify native Project closure automation before relying
+on it; Not Planned is not Done. No extra ledger, bot or Actions job.
 
-For GitLab repositories, use the issue's native **Create branch / Create merge
-request** flow and `ISSUE-topic` instead of the GitHub `codex/ISSUE-topic` convention.
-Automatic cross-linking requires the issue number followed by a hyphen at the
-start of the branch name. Verify the generated MR
-description, related issue and closure behavior; remove closing patterns for
-partial deliveries. These are contributor checks, not server enforcement.
+GitLab: use native Create branch / Create merge request with `ISSUE-topic` (number
+then hyphen), verify MR relations/closure and remove closing patterns for partial
+deliveries. These are contributor checks, not server enforcement.
 
 References: [GitHub CLI](https://cli.github.com/manual/gh_issue_develop),
 [GitHub branch links](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/creating-a-branch-for-an-issue),
@@ -378,21 +324,23 @@ work, rewrite task history through rebase/amend/reset/force-push, or bypass prot
 Ordinary owned code conflicts are driver work; preserve foreign intent and coordinate
 ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
 
-1. Finish scope, local proof and diff review, including Drafts. Before first push
+1. Finish implementation, focused local checks and diff review, including Drafts.
+   Name project-defined final proof still pending in the issue/PR. Before first push
    and every PR creation, fetch main and merge if missing; resolve permitted
    conflicts and rerun invalidated checks. Recheck delayed publication if main moved.
 2. Push prepared head once; update the same PR. Later main integration requires
    conflicts, affected correctness/ownership or an actual gate—not unrelated movement.
 3. Inspect live base/head, ownership, mergeability and selected checks together.
    Empty checks do not prove no workflow runs; missing expected/pending/cancelled/
-   failed checks are not success. Keep Draft only while implementation, local proof
+   failed checks are not success. Keep Draft only while implementation, focused proof
    or a selected pre-review check remains open. Await running checks through the
    harness waiting mechanism, not model polling. Refresh unknown metadata boundedly,
    then report the concrete blocker; do not park a finished PR in Draft without one.
 4. Before marking the PR Ready for Review and setting Automated review, verify
    delivered issue links and closure intent under [issue, branch and PR links](#issue-branch-and-pr-links).
-   Once that verification, implementation, local proof and selected checks are
-   complete, immediately mark Ready for Review / Automated review. Automatic
+   Once that verification, implementation and focused pre-review checks are
+   complete, immediately mark Ready for Review / Automated review. Selected CI and
+   automatic reviews run together; failed CI returns to Draft/In progress. Automatic
    reviews start outside Draft; never wait for them while the PR is Draft.
    Optional extra self-reviews, subagents or analyses are not new gates delaying
    this transition. Their actionable findings enter the same rework cycle below.
@@ -407,7 +355,13 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
 5. Further work, including review fixes, returns PR to Draft and issue to In progress
    before edits, including corrections requested during Human review. Finish changes
    and affected checks, then mark Ready for Review / Automated review again and await
-   the new review cycle. Before agent completion, fix every
+   the new review cycle; batch related corrections and rerun affected checks.
+   After the last automatic correction, run the project's required expensive final
+   proof before Human review/merge. Earlier targeted proof is justified by concrete
+   risk. Reuse evidence only while relevant inputs/environment remain valid; record
+   tested revision and comparison to delivered head. A new commit alone does not
+   invalidate proof. A final-proof failure needing code changes returns through
+   affected checks/reviews and invalidated final proof. Before agent completion, fix every
    finding with verification or link an actionable follow-up issue under
    [findings disposition](#recovery-scope-and-findings). Record dispositions in PR;
    creating follow-ups does not waive this PR's acceptance or required checks.
