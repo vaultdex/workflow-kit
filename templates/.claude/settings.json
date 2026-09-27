@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude; else printf '%s\\n' 'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.'; fi",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude; else printf '%s\\n' 'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.'; fi",
             "timeout": 5,
             "shell": "bash"
           },
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude continue; else printf '%s\\n' 'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.'; fi",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude continue; else printf '%s\\n' 'Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.'; fi",
             "timeout": 5,
             "shell": "bash"
           }

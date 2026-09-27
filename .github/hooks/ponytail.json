@@ -4,8 +4,8 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate copilot; else printf '%s\\n' '{\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.\"}'; fi",
-        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-8/launch.exe\"; if (Test-Path -LiteralPath $launcher) { & $launcher activate copilot } else { Write-Output '{\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .; im Kit selbst: node scripts/install-ponytail-hooks.mjs . ausfuehren; danach Hooks freigeben.\"}' }",
+        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate copilot; else printf '%s\\n' '{\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\"}'; fi",
+        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-8/launch.exe\"; if (Test-Path -LiteralPath $launcher) { & $launcher activate copilot } else { Write-Output '{\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\"}' }",
         "timeoutSec": 5
       }
     ],

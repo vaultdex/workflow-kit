@@ -65,6 +65,7 @@ session. Config files do not prove actual native hook activation.
 Explicitly install verified user-local hook snapshots after reviewing the checkout:
 
 ```sh
+node .vendor/workflow-kit/scripts/setup-skills.mjs .
 node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .
 node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .
 ```
