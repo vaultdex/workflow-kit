@@ -41,7 +41,10 @@ The final `.` selects this project. Inside the kit itself use `node scripts/... 
 instead. The hook installers need the generated skills and hooks, so run `setup-skills.mjs`
 first on a new checkout or worktree. Setup replaces kit-owned leftovers at provider
 skill/hook paths: unedited copies (a harness worktree may copy ignored links as
-folders) and links to the same bundle path in another checkout. Edited or foreign
+folders) and links to the same bundle path in another checkout with the matching
+kit ownership marker. Copies must match one freshly generated or receipt-backed
+state; the mutable installed bundle is not proof. Older hook copies without such
+proof stay protected. Edited or foreign
 entries stay untouched; the error names the path and the next step. No consumer forwarding scripts are needed. After installation,
 review/enable native hook definitions. One integration's setup does not initialize
 the other. Impeccable's missing-engine hint belongs at SessionStart; quiet missing

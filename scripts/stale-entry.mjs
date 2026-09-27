@@ -23,16 +23,16 @@ const equal = (a, b) => a.size === b.size && [...a].every(name => b.has(name));
 
 /**
  * Classifies an existing provider entry. `current` links to `expected`; `stale` is kit-owned and may be
- * replaced: a link to the same bundle path in another checkout (a copied junction/symlink) or a copy equal to
+ * replaced: a link to the same owned bundle path in another checkout (a copied junction/symlink) or a copy equal to
  * one single known generated state, i.e. the same complete listing and every file matching that state. A copy
  * assembled from several states, pruned or extended, stays untouched with the returned reason.
  */
-export function classifyEntry(target, expected, bundlePath, states) {
+export function classifyEntry(target, expected, bundlePath, states, ownsTarget) {
   const entry = lstatSync(target);
   if (entry.isSymbolicLink()) {
     const to = resolve(dirname(target), readlinkSync(target));
     if (to === expected) return 'current';
-    return to.endsWith(sep + bundlePath) ? 'stale' : 'foreign link';
+    return to.endsWith(sep + bundlePath) && ownsTarget(to) ? 'stale' : 'foreign link';
   }
   if (!entry.isDirectory()) return 'foreign file';
   const names = listing(target);

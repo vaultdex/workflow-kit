@@ -31,6 +31,7 @@ assert.ok(gitBinary, "Install Git in an absolute PATH directory outside this che
 const git = (...args) => execFileSync(gitBinary, args, { cwd: root, encoding: "utf8",
   env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: "1" } });
 const present = (path) => lstatSync(path, { throwIfNoEntry: false });
+const owned = path => present(join(path, '.owner'))?.isFile() && text(join(path, '.owner')).trim() === 'vaultdex-impeccable';
 const digest = path => createHash("sha256").update(text(path)).digest("hex");
 
 // Never traverse a harness/state directory redirected outside this checkout.
@@ -98,8 +99,7 @@ function generateSkill(skill, to, applied) {
 localDirectory(state);
 assert.ok(!present(bundle)?.isSymbolicLink(), "Generated bundle must not be a link");
 if (existsSync(bundle)) {
-  const owner = join(bundle, ".owner");
-  assert.ok(present(owner)?.isFile() && text(owner).trim() === "vaultdex-impeccable",
+  assert.ok(owned(bundle),
     "Refusing to replace an unknown .impeccable/vendor directory");
 }
 const receipt = ".github/skills/impeccable/.vaultdex-source.json";
@@ -137,9 +137,9 @@ try {
   const trackedCopilot = new Set(git("ls-files", "-z", "--", ".github/skills/impeccable",
     ".github/agents/impeccable*").split("\0").filter(Boolean));
   // Preflight every destination before replacing any working installation.
-  // Unedited copies equal one known generated state: the new or installed skill, or what an earlier kit generation
+  // Unedited copies equal one known generated state: the freshly generated skill, or what an earlier kit generation
   // (a shorter patch prefix) produced from this pinned upstream. Built only when a copy needs classification.
-  // Links to this bundle path elsewhere are stale.
+  // Links to this bundle path elsewhere are stale only with the kit's ownership marker.
   const generations = new Map();
   const earlier = skill => patches.slice(1).map((_, index) => {
     const to = join(stage, `generation-${index + 1}`, skill);
@@ -151,10 +151,11 @@ try {
     const target = join(root, skill);
     localDirectory(dirname(target));
     if (!present(target)) continue;
-    const current = [directoryState(join(next, skill)), directoryState(join(bundle, skill))];
+    const current = [directoryState(join(next, skill))];
     const copy = lstatSync(target).isDirectory() && !lstatSync(target).isSymbolicLink();
     const kind = classifyEntry(target, join(bundle, skill), relative(root, join(bundle, skill)),
-      copy ? [...current, ...earlier(skill)] : current);
+      copy ? [...current, ...earlier(skill)] : current,
+      to => owned(resolve(to, relative(join(bundle, skill), bundle))));
     if (kind === "stale") stale.push(target);
     else assert.equal(kind, "current", `Existing skill left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
   }

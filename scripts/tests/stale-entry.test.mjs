@@ -127,3 +127,50 @@ test('setup replaces copied or relocated kit entries and protects edited or fore
   ok(worktree);
   for (const entry of entries) assert.ok(lstatSync(join(worktree, entry)).isSymbolicLink(), entry);
 });
+
+for (const [engine, entry, file] of [
+  ['ponytail', '.claude/skills/ponytail', 'SKILL.md'],
+  ['ponytail', '.agents/hooks', 'ponytail-runtime.js'],
+  ['impeccable', '.claude/skills/impeccable', 'SKILL.md'],
+]) test(`setup preserves a copy of locally edited ${entry} bundle contents`, t => {
+  const root = mkdtempSync(join(tmpdir(), 'edited bundle '));
+  t.after(() => { assert.equal(dirname(root), tmpdir()); rmSync(root, { recursive: true, force: true }); });
+  execFileSync('git', ['init', '--quiet', root]);
+  const setup = () => spawnSync(process.execPath, [join(kit, `scripts/setup-${engine}.mjs`), root], { encoding: 'utf8' });
+  const initial = setup(); assert.equal(initial.status, 0, initial.stderr);
+  const target = join(root, entry), bundle = realpathSync(target);
+  appendFileSync(join(bundle, file), '\nlocal note\n');
+  const edited = readFileSync(join(bundle, file));
+  unlinkSync(target);
+  cpSync(bundle, target, { recursive: true });
+  const result = setup();
+  assert.notEqual(result.status, 0, 'An edited live bundle cannot authorize deleting its copy');
+  assert.match(result.stderr, /left untouched \(edited or foreign copy\).*rerun setup/s);
+  assert.ok(lstatSync(target).isDirectory());
+  assert.deepEqual(readFileSync(join(target, file)), edited);
+  assert.deepEqual(readFileSync(join(bundle, file)), edited);
+});
+
+for (const [engine, bundle, from] of [
+  ['ponytail', '.workflow-kit/ponytail', '.agents/skills/ponytail'],
+  ['ponytail', '.workflow-kit/ponytail', '.agents/hooks'],
+  ['impeccable', '.impeccable/vendor', '.claude/skills/impeccable'],
+]) test(`setup preserves unowned ${engine} links with a matching ${from} suffix`, t => {
+  const base = mkdtempSync(join(tmpdir(), 'foreign bundle '));
+  t.after(() => { assert.equal(dirname(base), tmpdir()); rmSync(base, { recursive: true, force: true }); });
+  const root = join(base, 'consumer'), foreign = join(base, 'foreign', bundle);
+  execFileSync('git', ['init', '--quiet', root]);
+  const target = join(root, from), elsewhere = join(foreign, from);
+  mkdirSync(dirname(target), { recursive: true });
+  mkdirSync(elsewhere, { recursive: true });
+  writeFileSync(join(elsewhere, 'user.txt'), 'User-owned\n');
+  link(elsewhere, target);
+  for (const marker of [null, 'another-owner\n']) {
+    if (marker) writeFileSync(join(foreign, '.owner'), marker);
+    const result = spawnSync(process.execPath, [join(kit, `scripts/setup-${engine}.mjs`), root], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0, 'A matching path suffix cannot prove kit ownership');
+    assert.match(result.stderr, /left untouched \(foreign link\).*rerun setup/s);
+    assert.equal(realpathSync(target), realpathSync(elsewhere));
+    assert.equal(readFileSync(join(elsewhere, 'user.txt'), 'utf8'), 'User-owned\n');
+  }
+});
