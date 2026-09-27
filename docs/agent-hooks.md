@@ -38,12 +38,16 @@ node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .
 ```
 
 The final `.` selects this project. Inside the kit itself use `node scripts/... .`
-instead. The hook installers need the generated skills and hooks, so run `setup-skills.mjs`
-first on a new checkout or worktree. Setup replaces kit-owned leftovers at provider
+instead. The Ponytail installer needs generated skills and hooks, so run `setup-skills.mjs`
+first on a new checkout or worktree. The Impeccable installer needs only the kit's
+`scripts/impeccable/VERSION` and `SHA256SUMS`, not generated skills or hooks.
+Setup replaces kit-owned leftovers at provider
 skill/hook paths: unedited copies (a harness worktree may copy ignored links as
 folders) and links to the same bundle path in another checkout with the matching
-kit ownership marker. Copies must match one freshly generated or receipt-backed
-state; the mutable installed bundle is not proof. Older hook copies without such
+kit ownership marker. A copy's complete listing and contents must match one freshly
+generated state, a receipt-backed Ponytail skill state, or an older Impeccable state
+reconstructed from a known prefix of the ordered patch list (no receipt required).
+The mutable installed bundle is not proof. Older hook copies without such
 proof stay protected. Edited or foreign
 entries stay untouched; the error names the path and the next step. No consumer forwarding scripts are needed. After installation,
 review/enable native hook definitions. One integration's setup does not initialize
