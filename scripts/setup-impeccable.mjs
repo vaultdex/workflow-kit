@@ -71,6 +71,8 @@ assert.ok(!present(bundle)?.isSymbolicLink(), "Generated bundle must not be a li
 git("-C", kit, "submodule", "update", "--init", "--", ".vendor/impeccable");
 assert.equal(git("-C", source, "status", "--porcelain", "--untracked-files=all").trim(), "",
   "Impeccable submodule has local changes; preserve/review them before setup");
+// assume-unchanged (lowercase tag) or skip-worktree (S) would hide edits from the status check above.
+assert.ok(!/^(?:[a-z]|S) /m.test(git("-C", source, "ls-files", "-v")), "Impeccable source hides local changes from git status");
 const version = text(join(security, "VERSION")).trim();
 const stage = mkdtempSync(join(state, "setup-"));
 const next = join(stage, "next");
@@ -98,12 +100,11 @@ try {
   // A link or file at the Copilot skill directory moves aside first; enumerating through it would delete its target.
   const copilot = join(root, ".github/skills/impeccable");
   if (present(copilot) && !present(copilot).isDirectory()) moveAside(root, copilot);
-  for (const file of companionFiles(root)) {
-    localDirectory(root, dirname(join(root, file)));
-    unlinkSync(join(root, file));
-  }
-  for (const file of companionFiles(bundle)) {
-    localDirectory(root, dirname(join(root, file)));
+  // Check every directory first, so a linked companion directory stops setup before anything is deleted.
+  const stale = companionFiles(root), fresh = companionFiles(bundle);
+  for (const file of [...stale, ...fresh]) localDirectory(root, dirname(join(root, file)));
+  for (const file of stale) unlinkSync(join(root, file));
+  for (const file of fresh) {
     // Drop whatever is left at the destination first: copying onto a link would write through it.
     rmSync(join(root, file), { force: true });
     copyFileSync(join(bundle, file), join(root, file));

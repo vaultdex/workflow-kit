@@ -3,17 +3,22 @@
 // nicht mehr und gehen nie verloren: Sie werden nach .workflow-kit/replaced/<Zeitpunkt>/ verschoben.
 import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, realpathSync, renameSync, symlinkSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 const present = path => lstatSync(path, { throwIfNoEntry: false });
 const stamp = new Date().toISOString().replaceAll(':', '-');
 
-/** Create `path` as a directory; every existing ancestor must stay inside `root` (no redirected state). */
+/** Create `path` as a directory below `root`; no existing component may be a link or a file (no redirected state). */
 export function localDirectory(root, path) {
-  let ancestor = path;
-  while (!present(ancestor)) ancestor = dirname(ancestor);
-  const actual = realpathSync(ancestor), base = realpathSync(root);
-  assert.ok(actual === base || actual.startsWith(base + sep), `Directory leaves checkout: ${path}`);
+  const inside = relative(root, path);
+  assert.ok(!isAbsolute(inside) && inside.split(sep)[0] !== '..', `Directory leaves checkout: ${path}`);
+  let current = root;
+  for (const part of inside.split(sep).filter(Boolean)) {
+    current = join(current, part);
+    const entry = present(current);
+    if (!entry) break;
+    assert.ok(entry.isDirectory(), `Refusing linked or non-directory path: ${relative(root, current)}`);
+  }
   mkdirSync(path, { recursive: true });
 }
 

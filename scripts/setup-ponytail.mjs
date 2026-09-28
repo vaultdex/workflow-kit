@@ -25,6 +25,8 @@ localDirectory(root, state);
 assert.ok(!present(bundle)?.isSymbolicLink(), 'Generated Ponytail bundle must not be a link');
 if (existsSync(join(source, '.git'))) assert.equal(git('-C', source, 'status', '--porcelain', '--untracked-files=all').trim(), '', 'Ponytail source has local changes');
 git('-C', kit, 'submodule', 'update', '--init', '--', '.vendor/ponytail');
+// assume-unchanged (lowercase tag) or skip-worktree (S) would hide edits from the status check above.
+assert.ok(!/^(?:[a-z]|S) /m.test(git('-C', source, 'ls-files', '-v')), 'Ponytail source hides local changes from git status');
 const revision = git('-C', source, 'rev-parse', 'HEAD').trim();
 const skills = git('-C', source, 'ls-tree', '-d', '--name-only', `${revision}:skills`).trim().split('\n');
 assert.ok(skills.includes('ponytail') && skills.every(s => skillName.test(s)), 'Invalid pinned skill names');
