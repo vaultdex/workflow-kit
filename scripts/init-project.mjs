@@ -17,8 +17,10 @@ if (root !== kit) assert.equal(relative(root, kit).split(sep).join('/'), '.vendo
 const existing = process.argv.includes('--existing');
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 const present = p => lstatSync(p, { throwIfNoEntry: false });
-// Kit handlers call the personal snapshots under ~/.ponytail/vaultdex or ~/.impeccable/vaultdex.
-const ours = handler => /\.(?:ponytail|impeccable)[\\/]+vaultdex[\\/]/.test(JSON.stringify(handler));
+// Kit handlers call the personal snapshots under ~/.ponytail/vaultdex or ~/.impeccable/vaultdex; older ones
+// built that path with path.join('.ponytail','vaultdex',…) or only printed the installer hint.
+const ours = handler => /\.(?:ponytail|impeccable)(?:[\\/]+|',\s*')vaultdex(?:[\\/]|')|install-(?:ponytail|impeccable)-hooks\.mjs/
+  .test(JSON.stringify(handler));
 const isHooks = name => /^(?:\.(?:codex|cursor)\/hooks\.json|\.claude\/settings\.json|\.github\/hooks\/[\w.-]+\.json)$/.test(name);
 
 /** A project file below the checkout, reached without links, that is a plain file if it exists. */
