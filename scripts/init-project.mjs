@@ -51,8 +51,7 @@ function mergeHooks(name, template) {
     if (kept.length) hooks[event] = kept;
   }
   for (const [event, groups] of Object.entries(template?.hooks ?? {})) hooks[event] = [...(hooks[event] ?? []), ...groups];
-  const { hooks: _, ...metadata } = template ?? {};
-  const merged = { ...metadata, ...current, hooks };
+  const merged = { ...template, ...current, hooks };
   // A file that held only kit handlers and schema metadata goes when its template is retired.
   if (!template && !Object.keys(hooks).length && Object.keys(merged).every(key => ['hooks', 'version', 'description'].includes(key))) {
     if (existsSync(target)) unlinkSync(target);

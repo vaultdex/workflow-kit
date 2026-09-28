@@ -63,7 +63,7 @@ try {
   // .github/skills/ponytail* is generated: rewrite it whole, so skills upstream drops disappear too.
   const cloud = join(root, '.github/skills');
   localDirectory(root, cloud);
-  for (const entry of readdirSync(cloud).filter(name => /^ponytail/.test(name))) rmSync(join(cloud, entry), { recursive: true, force: true });
+  for (const entry of readdirSync(cloud).filter(name => name.startsWith('ponytail'))) rmSync(join(cloud, entry), { recursive: true, force: true });
   for (const [file, bytes] of Object.entries(outputs)) {
     localDirectory(root, dirname(join(root, file)));
     writeFileSync(join(root, file), bytes);
