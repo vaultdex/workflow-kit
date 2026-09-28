@@ -112,8 +112,10 @@ dependent implementation. Preserve existing work; use [recovery](#recovery-scope
 Do not remove dependencies, silently narrow acceptance or call a native blocker
 "merge-only" to make work executable. Unaffected work means another authorized,
 executable issue or read-only investigation. A specific human instruction may
-authorize a bounded exception despite a named blocker: record its source, permitted
-work and remaining gates before acting. A general "continue", review request or
+authorize a bounded exception despite a named blocker or specified unavailable or
+incomplete check: record its source, permitted work and remaining gates before
+acting. Preserve the BLOCKED/UNKNOWN result; the exception authorizes only its
+recorded work. A general "continue", review request or
 Ready placement is not such an exception; it grants no acceptance or merge waiver.
 
 In the existing takeover/handoff record, keep a short dated result: checked issue,
