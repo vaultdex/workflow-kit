@@ -169,7 +169,8 @@ issues; record real prerequisites with native `blocked by` links. Splitting work
 grants no start/scope permission. A kit delivery and its consumer update need
 separate issues/PRs; the consumer starts only after its prerequisite is satisfied.
 
-After Ready, authorization, ownership and the [execution check](#execution-check),
+After Ready, authorization, ownership and a STARTABLE [execution check](#execution-check)
+(or its specific human exception recorded with source, permitted work and remaining gates),
 create the issue-linked branch through Development or the native CLI, using the
 actual approved base:
 
