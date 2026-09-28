@@ -46,7 +46,9 @@ function check() {
       blocked.push(`blocked by ${label} (closed as ${reason}; record a decision)`);
     }
   }
-  const verdict = blocked.length ? 'BLOCKED' : unknown.length ? 'UNKNOWN' : 'STARTABLE';
+  let verdict = 'STARTABLE';
+  if (unknown.length) verdict = 'UNKNOWN';
+  if (blocked.length) verdict = 'BLOCKED';
   const assignees = issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none';
   console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${assignees}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
@@ -96,9 +98,14 @@ function set(fieldName) {
   console.log(`#${issue.number} ${fieldName}: ${option.name}`);
 }
 
+// OWNER/REPO#N names a blocker in another repository; N or #N one in this project's repository.
+const blockerRepository = reference => reference.includes('/') ? reference.slice(0, reference.lastIndexOf('#')) : project.repository;
+const validBlocker = reference => /^\d+$/.test(reference.slice(reference.lastIndexOf('#') + 1))
+  && /^[\w.-]+\/[\w.-]+$/.test(blockerRepository(reference));
+
 function block() {
-  // The blocker may live in another repository: N or OWNER/REPO#N.
-  const [, blockerOwner = owner, blockerName = name, blockerNumber] = /^(?:([\w.-]+)\/([\w.-]+))?#?(\d+)$/.exec(value);
+  const [blockerOwner, blockerName] = blockerRepository(value).split('/');
+  const blockerNumber = value.slice(value.lastIndexOf('#') + 1);
   const { id } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id}}}`,
     { owner: blockerOwner, name: blockerName, number: Number(blockerNumber) }).repository.issue;
   graphql(`mutation($issue:ID!,$blocker:ID!){addBlockedBy(input:{issueId:$issue,blockingIssueId:$blocker}){issue{number}}}`,
@@ -110,7 +117,7 @@ const commands = { next, check, block, status: () => set('Status'), priority: ()
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
-  || (command === 'block' && !/^(?:[\w.-]+\/[\w.-]+)?#?\d+$/.test(value ?? ''))) {
+  || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error('Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | block ISSUE BLOCKER');
   process.exit(2);
 }
