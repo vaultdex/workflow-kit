@@ -16,7 +16,9 @@ take precedence within system, permission and safety boundaries.
   external blockers and competing PRs; record the driver. Before taking or resuming
   work, including review fixes and every move to In progress, run the live
   [execution check](docs/CONTRIBUTING.md#execution-check). An open native predecessor
-  or failed/incomplete check means STOP: no claim, In progress or dependent edits.
+  or failed/incomplete check means STOP: no claim, In progress or dependent edits,
+  except for the check's specific, recorded human exception with source, permitted
+  work and remaining gates.
   Ready, an existing branch/driver or a review request does not waive this check;
   never reinterpret a native blocker as merge-only. New work
   enters Backlog with milestone, Priority and labels. Never promote it without

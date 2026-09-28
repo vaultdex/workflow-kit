@@ -57,7 +57,8 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   authorization under the start policy. Native automations must
   not promote work to Ready/In progress just because a PR was linked or a bot acted.
 - Before taking work, refresh main, status, assignee, dependencies and linked PRs.
-  Only after the execution check passes, record its evidence and driver/session/branch,
+  Only after the execution check passes (or its specific human exception is recorded
+  with source, permitted work and remaining gates), record evidence and driver/session/branch,
   assign and set In progress, then re-read ownership and blockers before editing. Shared
   GitHub logins still need distinct sessions. Edits are not atomic claims; competing
   ownership/overlap stops affected work pending coordination. Inactivity grants nothing.
@@ -84,9 +85,11 @@ Require a successful command, an open issue, the authorized Project status and
 ownership, and complete native dependency data. Compare `blockedBy.totalCount`
 with `blockedBy.nodes.length`; check every predecessor's current state and URL,
 including other repositories. If the CLI lacks this field or returns fewer nodes,
-use the native dependency API with full pagination, for example:
+read issue state/ownership without that field and use the native dependency API
+with full pagination. Both reads must succeed:
 
 ```sh
+gh issue view ISSUE --repo OWNER/REPO --json state,assignees,projectItems
 gh api --paginate repos/OWNER/REPO/issues/ISSUE/dependencies/blocked_by
 ```
 
