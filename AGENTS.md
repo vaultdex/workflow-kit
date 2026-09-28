@@ -1,6 +1,7 @@
 # Workflow Kit contributors
 
-Follow [AGENT_RULES.md](AGENT_RULES.md); here the kit itself is the project.
+Follow [AGENT_RULES.md](AGENT_RULES.md); here the kit itself is the project, so
+kit paths drop the `.vendor/workflow-kit/` prefix (`node scripts/board.mjs check 123`).
 
 - Skills come only from the pinned submodules plus the reviewed patches in
   `scripts/`. Never edit generated skills or `.github/skills`.
