@@ -20,7 +20,7 @@ function graphql(query, variables = {}) {
 
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
   id number title state assignees(first:10){nodes{login}}
-  projectItems(first:20){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
+  projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
   blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
@@ -55,12 +55,19 @@ function check() {
 }
 
 function next() {
-  // Advanced issue search understands -is:blocked (open native predecessors).
-  const { issueCount, nodes } = graphql(`query($q:String!){search(query:$q,type:ISSUE_ADVANCED,first:100){issueCount nodes{...on Issue{
-    number title issueFieldValues(first:20){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
-    projectItems(first:20){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
-      priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
-  { q: `repo:${project.repository} is:issue is:open -is:blocked` }).search;
+  // Advanced issue search understands -is:blocked (open native predecessors). Read every page before sorting.
+  const nodes = [];
+  for (let after; ;) {
+    const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
+      pageInfo{hasNextPage endCursor} nodes{...on Issue{number title
+      issueFieldValues(first:20){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
+      projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
+        priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
+    { q: `repo:${project.repository} is:issue is:open -is:blocked`, ...(after && { after }) });
+    nodes.push(...search.nodes);
+    if (!search.pageInfo.hasNextPage) break;
+    after = search.pageInfo.endCursor;
+  }
   // The Priority field's option order is the ranking, whatever the scale (High/Low, P0/P1, …).
   const rank = selectField('Priority').choices.map(choice => choice.name);
   const order = priority => rank.includes(priority) ? rank.indexOf(priority) : rank.length;
@@ -71,7 +78,6 @@ function next() {
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);
   for (const issue of ready) console.log(`#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`);
   console.log(ready.length ? 'Run board.mjs check ISSUE before claiming one.' : 'No Ready issue without open blockers.');
-  if (issueCount > nodes.length) console.log(`Only the first ${nodes.length} of ${issueCount} unblocked open issues were read.`);
 }
 
 /** A single-select Project field with its options in configured order. */

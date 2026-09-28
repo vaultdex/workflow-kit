@@ -22,10 +22,14 @@ node .vendor/workflow-kit/scripts/setup-skills.mjs             # skills for ever
 
 Without `--existing`, `init-project` also creates the starter files (AGENTS.md,
 CONTRIBUTING.md, issue and PR templates) that are missing; afterwards they belong to
-the project and are never overwritten. It recognizes its own hook handlers by the
-snapshot paths they call and replaces only those; foreign hooks and settings stay.
-Setup regenerates `.github/skills` and `.github/agents` for the kit's skills and moves
-anything else found at its local skill paths to `.workflow-kit/replaced/`.
+the project and are never overwritten.
+
+What the kit owns and rewrites: hook handlers that mention its snapshot directories
+`~/.ponytail/vaultdex/` or `~/.impeccable/vaultdex/` (don't point your own hooks
+there), and the skills, agents and commands the pinned upstreams ship, by name.
+Generated `.github` files are committed, so Git keeps any earlier content. Anything
+else at a kit path moves to `.workflow-kit/replaced/`; foreign hooks and settings
+stay, and nothing else is deleted.
 Commit `.gitmodules`, the kit gitlink, the hook files and the generated `.github`
 files; local skill links and bundles stay ignored. In CI, run both commands and then
 `git add --intent-to-add --all && git diff --exit-code HEAD`: any diff, including a new
