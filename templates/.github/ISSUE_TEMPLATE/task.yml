@@ -4,13 +4,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Fehlt eine menschliche Entscheidung oder Handlung?**
-        Nur dann direkt nach dem Erstellen den Issue-Text bearbeiten: als ersten Abschnitt
-        `## Menschliche Mitwirkung nötig` ergänzen und Label `needs-human-input` setzen.
-        Zuständigkeit, konkrete Frage/Handlung, Optionen und Empfehlung, blockierte und
-        unabhängig mögliche Arbeit nennen. Antwort im Issue oder Agent-Chat genügt;
-        der Agent hält Entscheidung und Herkunft im Issue fest, bevor abhängige Arbeit weitergeht.
-        Ohne solchen Bedarf keinen Blocker-Abschnitt und kein solches Label setzen.
+        Braucht die Aufgabe eine menschliche Entscheidung oder Handlung? Dann nach dem Erstellen
+        `## Menschliche Mitwirkung nötig` als ersten Abschnitt ergänzen und das Label
+        `needs-human-input` setzen (Wer, Was fehlt, Wirkung, Antwortweg). Sonst weglassen.
   - type: textarea
     id: purpose
     attributes:
@@ -50,6 +46,6 @@ body:
     id: dependencies
     attributes:
       label: Abhängigkeiten und Wiederaufnahme
-      description: Voraussetzungen mit Beleg, nächster Aktion und Zuständigkeit; sonst „keine bekannt“. Kommentarfragen im Haupttext klären und Quellen verlinken. Status und Priority bleiben im Project.
+      description: Voraussetzungen mit Beleg, nächster Aktion und Zuständigkeit; sonst „keine bekannt“. Status und Priority stehen im Project, nicht hier.
     validations:
       required: true

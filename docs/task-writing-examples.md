@@ -1,9 +1,8 @@
 # Beispiele für Aufgaben und PRs
 
-Erfundene Beispiele für die [Schreibregeln](CONTRIBUTING.md#issue-plans-and-pr-descriptions).
-Dateien, Befehle und Ergebnisse gehören zum Beispielprojekt; keine Vaultdex-Aufträge
-oder behaupteten Prüfergebnisse. Für echte Aufgaben tatsächliche Einstiegspunkte,
-Metadaten und Belege einsetzen.
+Erfundene Beispiele für die [Schreibregeln](CONTRIBUTING.md#issues). Dateien,
+Befehle und Ergebnisse gehören zu einem Beispielprojekt. Für echte Aufgaben die
+tatsächlichen Einstiegspunkte, Metadaten und Belege einsetzen.
 
 ## Kleine Aufgabe: Startbefehl in der README korrigieren
 
@@ -94,21 +93,28 @@ statt das Implementierungsmodell raten zu lassen.
 
 ## PR zur kleinen Beispielaufgabe
 
-### Was wurde geändert?
+### Was wurde geändert und warum?
 
-Die README nennt im Abschnitt „Lokal starten“ jetzt `npm run dev`.
-Im echten PR hier das vollständig gelieferte Issue mit `Closes #N` verknüpfen.
+Die README nennt im Abschnitt „Lokal starten“ jetzt `npm run dev` statt des nicht
+vorhandenen `npm run start`. Neue Mitwirkende können die Entwicklungsumgebung
+damit nach Anleitung starten.
 
-### Warum war das nötig?
+Closes #N
 
-Der bisher dokumentierte Befehl `npm run start` existiert nicht.
+Ein Abschnitt **Prüfung und Grenzen** entfällt hier: Die Prüfung ist Routine und im
+Issue belegt. Nicht ausgeführte Prüfungen würden dort ausdrücklich als offen stehen.
 
-### Was bringt es uns?
+## Menschliche Mitwirkung
 
-Neue Mitwirkende können die Entwicklungsumgebung anhand der Anleitung starten.
+Beispiel für eine offene Produktentscheidung als erster Abschnitt eines Issues
+(zusätzlich Label `needs-human-input`):
 
-### Prüfung und Grenzen
-
-Beispiel für einen **tatsächlich ausgeführten** Nachweis: „Dokumentierte Vorbereitung
-und `npm run dev` auf eigenem Testaufbau bestanden; Diff enthält nur die README.“
-Nicht ausgeführte Prüfung stattdessen ausdrücklich als offen benennen.
+> ## Menschliche Mitwirkung nötig
+> - **Wer:** Produkt-Owner.
+> - **Was fehlt:** Sollen abgelehnte Datensätze eigene Reviewfälle bleiben?
+>   Empfehlung A: nur Identitätsfälle anzeigen, Datensatzbelege behalten.
+>   Alternative B: Datensatzfälle anzeigen und bei Auflösung mit schließen.
+> - **Wirkung:** Umsetzung und Abnahme der Bereinigung sind blockiert; die
+>   Reproduktion ist schon möglich.
+> - **Antwortweg:** A oder B im Issue oder im Agent-Chat. Danach konkretisiert der
+>   Agent Umsetzung und Tests im Issue.

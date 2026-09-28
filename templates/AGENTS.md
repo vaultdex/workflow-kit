@@ -1,13 +1,10 @@
 # Contributors
 
-Follow [shared agent rules](.vendor/workflow-kit/AGENT_RULES.md) once per task.
-Those rules apply to this project; the kit's own AGENTS.md is for kit maintainers.
-Read only the detailed sections needed for the current step.
+Follow the [shared agent rules](.vendor/workflow-kit/AGENT_RULES.md); they apply to
+this project. Board and start policy: `.github/workflow-project.json`.
 
 ## Project contracts
 
-Project/status/start policy: `.github/workflow-project.json`.
-Read local CONTRIBUTING.md for setup, test commands and final proof gates.
-Read affected architecture/contracts before behavior changes.
-Keep product-specific rules and exceptions here; do not copy the shared workflow.
-Keep this entry about 20–40 lines or shorter; link detailed product contracts.
+- Setup, test commands and required final proof: [CONTRIBUTING.md](CONTRIBUTING.md).
+- Read the affected architecture and contract docs before changing behavior.
+- Keep this file to project facts and exceptions (about 20–40 lines); link details.

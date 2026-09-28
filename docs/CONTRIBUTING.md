@@ -1,472 +1,194 @@
-# Contributing
+# Contribution workflow
 
-Start with local `AGENTS.md` and [shared agent rules](../AGENT_RULES.md).
-Read only this guide's sections required for the current step; reuse unchanged
-rules/evidence, refresh changed rules and live state. User instructions override
-skill guidelines within higher-priority/permission boundaries. If a rule blocks
-work, cite its file/text and continue unaffected authorized work.
+Details for the steps listed in [AGENT_RULES.md](../AGENT_RULES.md). The GitHub
+Project named in `.github/workflow-project.json` owns status and priority; issues
+own scope, acceptance, blockers and evidence; PRs own review. Keep no second task
+list, ledger or tracking issue.
 
-## Board and ownership
+## Starting work
 
-The project recorded in `.github/workflow-project.json` owns order/status; issues
-own scope/evidence/recovery; PRs own review/checks. No task JSON, central issue,
-claim/paired-research/completion PRs, dashboard synchronizer or automatic all-board loop.
+Statuses: Backlog → Ready → In progress → Automated review → Human review → Done.
+New issues, follow-ups included, start in Backlog. Only a human moves an issue from
+Backlog to Ready, and Ready may still hold issues with unresolved blockers.
 
-| Status | Required state |
-| --- | --- |
-| Backlog | Newly proposed, awaiting human triage, or still infeasible after blockers resolve; record reasons. |
-| Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement authorizes a start only under `"start": "ready"` (start policy below). |
-| In progress | Taken from Ready under the start policy and execution check, including its bounded human exception; one driver and linked session, branch/PR. This is the Doing state. |
-| Automated review | Ready PR with focused local checks passed; selected CI and automatic reviews run together. Disclose pending project-defined final proof. |
-| Human review | Ready for human acceptance: selected checks passed, automatic reviews finished and every finding fixed or linked to an actionable follow-up; disclose confirmed unavailable reviews under the exception below. |
-| Done | Acceptance satisfied; delivered repository work actually merged. |
+**Start policy.** By default every start needs an explicit human request that
+covers the issue. A project may set `"start": "ready"` in
+`.github/workflow-project.json`; then a human placing an issue in Ready is that
+request. A human request to implement a Backlog issue covers moving it through
+Ready. Authorization for an issue covers its review fixes; a different issue needs
+its own. Automations and bots never authorize a start.
 
-- New issues start in Backlog, including immediately actionable work. A human may
-  authorize triage of one issue or the whole Backlog: check scope and metadata,
-  promote feasible work to Ready even with unresolved blockers, and retain only
-  work that remains infeasible after its blockers are resolved, with reasons.
-  Under the default start policy, triage authorization never authorizes
-  implementation or moving to In progress; under `"start": "ready"`, Ready placement
-  from human-authorized triage is that authorization (start policy below).
-  Preserve native dependency links and explicit external blocker/recovery evidence.
-  Before selecting Ready work, run the [execution check](#execution-check) and skip
-  blocked items. Closed predecessors remain linked; verify their delivery rather
-  than treating Ready or closure alone as clearance. If no Ready issue is executable,
-  report its blockers; never bypass them or treat waiting as permission.
-- Before adding work, inspect relevant open/closed issues, cards and competing PRs.
-  Extend compatible unowned work; coordinate foreign active scope. Plans specify
-  outcome, files/contracts, non-goals, steps, acceptance, checks, real dependencies,
-  risks and recovery. Evidence needs durable authorized links/paths, not chat alone.
-- Start policy: implementation starts only from Ready. By default each start needs
-  an explicit human request covering that issue/scope. A project may instead set
-  `"start": "ready"` in `.github/workflow-project.json` (project-owned; setup and
-  kit updates keep it) to declare human triage to Ready as that authorization;
-  every other gate here still applies. Never take implementation
-  directly from Backlog or autonomously move a candidate to Ready/In progress
-  because it seems useful or executable.
-- If Ready is empty, inspect Backlog without implementation: assess scope, evidence,
-  dependencies, ownership and blockers; propose the next executable issue with a
-  short reason and needed preparation. Leave its status unchanged pending a human
-  decision. If none is executable, report the concrete blockers instead of starting
-  unrelated work. Analysis permission is not implementation permission.
-- A human request to implement a Backlog issue authorizes preparing/checking Ready:
-  record the instruction and accepted scope, move through Ready,
-  then start In progress only after the execution check passes or its specific human
-  exception is recorded with source, permitted work and remaining gates. Do not skip
-  unresolved dependencies or required approval outside that recorded exception.
-  Existing authorization covers verification/review fixes within the same active
-  scope, subject to the execution check; starting another issue needs new
-  authorization under the start policy. Native automations must
-  not promote work to Ready/In progress just because a PR was linked or a bot acted.
-- Before taking work, refresh main, status, assignee, dependencies and linked PRs.
-  Only after the execution check passes (or its specific human exception is recorded
-  with source, permitted work and remaining gates), record evidence and driver/session/branch,
-  assign and set In progress, then re-read ownership and blockers before editing. Shared
-  GitHub logins still need distinct sessions. Edits are not atomic claims; competing
-  ownership/overlap stops affected work pending coordination. Inactivity grants nothing.
-- Driver owns integration, decisions, proof and delivery. Delegated slices need
-  bounded non-overlapping paths, acceptance, non-goals and shared contracts; workers
-  cannot claim, change status or approve/merge. Use sufficient model capability;
-  no fixed model/version or legacy model_reasoning metadata. Respect requested scope.
-- Risk determines proof: local regression → cross-component contracts → security,
-  workflow/migration boundaries and recovery → authorized live targets/operator
-  evidence. Old R0–R4 labels and agent-merge exceptions are retired. Human review
-  and merge remain default; green checks, labels or board edits grant no authority.
+**Finding work.** `board.mjs next` lists open Ready issues without open native
+blockers, highest Priority first. If nothing is startable, report the blockers and
+propose the next issue from Backlog with a short reason; don't implement it or
+change its status.
 
 ### Execution check
 
-Run immediately before taking work, resuming after interruption or handoff, and
-every move to In progress, including review corrections. Earlier comments, memory,
-Ready placement, an existing branch/PR or the same driver are not current evidence.
+Run `board.mjs check ISSUE` right before you claim an issue, resume after an
+interruption or handoff, or return to In progress for review fixes. Earlier
+results, memory, an existing branch or the Ready status are not evidence.
 
-```sh
-gh issue view ISSUE --repo OWNER/REPO --json state,blockedBy,assignees,projectItems
-```
-
-Require a successful command, an open issue, the authorized Project status and
-ownership, and complete native dependency data. The command's `projectItems`
-contains titles/statuses, not Project identity: separately query native Project
-items with their `project.id` and status, matching the configured Project ID in
-`.github/workflow-project.json` and this issue. Resolve owner/number to that ID if
-needed; paginate until the matching item is found or all items are exhausted.
-Never accept a same-title board's status; missing/ambiguous identity is UNKNOWN.
-Compare `blockedBy.totalCount`
-with `blockedBy.nodes.length`; check every predecessor's current state and URL,
-including other repositories. If the CLI lacks this field or returns fewer nodes,
-read issue state/ownership without that field and use the native dependency API
-with full pagination. Both reads must succeed:
-
-```sh
-gh issue view ISSUE --repo OWNER/REPO --json state,assignees,projectItems
-gh api --paginate repos/OWNER/REPO/issues/ISSUE/dependencies/blocked_by
-```
-
-Any open native predecessor means **BLOCKED**. A failed request, inaccessible
-predecessor, missing field or incomplete response means **UNKNOWN**, never an empty
-blocker list. For closed predecessors verify actual required delivery or an accepted
-disposition; closure/Not Planned alone is insufficient. Read current issue scope,
-decisions and external prerequisites too: an empty native list does not clear them.
-
-BLOCKED or UNKNOWN forbids claiming the issue, moving it to In progress or starting
-dependent implementation. Preserve existing work; use [recovery](#recovery-scope-and-findings).
-Do not remove dependencies, silently narrow acceptance or call a native blocker
-"merge-only" to make work executable. Unaffected work means another authorized,
-executable issue or read-only investigation. A specific human instruction may
-authorize a bounded exception despite a named blocker or specified unavailable or
-incomplete check: record its source, permitted work and remaining gates before
-acting. Preserve the BLOCKED/UNKNOWN result; the exception authorizes only its
-recorded work. A general "continue", review request or
-Ready placement is not such an exception; it grants no acceptance or merge waiver.
-
-In the existing takeover/handoff record, keep a short dated result: checked issue,
-native predecessor states and delivery evidence, external blockers, driver/session
-and STARTABLE/BLOCKED/UNKNOWN. No separate ledger or repeated unchanged-blocker
-comments. If prerequisites change during work, stop affected edits and refresh this
-decision. Recheck before Human review; unresolved integration/acceptance blockers
-prevent that handoff even when isolated tests pass or bounded edits were authorized.
-
-Review these cases without a specific human exception when changing these rules:
-
-| Case | Required decision |
+| Verdict | Meaning |
 | --- | --- |
-| Ready with an open native predecessor | BLOCKED; no claim or In progress. |
-| Previously cleared predecessor reopens before resume | BLOCKED; preserve branch/PR and wait for verified resolution. |
-| Review requests a fix while a native predecessor is open | BLOCKED; ordinary review authorization does not waive it. |
-| API failure or incomplete native dependency list | UNKNOWN; recover the read, never infer no blockers. |
-| Predecessor closed without required delivery/disposition | No start until evidence resolves the prerequisite. |
+| STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed. |
+| BLOCKED | An open predecessor, a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, or status Backlog or Done. |
+| UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, or the issue is missing from the Project. Retry the read; never read it as "no blockers". |
 
-## Issue plans and PR descriptions
+The check covers native blockers only. Also read the issue's **Abhängigkeiten und
+Wiederaufnahme** section for external prerequisites such as access, releases or
+decisions.
 
-Issues und PRs in einfachem Deutsch, technische Namen exakt. Kleine Aufgaben
-bleiben kurz; komplexe brauchen konkrete Schritte, Dateien/Verträge, Ein-/Ausgaben
-und betroffene Rechte, Fehlerfälle, Wiederholung, Datenänderungen und Recovery.
-Keine Spekulation, Modellvorgaben oder Fülltexte.
+BLOCKED or UNKNOWN means: don't claim, don't move to In progress, don't edit
+dependent code. Don't remove dependencies, narrow acceptance or call a blocker
+"merge-only" to make an issue startable. Only a specific human instruction that
+names the blocker allows bounded work despite it; record its source, the permitted
+work and the remaining gates in the issue first. "Continue", a review request or
+Ready placement is not such an instruction.
 
-Jedes neue oder wesentlich überarbeitete Issue erklärt:
+**Claiming.** After STARTABLE, assign yourself, set In progress and note the
+verdict, your session and branch in the issue. Assignment is not a lock. If
+prerequisites change while you work, stop the affected edits and check again;
+check once more before Human review.
 
-| Inhalt | Prüffrage |
-| --- | --- |
-| Zweck und Istzustand | Welches belegte Problem betrifft wen? Bei Fehlern: Reproduktion und Erwartung. |
-| Nutzen | Welcher sichtbare Vorteil oder vermiedene Schaden, ohne unbelegte Zeit-/Kostenversprechen? |
-| Umfang und Umsetzung | Welches vollständige Ergebnis, welche Nichtziele und geordneten Schritte mit vorhandenen Bausteinen? |
-| Abnahme | Welche Kriterien, bestehenden Tests/Befehle/Prüfwege und Ergebnisse? Mock, echte Integration und Live-Beleg unterscheiden. |
-| Abhängigkeiten/Wiederaufnahme | Welche nativen Vorgänger oder externen Voraussetzungen mit Beleg, nächster Aktion und Zuständigkeit? Sonst nach Prüfung „keine bekannt“. |
+**Delegation.** The driver owns integration, decisions, proof and delivery.
+Subagents get bounded, non-overlapping paths with acceptance and non-goals; they
+never claim, change status or approve.
 
-Routineentscheidungen treffen Implementierende selbst. Fehlende Produkt-,
-Architektur-, Datenschutz- oder Kostenentscheidungen nach [Human input](#human-input)
-klären; Vorschlag und Planungsarbeit sind keine Freigabe oder Implementierung.
-Offene Fragen und spätere Entscheidungen aus allen Issue-Kommentaren in den
-Haupttext übernehmen: Quelle nennen, nötigenfalls antworten, veraltete Aussagen
-erkennbar ersetzen und historische Belege erhalten. Fehlgeschlagene/unzugängliche
-Prüfung bleibt unbekannt. Status/Priority gehören ins Project, Ownership getrennt.
+## Issues
 
-PRs erklären tatsächliche Änderung, Grund und Nutzen, bei Bedarf Vorher/Nachher;
-passende Prüfung und wesentliche Grenzen knapp nennen. Issue-Belege verlinken
-statt Logs/wechselnde CI-Status kopieren. Leere Platzhalter/Hinweise entfernen.
-Dies gilt auch für Blank-Issues, API/CLI, Agenten und Follow-ups: Autor prüft Inhalt
-vor Übergabe, Reviewer Bedeutung statt Überschriften. Keine zusätzliche Automation,
-Startfreigabe oder zweite Aufgabenliste. [Beispiele](task-writing-examples.md) nur
-bei Bedarf. Kit-Updates aktualisieren verwaltete Vorlagen über `init-project`;
-eigene Verbrauchervorlagen bewusst angleichen, fremde Anpassungen erhalten.
+Write issues and PRs in simple German and keep technical names exact. Before
+creating one, search open and closed issues and PRs, and extend compatible work
+instead of duplicating it. Separate deliverables need separate issues before
+branching; a kit change and its consumer update are two issues.
 
-## Issue, branch and PR links
+Use the issue form's sections:
 
-Before branching, define complete delivery units: each PR closes only its own
-fully delivered issue(s), each with milestone, Priority and labels. Reuse compatible
-issues; record real prerequisites with native `blocked by` links. Splitting work
-grants no start/scope permission. A kit delivery and its consumer update need
-separate issues/PRs; the consumer starts only after its prerequisite is satisfied.
+- **Wofür brauchen wir das?** The evidenced problem; for bugs, reproduction and
+  expected behavior.
+- **Was bringt es uns?** The concrete benefit or avoided harm.
+- **Was muss gemacht werden?** The complete outcome and its non-goals.
+- **Wie soll es umgesetzt werden?** Steps, files, contracts, data, and failure and
+  retry cases.
+- **Woran erkennen wir, dass es fertig ist?** Checkable criteria with commands;
+  say which proof is a mock and which is live.
+- **Abhängigkeiten und Wiederaufnahme.** Prerequisites with evidence and the next
+  action, or „keine bekannt“.
 
-After Ready, authorization, ownership and a STARTABLE [execution check](#execution-check)
-(or its specific human exception recorded with source, permitted work and remaining gates),
-create the issue-linked branch through Development or the native CLI, using the
-actual approved base:
+Small tasks stay short. Move answers and decisions from comments into the body,
+naming their source. See the [examples](task-writing-examples.md).
 
-```sh
-gh issue develop ISSUE --repo OWNER/REPO --list
-gh issue develop ISSUE --repo OWNER/REPO --name codex/ISSUE-topic --base main
-gh issue develop ISSUE --repo OWNER/REPO --list
-```
+**Metadata.** Every issue, including Backlog items and follow-ups, gets one
+repository milestone, a Project Priority and area/type labels when it is created,
+and keeps them after closing. Set the real fields (`gh issue create --milestone …
+--label …`, then `board.mjs priority`), not text in the body. Priority reflects
+impact and urgency (Urgent, High, Medium, Low). If unsure, give a provisional one
+and state its basis. Don't reprioritize others' active work. Confirmed production,
+security or data-loss fixes use the milestone `Hotfixes · laufend`. Labels describe
+scope, never approval, priority or checks.
 
-Fetch into the intended checkout; use `--checkout` only when switching is safe.
-Reuse compatible owned branches/PRs; link existing branches through Development.
-After an error inspect remote refs and issue links before retrying: creation may
-have succeeded. Verify branch/repository before editing.
+### Human input
 
-Before any PR, including Draft, resolve unavailable acceptance under
-[scope and findings](#recovery-scope-and-findings): explicit human authorization,
-complete follow-up metadata/dependency, and recorded resulting scope. Existing
-authorization suffices; do not ask twice or silently drop acceptance. Only the
-fully delivered resulting scope closes. Project-defined final proof may remain
-explicitly pending during automatic review, but must pass before Human review/merge.
-Missing access or unperformable acceptance is still a blocker, not a scheduled gate.
+When an issue needs a human decision or action, make `## Menschliche Mitwirkung
+nötig` its first section and add the label `needs-human-input`. For each open point
+name:
 
-Put `Closes #N` (cross-repo: `Closes OWNER/REPO#N`) for every delivered issue in
-the PR body from first publication. Branch names, titles, comments and commits
-do not establish closing links. Keep auto-close enabled; never attach multiple
-deliveries to one unfinished umbrella issue. Use `Refs OWNER/REPO#N` for background
-or non-default-branch integration; it grants no completion. Non-default targets
-ignore closing keywords and need an explicit final delivery to the default branch.
+- **Wer:** who decides or acts.
+- **Was fehlt:** the question or action, with options and a recommendation.
+- **Wirkung:** what is blocked and what can proceed.
+- **Antwortweg:** an issue comment or the agent chat; both count.
 
-After creation/body/base changes and before review handoff, read saved relationships:
+Before dependent work, record the answer, its scope and its source in the body:
+a comment link, or the date, person and session for a chat answer. Silence, a
+recommendation or elapsed time is not approval. Remove the section and the label
+only when every point is resolved. Routine technical decisions are yours.
+[Example](task-writing-examples.md#menschliche-mitwirkung).
 
-```sh
-gh pr view PR --repo OWNER/REPO --json url,body,baseRefName,closingIssuesReferences
-```
+## Delivery
 
-Verify intended closures only; for references verify body/cross-reference activity
-and no unintended closure. Record proof in the owning issue. A PR may replace its
-branch link; an empty branch list then is not failure. Repair links on the same PR;
-unknown/inaccessible linkage remains a blocker. Manual Development closing links
-must be removed in Development UI, not repeated body edits. Recheck closure intent
-after base/scope changes. Verify native Project closure automation before relying
-on it; Not Planned is not Done. No extra ledger, bot or Actions job.
+**Branch.** Create the branch from the issue so GitHub links it:
+`gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base main`.
+Reuse your existing branch and PR for the same issue. If creation fails, check the
+remote branches and issue links before retrying.
 
-GitLab: use native Create branch / Create merge request with `ISSUE-topic` (number
-then hyphen), verify MR relations/closure and remove closing patterns for partial
-deliveries. These are contributor checks, not server enforcement.
+**PR body.** From the first push, write `Closes #N` (cross-repo:
+`Closes OWNER/REPO#N`) for each issue the PR fully delivers, and `Refs #N` for
+related work. Closing keywords work only in PRs into the default branch. Partial
+delivery never closes an issue; split the undeliverable part first
+([undeliverable acceptance](#undeliverable-acceptance)). A branch created from the
+issue already counts as a closing link. After creating the PR or changing its body
+or base, verify with `gh pr view PR --json closingIssuesReferences`.
 
-References: [GitHub CLI](https://cli.github.com/manual/gh_issue_develop),
-[GitHub branch links](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/creating-a-branch-for-an-issue),
-[GitHub PR links](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue),
-[GitLab cross-links](https://docs.gitlab.com/user/project/issues/crosslinking_issues/).
+Write the PR in German: **Was wurde geändert und warum?** covers the result, the
+reason and the benefit, with before/after where useful, plus the issue links. Add
+**Prüfung und Grenzen** only for problems, skipped checks or proof limits. Link the
+evidence in the issue instead of pasting logs or CI status. Delete template hints
+and empty sections.
 
-## Milestones
+### Review loop
 
-Every task issue needs one repository milestone when created or added to the project,
-including Backlog, investigations and follow-ups. Reuse a matching milestone; create
-a scoped one when none fits. Set the actual GitHub Milestone field, not just an issue
-body reference or label. Convert draft cards to issues before tracking them as tasks.
-Keep the assignment after closure; completeness checks include Done/closed cards.
+1. Before the first push, focused checks pass, the diff is reviewed and current
+   main is merged if the branch is behind. Push once, then update the same PR.
+2. Keep the PR Draft only while implementation or focused checks are unfinished.
+   Then mark it Ready for Review and set Automated review. Don't wait for optional
+   self-reviews; bots and CI start only outside Draft.
+3. Wait for CI and every configured automatic review on the current head, using the
+   harness's waiting, not polling. Pending, cancelled or missing expected checks are
+   not success. Read all findings, including every page of analyzer results such
+   as Sonar issues and hotspots. A green quality gate does not mean zero findings,
+   and a missing or stale analysis is not clean.
+4. To change code: run the execution check, set the PR to Draft and the issue to In
+   progress, batch the fixes, rerun the affected checks, mark the PR Ready for
+   Review, set Automated review and wait again. Merge main only for conflicts or a
+   real need.
+5. After the last automatic correction, run the project's expensive final proof if
+   it defines one, and record the tested commit. Reuse proof only while its inputs
+   are unchanged.
+6. Set Human review only when CI passes, every automatic review of the current head
+   has finished, each finding is fixed or linked to a follow-up, the final proof has
+   passed and no prerequisite is open. If a reviewer is confirmed unavailable
+   (quota, outage), record the reviewer, cause and evidence in the PR and hand off
+   with that limitation stated. Pending or unknown does not count as unavailable.
+7. After the human merges, confirm the delivered scope is accepted and the issue is
+   closed; then it is Done. A not-planned closure never becomes Done.
 
-Urgent fixes for confirmed production failures, security problems or data-loss risks
-use the repository milestone `Hotfixes · laufend`, kept open
-without a due date. Close hotfix issues individually; normal bug fixes and planned
-work use their scoped milestone. Hotfix urgency never bypasses acceptance, review
-or merge rules. This is a contributor obligation, not automatic server enforcement.
+Update the affected docs (behavior, API, operations, workflow) in the same PR, and
+add notable user-visible changes to the project's changelog or release notes.
 
-## Priority and issue metadata
+## Blockers and scope
 
-Every issue needs a matching repository milestone, an explicit `Priority` in the
-GitHub Project and appropriate area/type labels when created or added to the board.
-This includes Backlog, investigations, hotfixes and follow-ups; retain metadata
-when closing. Set the actual fields: an issue-body mention or a `priority` label
-does not replace Project Priority. Convert draft cards to issues first.
+**Blocked mid-work.** Stop the affected edits. In the issue, record the blocker, its
+evidence, what unblocks it, the next action and your branch and PR. Return a
+triaged issue to Ready with the blocker noted and unassign yourself; resume only
+through the execution check. Other authorized, startable work or read-only
+investigation can continue.
 
-When taking an authorized Ready issue, the driver checks its milestone, labels and
-Project Priority before implementation and independently fills missing metadata.
-GitHub Projects can link organization issue fields: an empty Project `options`
-array does not prove an empty scale. Read the linked `issueField.options` and the
-issue's `issueFieldValues` first. Set the underlying issue field for linked
-Priority fields; do not create a duplicate Project field or replace its scale.
-For a project-local Priority field with no selectable options, completing its
-scale is routine setup within authorized project work: initialize Urgent, High,
-Medium, Low without requesting additional approval. Changing a linked organization
-scale requires authorization covering that shared schema; reuse existing authority.
-Filling a missing issue priority from an existing scale within authorized work
-needs no additional approval and does not change its schema. Preserve existing
-options and priorities of foreign active work; coordinate any changes to those.
-Complete this preflight early so missing metadata does not first become a blocker
-at review handoff.
+**Failures.** Inspect the real Git and GitHub state, fix the cause and continue on
+the same branch and PR. No resets, duplicate PRs or workarounds for your own
+mistakes. Report tool or service defects with a reproduction. Missing credentials
+stay explicit gaps.
 
-Use the project's existing priority scale (template: Urgent, High, Medium, Low),
-assessing impact and urgency. Do not default everything to High or reprioritize
-foreign active work without coordination. If impact is uncertain, document the
-basis of a provisional priority and the investigation needed; do not leave it blank.
-Reuse labels that describe affected areas and work type; create new labels only
-for a missing meaningful category. Priority never grants approval or waives checks.
-Verify all three fields before handing off or moving an issue to Ready, Automated review or Human review.
-This is a contributor obligation, not a server-enforced required-field check.
+### Findings and follow-ups
 
-## Labels
+Every concrete finding needs evidence, impact and a disposition. Either it gets a
+verified fix within the issue's scope, with a regression check, or it gets a
+linked follow-up issue.
 
-Use native issue forms and explicit labels on CLI-created issues/PRs. Labels describe
-scope or a concrete need for human input, never approval, priority, checks or merge
-authority. Preserve existing labels.
+Follow-ups are deduplicated, carry full metadata, start in Backlog, and state
+evidence, acceptance and checks. Phrase an unconfirmed signal as an investigation
+question, not as a proven defect. A follow-up grants no authority to implement it
+now. For research or audits, record each finding's accept, defer or reject decision
+with the human's call; accepted findings become issues. Report critical security,
+data-loss or availability risks at once, without exposing secrets.
 
-## Human input
+### Undeliverable acceptance
 
-Braucht ein Issue eine menschliche Entscheidung, Freigabe oder Handlung, stehen
-**beide** Hinweise sofort fest: erster sichtbarer Abschnitt im Haupttext
-`## Menschliche Mitwirkung nötig` und Label `needs-human-input`. Das gilt bei
-Erstellung, Überarbeitung und neu entdeckten Blockern, auch für Blank-Issues,
-API/CLI und Agenten. Nicht in Umsetzungsschritten oder Kommentaren verstecken.
-Das allgemeine Issue-Formular enthält dafür nur einen Ausfüllhinweis, kein leeres
-Blocker-Feld. Bei echtem Bedarf direkt nach dem Absenden Kopfblock und Label
-ergänzen, bevor das Issue zur Bearbeitung übergeben wird.
+If part of the acceptance can't be delivered, for example because access is
+missing, get explicit human authorization before opening the PR. Then move that
+part into a follow-up issue: Backlog, full metadata, native `blocked by` the
+original issue. Record the split in the original issue; the PR then closes the
+reduced scope. Without authorization it stays a blocker. A split never waives
+security or required checks.
 
-Der Kopfblock nennt für jede offene Frage:
-
-- **Wer:** zuständige Person oder Rolle; unklare Zuständigkeit ausdrücklich nennen.
-- **Was fehlt:** konkrete Frage oder Handlung, bei Entscheidungen Optionen und
-  begründete Empfehlung. Routineentscheidungen trifft der Agent selbst.
-- **Wirkung:** blockierte Umsetzung/Abnahme und unabhängig ausführbare Arbeit.
-- **Antwortweg:** Issue-Kommentar oder direkte Antwort im Harness-/Agent-Chat;
-  erforderliches Ergebnis und nächster Schritt des Agenten.
-
-Beispiel für eine noch offene Produktentscheidung:
-
-> ## Menschliche Mitwirkung nötig
-> - **Wer:** Produkt-Owner.
-> - **Frage:** Sollen abgelehnte Datensätze eigene Reviewfälle bleiben?
-> - **Empfehlung A:** Nur Identitätsfälle anzeigen; Datensatzbelege behalten.
->   **Alternative B:** Datensatzfälle anzeigen und bei Auflösung mit schließen.
-> - **Blockiert:** Umsetzung und Abnahme der Bereinigung. Reproduktion ist möglich.
-> - **Antwort:** A oder B im Issue oder Agent-Chat. Danach konkretisiert der Agent
->   Umsetzung und Tests im Issue.
-
-Kommentar und Chat sind gleichwertige Antwortwege; Menschen müssen Antworten
-nicht doppelt eintragen. Vor abhängiger Arbeit übernimmt der Agent die ausdrückliche
-Entscheidung, deren Geltungsbereich und Herkunft in den Issue-Haupttext und passt
-Plan, Abnahme und Wiederaufnahme an. Quelle: Kommentarlink oder bei einer
-Chat-Antwort Datum, antwortende Person und verfügbare Sitzungsreferenz. Fehlt ein
-teilbarer Link, genügt eine eindeutige Sitzungskennung; keine privaten Transkripte
-veröffentlichen. Nur entscheidungsrelevante, zur Veröffentlichung geeignete Inhalte
-übernehmen; Geheimnisse bleiben in vorgesehenen privaten Eingabewegen.
-
-Teilantworten lösen nur beantwortete Punkte. Widerspruch, unklare Antwort oder
-fehlende Entscheidungsbefugnis bleiben offen und werden gezielt geklärt.
-Empfehlung, Schweigen und Zeitablauf sind keine Freigabe. Erledigte Punkte mit
-Quelle unter „Abhängigkeiten und Wiederaufnahme“ erhalten und aus dem aktiven
-Kopfblock entfernen. Erst wenn **alle** menschlichen Punkte geklärt und erforderliche
-Handlungen belegt sind, Kopfblock und Label entfernen. Bei erneutem Bedarf beide
-wieder setzen. Leere Formularabschnitte vor Übergabe entfernen.
-
-Label und Kopfblock gelten unabhängig vom Project-Status. Sie ändern weder
-Priorität noch Ownership und ersetzen keine nativen Abhängigkeiten. Normale
-offene Vorgänger oder die reguläre PR-Abnahme in Human review allein brauchen
-dieses Label nicht. Ein zusätzlicher konkreter Entscheidungsbedarf dort schon.
-Nach Klärung Start-, Scope-, Ownership- und Review-Gates erneut prüfen; keine
-automatische Backlog-Promotion, kein automatischer Merge. Unabhängige Arbeit nur
-innerhalb bestehender Autorisierung fortführen.
-
-`setup-github.mjs` legt das fehlende Label bei der Einrichtung an und erhält
-vorhandene Labels. Bestehende Projekte ergänzen nur das fehlende Label nativ,
-ohne vollständiges Setup erneut auszuführen. Autoren/Agenten halten Text und
-Label gemeinsam aktuell; keine neue Automation, Chat-Brücke oder Polling-Schleife.
-
-## Recovery, scope and findings
-
-- Apply the [execution check](#execution-check) before recovery work. Block affected
-  implementation, not read-only investigation or other executable authorized issues.
-  Record failure, unblocking evidence needed, next action
-  and prior driver/branch/commit/PR; preserve partial work. Store handoff, return
-  previously triaged feasible work to Ready with explicit blockers, release
-  assignment and verify. Untriaged or inherently infeasible work stays Backlog.
-  Anyone may refine unowned blockers;
-  preserve approvals. Resume only under the execution check, including its bounded
-  human exception, and fresh ownership/dependency checks, never merely elapsed time.
-- Inspect actual Git/GitHub state after failure; correct the cause and resume the
-  same branch/PR. No resets, duplicate PRs, credential/protection changes or repo
-  workarounds for invocation mistakes. Report tool/service defects with reproduction.
-  Missing credentials, metadata or evidence remain explicit gaps.
-- Requested corrections return work to In progress and PR to Draft only after the
-  execution check passes (or its specific human exception is recorded).
-  PR rejection/closure is not delivery or permission to take ownership. Cancellation
-  needs a human not-planned disposition; preserve history, never mark implemented/Done.
-  Reopening requires reconciling scope/status.
-- Every concrete finding needs evidence, consequence and disposition: bounded
-  same-outcome/root-cause fix plus regression, or linked actionable unowned follow-up
-  with acceptance/checks. Update scope before work; distinct outcomes, ownership,
-  dependencies, risk, product/architecture or protected-data changes need separately
-  scoped work/authorization. Preserve foreign work; retain out-of-scope findings.
-  Independent follow-ups need planning, not implementation before this delivery.
-- Before PR creation, and only with explicit human authorization of the resulting
-  acceptance/scope, move separately executable unavailable acceptance into a
-  follow-up issue: record exact acceptance, missing access/evidence, recovery and
-  checks; assign milestone, Project Priority, labels and Backlog; set its native
-  `blocked by` dependency to the original issue. Record the split, follow-up link
-  and resulting deliverable scope in the original issue. Preserve historical
-  acceptance text and link the human authorization as the superseding decision,
-  not silent deletion. Existing explicit authorization covering this split remains
-  valid; this policy or a driver's own decision alone does not authorize it.
-  An authorized split is not a waiver of security/integrity or
-  mandatory pre-merge checks. If safe delivery depends on the missing proof,
-  retain the blocker. Changed outcomes, risk or ownership still need the separately
-  scoped authorization above. Creating the follow-up grants no implementation
-  authority: Backlog-to-Ready remains human triage under the start policy.
-- Research retains full results and each finding's accept/defer/reject rationale
-  with human decision. Accepted implementation findings become deduplicated tasks;
-  result PR only when files change. Closing PRs never substitutes for that decision.
-
-## Publication and review
-
-Preserve unrelated edits; isolate worktrees when needed. Never stash/discard foreign
-work, rewrite task history through rebase/amend/reset/force-push, or bypass protections.
-Ordinary owned code conflicts are driver work; preserve foreign intent and coordinate
-ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
-
-1. Finish implementation, focused local checks and diff review, including Drafts.
-   Name project-defined final proof still pending in the issue/PR. Before first push
-   and every PR creation, fetch main and merge if missing; resolve permitted
-   conflicts and rerun invalidated checks. Recheck delayed publication if main moved.
-2. Push prepared head once; update the same PR. Later main integration requires
-   conflicts, affected correctness/ownership or an actual gate—not unrelated movement.
-3. Inspect live base/head, ownership, mergeability and selected checks together.
-   Empty checks do not prove no workflow runs; missing expected/pending/cancelled/
-   failed checks are not success. Keep Draft only while implementation, focused proof
-   or a selected pre-review check remains open. Await running checks through the
-   harness waiting mechanism, not model polling. Refresh unknown metadata boundedly,
-   then report the concrete blocker; do not park a finished PR in Draft without one.
-4. Before marking the PR Ready for Review and setting Automated review, verify
-   delivered issue links and closure intent under [issue, branch and PR links](#issue-branch-and-pr-links).
-   Once that verification, implementation and focused pre-review checks are
-   complete, immediately mark Ready for Review / Automated review. Selected CI and
-   automatic reviews run together; failed CI enters step 5's execution check before
-   any return to Draft/In progress. Automatic
-   reviews start outside Draft; never wait for them while the PR is Draft.
-   Optional extra self-reviews, subagents or analyses are not new gates delaying
-   this transition. Their actionable findings enter the same rework cycle below.
-   Await all configured automatic reviews for the delivered revision before
-   reporting agent work complete; green CI alone is insufficient. Record local
-   proof against tested revision in issue; CI owns check state.
-   Query analyzer findings directly (Sonar issues/security hotspots and review-body
-   comments), including every page; verify analysis covers delivered HEAD. A green
-   quality gate does not mean zero findings. Re-query after the final push and record
-   remaining counts/dispositions. Missing or stale analysis is not a clean result;
-   apply step 6 only for confirmed service limitations.
-5. Before further work, including review fixes or corrections requested during Human
-   review, repeat the [execution check](#execution-check). Only after it passes (or
-   its specific human exception is recorded), return PR to Draft and issue to
-   In progress before edits. Finish changes
-   and affected checks, then mark Ready for Review / Automated review again and await
-   the new review cycle; batch related corrections and rerun affected checks.
-   After the last automatic correction, run the project's required expensive final
-   proof before Human review/merge. Earlier targeted proof is justified by concrete
-   risk. Reuse evidence only while relevant inputs/environment remain valid; record
-   tested revision and comparison to delivered head. A new commit alone does not
-   invalidate proof. A final-proof failure needing code changes returns through
-   affected checks/reviews and invalidated final proof. Before agent completion, fix every
-   finding with verification or link an actionable follow-up issue under
-   [findings disposition](#recovery-scope-and-findings). Record dispositions in PR;
-   creating follow-ups does not waive this PR's acceptance or required checks.
-   Recheck native and external prerequisites; unresolved integration or acceptance
-   blockers forbid Human review, including under the review-service exception below.
-   Once these gates are satisfied, move the issue to Human review and hand off for
-   human acceptance. Ready for Review alone never means Human review.
-6. If automatic reviews cannot run because of exhausted tokens/quota, service failure
-   or another confirmed blocker, record affected reviewer, cause and evidence in PR
-   and explicitly disclose the missing review in the final report. After other work,
-   checks and received findings are handled, move to Human review with the missing
-   review prominently disclosed; agent work may finish with that limitation.
-   Pending, queued or unknown review state remains Automated review and is not this exception; inspect
-   PR reviews, comments and checks, not only CI. This exception grants no merge
-   authority, check bypass or pre-merge Done status.
-7. After actual merge, verify acceptance of the recorded delivered scope before
-   closure and Done. Separately scoped external acceptance remains in its dependent
-   follow-up; it is not certified by this merge. Apply the split before PR creation,
-   not for the first time after merge. Queued merge or PR closure is not delivery.
-   Verify native Project automation before relying on it; not-planned closure must
-   not become Done. GITHUB_TOKEN Project access is not assumed.
-
-Write concise PR titles/descriptions in the project language: **Was wurde geändert und warum?**
-(plans: **Was ist geplant und warum?**), resulting behavior/reason and issue links.
-Routine evidence stays in issues/native checks. **Prüfung und Ergebnisse** only for
-problems/material proof limits; **Retro** only for findings and fix/follow-up links.
-Remove hints, empty sections, copied logs/status, mandatory inventories/SHAs, legacy
-role/task metadata, generic rollback fields and decorative alerts. Explain material
-risk/recovery where relevant.
-
-Update durable behavior/API/architecture/operations/configuration/workflow docs and
-affected unowned follow-ups. Preserve historical results through supersession links;
-notable delivered user changes belong in release notes, not another task ledger.
+**Cancellation.** A rejected or closed PR is not delivery. Only a human cancels
+work (close as not planned), and its history stays.
