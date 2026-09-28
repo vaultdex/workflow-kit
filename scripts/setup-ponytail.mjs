@@ -32,28 +32,8 @@ const skills = git('-C', source, 'ls-tree', '-d', '--name-only', `${revision}:sk
 assert.ok(skills.includes('ponytail') && skills.every(s => /^ponytail(?:-[a-z0-9]+)*$/.test(s)), 'Invalid pinned skill names');
 const files = [...skills.map(s => `skills/${s}/SKILL.md`),
   ...['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent'].map(n => `hooks/ponytail-${n}.js`)];
-// Read committed blobs in one Git process. Parse byte lengths before decoding:
-// UTF-8 characters and embedded newlines are not batch-record boundaries.
-const requested = [...files, 'LICENSE'];
-const batch = execFileSync(gitTool.file, ['-C', source, 'cat-file', '--batch'], {
-  cwd: root, env: gitTool.env, input: requested.map(file => `${revision}:${file}\n`).join(''),
-  maxBuffer: 16 * 1024 * 1024,
-});
-let offset = 0;
-const contents = new Map();
-for (const file of requested) {
-  const end = batch.indexOf(10, offset);
-  assert.ok(end >= offset, `Missing pinned blob header: ${file}`);
-  const header = /^([a-f0-9]{40}|[a-f0-9]{64}) blob (\d+)$/.exec(batch.toString('ascii', offset, end));
-  assert.ok(header, `Missing or non-blob pinned source: ${file}`);
-  const size = Number(header[2]);
-  offset = end + 1;
-  assert.ok(Number.isSafeInteger(size) && size >= 0 && size < batch.length - offset
-    && batch[offset + size] === 10, `Incomplete pinned blob: ${file}`);
-  contents.set(file, batch.toString('utf8', offset, offset + size).replaceAll('\r\n', '\n'));
-  offset += size + 1;
-}
-assert.equal(offset, batch.length, 'Unexpected trailing pinned-source output');
+// The source is clean and at the pin, so its working tree holds the pinned files.
+const contents = new Map([...files, 'LICENSE'].map(file => [file, text(join(source, file))]));
 const stage = mkdtempSync(join(state, 'setup-'));
 const next = join(stage, 'next');
 const previous = join(stage, 'previous');

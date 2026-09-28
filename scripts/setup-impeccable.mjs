@@ -97,12 +97,9 @@ try {
     copyTracked(directory, join(next, directory));
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
-  const inputFiles = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/provider-links.mjs", "scripts/impeccable/launchers.patch",
-    "scripts/impeccable/maintainability.patch", "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
-  const inputs = createHash("sha256").update(inputFiles.map((file) => text(join(kit, file))).join("\0")).digest("hex");
   const recorded = existsSync(join(root, receipt)) ? JSON.parse(text(join(root, receipt))) : null;
   const files = Object.fromEntries(companionFiles(next).sort().map(file => [file, digest(join(next, file))]));
-  writeFileSync(join(next, receipt), JSON.stringify({ revision, inputs, files }, null, 2) + "\n");
+  writeFileSync(join(next, receipt), JSON.stringify({ revision, files }, null, 2) + "\n");
   const oldFiles = companionFiles(bundle);
   const newFiles = companionFiles(next);
   const trackedCopilot = new Set(git("ls-files", "-z", "--", ".github/skills/impeccable",

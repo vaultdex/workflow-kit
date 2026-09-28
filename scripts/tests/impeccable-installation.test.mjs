@@ -12,13 +12,8 @@ const trustedGit = () => externalTool("git", process.cwd()).file;
 test("Copilot discovery assets were generated for the pinned submodule and setup", () => {
   const git = trustedGit();
   const revision = execFileSync(git, ["rev-parse", "HEAD:.vendor/impeccable"], { encoding: "utf8" }).trim();
-  const files = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/provider-links.mjs", "scripts/impeccable/launchers.patch",
-    "scripts/impeccable/maintainability.patch", "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
-  const inputs = createHash("sha256").update(files.map((file) => readFileSync(file, "utf8")
-    .replaceAll("\r\n", "\n")).join("\0")).digest("hex");
   const receipt = JSON.parse(readFileSync(".github/skills/impeccable/.vaultdex-source.json", "utf8"));
-  assert.deepEqual({ revision: receipt.revision, inputs: receipt.inputs }, { revision, inputs },
-    "Run node scripts/setup-impeccable.mjs and commit refreshed .github assets with the update");
+  assert.equal(receipt.revision, revision, "Run node scripts/setup-impeccable.mjs and commit refreshed .github assets with the update");
   // A fresh clone contains committed discovery assets, not generated local companions.
   for (const [file, digest] of Object.entries(receipt.files).filter(([file]) => file.startsWith(".github/")))
     assert.equal(createHash("sha256").update(readFileSync(file, "utf8").replaceAll("\r\n", "\n")).digest("hex"), digest,

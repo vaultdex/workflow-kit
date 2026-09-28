@@ -42,27 +42,16 @@ function fixture(t) {
   copyFileSync(setup, join(kit, 'scripts/setup-ponytail.mjs'));
   copyFileSync(new URL('../checkout-root.mjs', import.meta.url), join(kit, 'scripts/checkout-root.mjs'));
   copyFileSync(new URL('../provider-links.mjs', import.meta.url), join(kit, 'scripts/provider-links.mjs'));
-  const trace = join(base, 'git-events.jsonl');
-  const run = () => {
-    writeFileSync(trace, '');
-    return spawnSync(process.execPath, [join(kit, 'scripts/setup-ponytail.mjs'), root], {
-      encoding: 'utf8', env: { ...process.env, GIT_TRACE2_EVENT: trace },
-    });
-  };
-  const starts = () => readFileSync(trace, 'utf8').trim().split('\n').filter(Boolean)
-    .map(line => JSON.parse(line)).filter(event => event.event === 'start').map(event => event.argv);
+  const run = () => spawnSync(process.execPath, [join(kit, 'scripts/setup-ponytail.mjs'), root], { encoding: 'utf8' });
   const pin = () => { git(source, 'add', '-A'); git(source, 'commit', '--quiet', '-m', 'Change fixture');
     git(kit, 'add', '.vendor/ponytail'); git(kit, 'commit', '--quiet', '-m', 'Update pin'); };
-  return { root, source, expected, run, starts, pin };
+  return { root, source, expected, run, pin };
 }
 
 function succeeds(result) { assert.equal(result.status, 0, result.stderr); }
 
-test('one batch reads all pinned blobs with byte-correct UTF-8, CRLF and empty files', t => {
+test('setup reads the pinned sources byte-correctly: UTF-8, CRLF and empty files', t => {
   const f = fixture(t); succeeds(f.run());
-  const calls = f.starts();
-  assert.equal(calls.filter(args => args.includes('cat-file') && args.includes('--batch')).length, 1);
-  assert.equal(calls.filter(args => args.includes('show')).length, 0);
   for (const [path, original] of f.expected) {
     const value = original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n');
     const output = path === 'LICENSE' ? '.agents/hooks/LICENSE.md' : `.agents/${path}`;
@@ -92,7 +81,7 @@ for (const problem of ['missing', 'tree']) test(`${problem} pinned source fails 
   f.pin();
   const result = f.run();
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Missing or non-blob pinned source/);
+  assert.match(result.stderr, problem === 'missing' ? /ENOENT.*ponytail-runtime\.js/ : /EISDIR/);
   assert.deepEqual(readFileSync(receipt), before);
   assert.equal(readFileSync(join(f.root, '.agents/hooks/ponytail-runtime.js'), 'utf8'), '');
   assert.deepEqual(readdirSync(join(f.root, '.workflow-kit')), ['ponytail']);
@@ -137,7 +126,7 @@ test('missing license fails without publishing a partial installation', t => {
   const f = fixture(t); rmSync(join(f.source, 'LICENSE')); f.pin();
   const result = f.run();
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Missing or non-blob pinned source: LICENSE/);
+  assert.match(result.stderr, /ENOENT.*LICENSE/);
   assert.equal(existsSync(join(f.root, '.workflow-kit/ponytail')), false);
 });
 

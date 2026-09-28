@@ -1,6 +1,5 @@
 {
   "revision": "cd12f8660e2dde57b9615c8a6b8ea674101f9cfc",
-  "inputs": "a68566b77fe0eafc1283b2c00cd094042c57ddbaae63f15012ab45a7e3f335d5",
   "files": {
     ".claude/agents/impeccable-asset-producer.md": "c6a0ec6c28ae55fe539f0f41a507b1638495afd285d6eb15c00245fc8cc7e7fe",
     ".claude/agents/impeccable-documenter.md": "6bc62a59f6fef0b749927c8d10e9849ab2411199d86d70772a86f8e83ac309f5",
