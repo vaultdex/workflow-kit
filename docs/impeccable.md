@@ -1,56 +1,34 @@
 # Impeccable
 
-Source: `.vendor/impeccable`, pinned to `skill-v4.3.1`. `scripts/impeccable/` owns
-the reviewed launcher and maintainability patches, engine VERSION and SHA256SUMS.
-Setup stages upstream packages, applies those patches, retains LICENSE/NOTICE and
-leaves upstream untouched. The maintainability patch only splits
-`live-browser-ignores.js` into helpers without changing behavior, and it marks the
-file as modified. The pinned upstream `tests/live-browser-ignores.test.mjs` runs
-against the generated file.
+Source: `.vendor/impeccable`, pinned to `skill-v4.3.1`. `scripts/impeccable/`
+holds the engine `VERSION`, `SHA256SUMS` and two reviewed patches:
 
-From the product root, run `node .vendor/workflow-kit/scripts/setup-skills.mjs .`
-after cloning or a reviewed kit update. Five local providers use links (Windows
-junctions, POSIX relative symlinks); Copilot cloud requires committed
-`.github/skills/impeccable` and `.github/agents/impeccable-*`. Codex/Claude agents
-and OpenCode commands are generated alongside skills. Edited or foreign destinations
-are refused. A failed publication preserves the previous bundle.
+- `launchers.patch` makes the skill's CLI launchers resolve system tools by
+  absolute path, so a checkout cannot substitute `curl`, `git` or `where`.
+- `maintainability.patch` splits `live-browser-ignores.js` without changing
+  behavior; upstream's own test runs against the result.
 
-Review engine-version changes with pins, patches and fixed hook definitions. Hooks
-execute only an explicitly installed user-local engine. Install with
-`node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .`; checksums are
-verified even for existing installations. No automatic hook/postinstall installs
-or executes checkout code. Personal hook trust is separate. Per-project PRODUCT.md
-and `.impeccable` settings remain in consumers and are not overwritten by this kit.
+`setup-skills` builds `.impeccable/vendor` and links it into five providers.
+Copilot gets committed copies in `.github/skills/impeccable` and
+`.github/agents/impeccable-*`; Codex/Claude agents and OpenCode commands are
+generated alongside. Per-project `PRODUCT.md` and `.impeccable` settings stay
+with the consumer.
 
-## Missing engine and Stop work
+## Hooks
 
-A missing engine produces a setup warning at the native SessionStart event, not
-on every edit and Stop. Codex/Claude restrict that warning to startup/clear; Copilot
-uses its native sessionStart event. Missing edit/Stop handlers return quietly without
-claiming that an analysis ran. An installed engine is still executed and its exit
-status is preserved. Reinstall/review hooks explicitly after correcting a failure.
+Hooks run only the engine that `install-impeccable-hooks.mjs` put in
+`~/.impeccable/vaultdex/engine-<version>/`. It is verified against `SHA256SUMS`,
+also when reused. Without the engine, SessionStart prints an install hint, and
+the edit and Stop hooks stay silent without claiming an analysis. Engine 0.1.5
+analyzes only the session's touched files at Stop.
 
-Engine 0.1.5 already returns `no-touched-files` from Stop when its session cache has
-no touched targets. The deep pass uses the session's touched files, not a recursive
-repository scan, and has a re-entry guard. Touched files may still be revisited at a
-later Stop in the same session. We do not add another change registry or disable
-that coverage to save a process. Source: pinned
-[run_stop_hook](https://github.com/pbakaus/impeccable/blob/engine-v0.1.5/crates/hook/src/hook.rs).
+`node scripts/check-impeccable.mjs` (kit only) tests setup and hooks in a
+disposable clone:
 
-## Verification
+- real and tampered engine downloads,
+- concurrent cold starts,
+- hostile checkout executables,
+- web and mobile app contexts.
 
-`node .vendor/workflow-kit/scripts/check-skills.mjs .` compares regenerated cloud
-discovery with pinned sources. For real-engine security checks, run
-`node scripts/check-impeccable.mjs` **inside the kit directory**. That command clones
-the committed kit into a disposable directory with spaces and tests fresh/repeated
-setup, foreign files, upgrades, incompatible engines, real downloads, substituted
-hashes, concurrent cold starts, hostile Windows executables, web/mobile fixtures
-and hook isolation. It does not prove native UI discovery, trust or device acceptance.
-
-`node --test scripts/tests/impeccable-hooks.test.mjs`, inside the kit, exercises the
-actual manifest commands for missing and failed engines. With
-`WORKFLOW_KIT_ENGINE_PROOF=1` it additionally downloads the pinned checksum-verified
-engine into an isolated temporary HOME and records Stop process times before and
-after a CSS edit. The existing GitHub Actions test step runs that case too; no
-separate workflow, schedule or persistent benchmark service is added. These process
-times are not a productive agent or token-savings benchmark.
+`WORKFLOW_KIT_ENGINE_PROOF=1 node --test scripts/tests/impeccable-hooks.test.mjs`
+also measures Stop against the real engine; CI runs it.

@@ -4,24 +4,24 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate copilot; else printf '%s\\n' '{\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\"}'; fi",
-        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-8/launch.exe\"; if (Test-Path -LiteralPath $launcher) { & $launcher activate copilot } else { Write-Output '{\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\"}' }",
+        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate copilot; else printf '%s\\n' '{\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . and trust the hooks.\"}'; fi",
+        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-9/launch.cmd\"; if (Test-Path -LiteralPath $launcher) { & $launcher activate copilot } else { Write-Output '{\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . and trust the hooks.\"}' }",
         "timeoutSec": 5
       }
     ],
     "userPromptSubmitted": [
       {
         "type": "command",
-        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" mode-tracker copilot; fi",
-        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-8/launch.exe\"; if (Test-Path -LiteralPath $launcher) { & $launcher mode-tracker copilot }",
+        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" mode-tracker copilot; fi",
+        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-9/launch.cmd\"; if (Test-Path -LiteralPath $launcher) { & $launcher mode-tracker copilot }",
         "timeoutSec": 5
       }
     ],
     "subagentStart": [
       {
         "type": "command",
-        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" subagent copilot; fi",
-        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-8/launch.exe\"; if (Test-Path -LiteralPath $launcher) { & $launcher subagent copilot }",
+        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" subagent copilot; fi",
+        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-9/launch.cmd\"; if (Test-Path -LiteralPath $launcher) { & $launcher subagent copilot }",
         "timeoutSec": 5
       }
     ]

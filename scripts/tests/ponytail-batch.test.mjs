@@ -27,7 +27,6 @@ function fixture(t) {
   const expected = new Map(skills.map(name => [`skills/${name}/SKILL.md`, `# ${name}\r\nGrüße 🎴\r\n\n`])
     .concat(hooks.map(name => [`hooks/ponytail-${name}.js`, name === 'runtime' ? '' : `// ${name}\r\n`])));
   expected.set('skills/ponytail/SKILL.md', '# ponytail\nbase\nGrüße 🎴\n');
-  expected.set('skills/ponytail-help/SKILL.md', 'Run `node scripts/install-ponytail-hooks.mjs` from the product root.\n');
   expected.set('LICENSE', 'License\r\n© Example 🎴\r\n');
   for (const [path, content] of expected) write(join(upstream, path), content);
   git(upstream, 'add', '.'); git(upstream, 'commit', '--quiet', '-m', 'Fixture sources');
@@ -65,9 +64,7 @@ test('one batch reads all pinned blobs with byte-correct UTF-8, CRLF and empty f
   assert.equal(calls.filter(args => args.includes('cat-file') && args.includes('--batch')).length, 1);
   assert.equal(calls.filter(args => args.includes('show')).length, 0);
   for (const [path, original] of f.expected) {
-    let value = original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n');
-    if (path === 'skills/ponytail-help/SKILL.md') value = value.replace('`node scripts/install-ponytail-hooks.mjs`',
-      '`node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` (inside the kit: `node scripts/install-ponytail-hooks.mjs .`)');
+    const value = original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n');
     const output = path === 'LICENSE' ? '.agents/hooks/LICENSE.md' : `.agents/${path}`;
     assert.equal(readFileSync(join(f.root, output), 'utf8'), value, path);
   }

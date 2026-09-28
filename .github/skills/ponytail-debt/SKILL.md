@@ -14,13 +14,10 @@ can't quietly become permanent.
 
 ## Scan
 
-Search application code for comment markers, skipping dependencies, build
-output and vendored skills. Scan files for secrets before reading their contents,
-as required by repository AGENTS.md. Include Vaultdex's existing `watchdog:`
-markers; do not rename them merely to use this report.
+Grep the repo for comment markers, skipping `node_modules`, `.git`, and build
+output:
 
-Use `rg -n '(#|//) ?(ponytail|watchdog):'` on the scanned source files
-(add other comment prefixes if your stack uses them).
+`grep -rnE '(#|//) ?ponytail:' .`  (add other comment prefixes if your stack uses them)
 
 Each hit is one ledger row. The comment prefix keeps prose that merely mentions
 the convention out of the ledger.
@@ -35,13 +32,13 @@ The convention is `ponytail: <ceiling>, <upgrade path>`, so pull the ceiling
 and the trigger straight from the comment. Want an owner per row too? add
 `git blame -L<line>,<line>`.
 
-Flag the rot risk: any shortcut comment that names no upgrade path or
+Flag the rot risk: any `ponytail:` comment that names no upgrade path or
 trigger gets a `no-trigger` tag, those are the ones that silently rot.
 
-End with `<N> markers, <M> with no trigger.` Nothing found: `No shortcut markers found.`
+End with `<N> markers, <M> with no trigger.` Nothing found: `No ponytail: debt. Clean ledger.`
 
 ## Boundaries
 
-Reads and reports only, changes nothing. Follow repository CONTRIBUTING.md for
-durable findings in existing issues; do not create a second task ledger.
-One-shot. "stop ponytail-debt" or "normal mode" to revert.
+Reads and reports only, changes nothing. Track durable findings as issues under
+the repository's CONTRIBUTING.md, not in a second ledger file. One-shot.
+"stop ponytail-debt" or "normal mode" to revert.

@@ -39,7 +39,7 @@ for (const name of manifests) test(`${name}: missing engine warns only at Sessio
   assert.ok(repeated.length);
   const warning = run(starts[0], f);
   assert.equal(warning.status, 0, warning.stderr);
-  assert.match(warning.stdout, /Impeccable fehlt/);
+  assert.match(warning.stdout, /Impeccable hooks missing/);
   assert.match(warning.stdout, /\.vendor\/workflow-kit\/scripts\/install-impeccable-hooks\.mjs \./);
   assert.equal(warning.stderr, '');
   for (let turn = 0; turn < 3; turn++) for (const hook of repeated) {
