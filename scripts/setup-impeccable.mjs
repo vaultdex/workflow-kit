@@ -5,7 +5,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { externalTool, projectRoot } from "./checkout-root.mjs";
-import { link, localDirectory, rename } from "./provider-links.mjs";
+import { link, localDirectory, moveAside, rename } from "./provider-links.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -95,6 +95,9 @@ try {
   }
   for (const skill of linkedSkills) link(root, join(root, skill), join(bundle, skill));
   // Copilot skill and the impeccable* agents/commands are generated: replace them whole, so upstream removals disappear.
+  // A link or file at the Copilot skill directory moves aside first; enumerating through it would delete its target.
+  const copilot = join(root, ".github/skills/impeccable");
+  if (present(copilot) && !present(copilot).isDirectory()) moveAside(root, copilot);
   for (const file of companionFiles(root)) {
     localDirectory(root, dirname(join(root, file)));
     unlinkSync(join(root, file));

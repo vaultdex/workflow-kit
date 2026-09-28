@@ -29,16 +29,20 @@ export function rename(from, to) {
   }
 }
 
+/** Move whatever is at `path` to .workflow-kit/replaced/<stamp>/, keeping it for the user. */
+export function moveAside(root, path) {
+  if (!present(path)) return;
+  const destination = join(root, '.workflow-kit/replaced', stamp, relative(root, path));
+  localDirectory(root, dirname(destination));
+  renameSync(path, destination);
+  console.log(`Moved ${relative(root, path)} to ${relative(root, destination)}`);
+}
+
 /** Make `path` a link to `target`. A matching link stays; anything else moves to .workflow-kit/replaced/. */
 export function link(root, path, target) {
   if (present(path)?.isSymbolicLink() && existsSync(path) && realpathSync(path) === realpathSync(target)) return;
   localDirectory(root, dirname(path));
-  if (present(path)) {
-    const destination = join(root, '.workflow-kit/replaced', stamp, relative(root, path));
-    localDirectory(root, dirname(destination));
-    renameSync(path, destination);
-    console.log(`Moved ${relative(root, path)} to ${relative(root, destination)}`);
-  }
+  moveAside(root, path);
   const windows = process.platform === 'win32';
   symlinkSync(windows ? target : relative(dirname(path), target), path, windows ? 'junction' : 'dir');
 }
