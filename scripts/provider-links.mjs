@@ -41,6 +41,8 @@ export function rename(from, to) {
 
 /** Move whatever is at `path` to .workflow-kit/replaced/<stamp>/, keeping it for the user. */
 export function moveAside(root, path) {
+  // Through a linked ancestor, `path` would name an entry somewhere else.
+  checkDirectory(root, dirname(path));
   if (!present(path)) return;
   const destination = join(root, '.workflow-kit/replaced', stamp, relative(root, path));
   localDirectory(root, dirname(destination));

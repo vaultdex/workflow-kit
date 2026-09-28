@@ -66,6 +66,7 @@ function next() {
     { q: `repo:${project.repository} is:issue is:open -is:blocked`, ...(after && { after }) });
     nodes.push(...search.nodes);
     if (!search.pageInfo.hasNextPage) break;
+    assert.ok(search.pageInfo.endCursor && search.pageInfo.endCursor !== after, 'Search pagination did not advance');
     after = search.pageInfo.endCursor;
   }
   // The Priority field's option order is the ranking, whatever the scale (High/Low, P0/P1, …).
