@@ -67,11 +67,12 @@ try {
     throw error;
   }
   for (const [dest, from] of links) link(root, join(root, dest), join(bundle, from));
-  // Current skills in .github/skills are generated and rewritten whole; other ponytail-* entries
-  // (skills upstream dropped, or the project's own) move to .workflow-kit/replaced/.
-  for (const entry of readdirSync(cloud).filter(name => skillName.test(name)))
-    if (skills.includes(entry)) rmSync(join(cloud, entry), { recursive: true, force: true });
-    else moveAside(root, join(cloud, entry));
+  // Other ponytail-* entries in .github/skills and the providers (skills upstream dropped, or the project's
+  // own) move to .workflow-kit/replaced/; current Copilot skills are generated and rewritten whole.
+  for (const directory of [cloud, ...providers.map(p => join(root, p, 'skills'))])
+    for (const entry of readdirSync(directory).filter(name => skillName.test(name)))
+      if (!skills.includes(entry)) moveAside(root, join(directory, entry));
+      else if (directory === cloud) rmSync(join(cloud, entry), { recursive: true, force: true });
   for (const [file, bytes] of Object.entries(outputs)) {
     localDirectory(root, dirname(join(root, file)));
     writeFileSync(join(root, file), bytes);
