@@ -299,10 +299,10 @@ index ecbc0ca..48b7eed 100644
 +the repository's CONTRIBUTING.md, not in a second ledger file. One-shot.
 +"stop ponytail-debt" or "normal mode" to revert.
 diff --git a/skills/ponytail-help/SKILL.md b/skills/ponytail-help/SKILL.md
-index ba145c0..b10cc70 100644
+index ba145c0..2374e87 100644
 --- a/skills/ponytail-help/SKILL.md
 +++ b/skills/ponytail-help/SKILL.md
-@@ -32,39 +32,32 @@ Level sticks until changed or session end.
+@@ -32,39 +32,31 @@ Level sticks until changed or session end.
  | **ponytail-gain** | `/ponytail-gain` | Measured-impact scoreboard: less code, less cost, more speed. |
  | **ponytail-help** | `/ponytail-help` | This card. |
  
@@ -341,8 +341,7 @@ index ba145c0..b10cc70 100644
 -Resolution: env var > config file > `full`.
 +This checkout bundles skills plus Node.js lifecycle hooks for Codex, Claude Code,
 +Copilot and Cursor. From a reviewed checkout, initialize them with
-+`node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` (inside the kit:
-+`node scripts/install-ponytail-hooks.mjs .`), then enable the host's project trust/hooks
++`node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs`, then enable the host's project trust/hooks
 +to activate the default mode at session start. Default priority: `PONYTAIL_DEFAULT_MODE`, then personal
 +Ponytail config `defaultMode`, then `full`. Supported defaults: off/lite/full/ultra.
 +`/ponytail default lite` saves a personal default; ordinary mode switches do not.

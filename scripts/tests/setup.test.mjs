@@ -17,7 +17,7 @@ test('setup-skills links every provider in a fresh checkout and keeps a foreign 
   const fixture = temporary(t, 'workflow-kit setup ');
   execFileSync('git', ['init', '--quiet', fixture]);
   copyFileSync(join(kit, '.gitattributes'), join(fixture, '.gitattributes'));
-  const setup = name => spawnSync(process.execPath, [join(kit, 'scripts', name), fixture], { encoding: 'utf8' });
+  const setup = name => spawnSync(process.execPath, [join(kit, 'scripts', name)], { cwd: fixture, encoding: 'utf8' });
   const collision = join(fixture, '.github/agents/impeccable-documenter.agent.md');
   mkdirSync(dirname(collision), { recursive: true });
   writeFileSync(collision, 'foreign tracked agent\n');
@@ -41,7 +41,7 @@ test('setup never runs a Git from the checkout or the working directory', t => {
   mkdirSync(tools);
   copyFileSync(process.execPath, git);
   chmodSync(git, 0o755);
-  const result = spawnSync(process.execPath, [join(kit, 'scripts/setup-ponytail.mjs'), root],
+  const result = spawnSync(process.execPath, [join(kit, 'scripts/setup-ponytail.mjs')],
     { cwd: root, encoding: 'utf8', env: { ...process.env, PATH: [tools, '.'].join(delimiter) } });
   assert.notEqual(result.status, 0);
   assert.equal(existsSync(join(root, '.workflow-kit')), false, 'Refused before any write');

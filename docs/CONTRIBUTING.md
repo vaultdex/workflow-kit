@@ -186,7 +186,7 @@ data-loss or availability risks at once, without exposing secrets.
 If part of the acceptance can't be delivered, for example because access is
 missing, get explicit human authorization before opening the PR. Then move that
 part into a follow-up issue: Backlog, full metadata, native `blocked by` the
-original issue. Record the split in the original issue; the PR then closes the
+original issue (`board.mjs block FOLLOW-UP ORIGINAL`). Record the split in the original issue; the PR then closes the
 reduced scope. Without authorization it stays a blocker. A split never waives
 security or required checks.
 

@@ -7,11 +7,11 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { externalTool } from './checkout-root.mjs';
+import { externalTool, projectRoot } from './checkout-root.mjs';
 import { link, localDirectory } from './provider-links.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const root = resolve(process.argv[2] ?? kit);
+const root = projectRoot();
 const source = join(kit, '.vendor/ponytail');
 const state = join(root, '.workflow-kit');
 const bundle = join(state, 'ponytail');

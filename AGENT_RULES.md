@@ -28,13 +28,14 @@ step, and never load guides or skill trees you don't need.
 | Human review | Hand off. A human accepts and merges. |
 | Done | Merged and accepted. |
 
-Board commands, run from the project root (`gh` must be logged in):
+Board commands, run in the project (`gh` must be logged in):
 
 ```sh
 node .vendor/workflow-kit/scripts/board.mjs next                      # startable Ready issues
 node .vendor/workflow-kit/scripts/board.mjs check 123                 # STARTABLE, BLOCKED or UNKNOWN
 node .vendor/workflow-kit/scripts/board.mjs status 123 "In progress"
 node .vendor/workflow-kit/scripts/board.mjs priority 123 High
+node .vendor/workflow-kit/scripts/board.mjs block 124 123              # 124 is blocked by 123 (or OWNER/REPO#N)
 ```
 
 ## Engineering

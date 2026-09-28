@@ -4,8 +4,12 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFile
 import { dirname, resolve, sep } from 'node:path';
 import { externalTool } from './checkout-root.mjs';
 
-const repo = process.argv[2];
-assert.match(repo ?? '', /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Usage: node setup-github.mjs OWNER/REPO [PROJECT_NUMBER]');
+const [repo, requestedNumber] = process.argv.slice(2);
+// Only plain names and numbers reach gh: no argument can smuggle in options.
+if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo ?? '') || (requestedNumber !== undefined && !/^\d+$/.test(requestedNumber))) {
+  console.error('Usage: node setup-github.mjs OWNER/REPO [PROJECT_NUMBER]');
+  process.exit(2);
+}
 const [owner, name] = repo.split('/');
 const root = realpathSync(process.cwd());
 const outside = path => path !== root && !path.startsWith(root + sep);
@@ -20,8 +24,8 @@ const saved = existsSync(marker) ? JSON.parse(readFileSync(marker, 'utf8')) : nu
 if (saved) assert.equal(saved.repository, repo, 'Recorded project belongs to another repository');
 const meta = JSON.parse(gh('repo', 'view', repo, '--json', 'viewerPermission,url'));
 assert.ok(['ADMIN', 'MAINTAIN', 'WRITE'].includes(meta.viewerPermission), 'Repository write permission required');
-const number = process.argv[3] ?? saved?.number;
-if (number) assert.match(String(number), /^\d+$/, 'Project number must be numeric');
+const number = requestedNumber ?? saved?.number;
+if (number) assert.match(String(number), /^\d+$/, 'Recorded project number must be numeric');
 const project = number
   ? JSON.parse(gh('project', 'view', String(number), '--owner', owner, '--format', 'json'))
   : JSON.parse(gh('project', 'copy', '5', '--source-owner', 'vaultdex', '--target-owner', owner, '--title', name, '--format', 'json'));

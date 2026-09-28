@@ -4,9 +4,9 @@
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { projectRoot } from './checkout-root.mjs';
 
-const root = path.resolve(process.argv[2] ?? fileURLToPath(new URL('../', import.meta.url)));
+const root = projectRoot();
 const version = '4.10.0-9';
 const destination = path.join(homedir(), '.ponytail', 'vaultdex', version);
 const insideCheckout = directory => {
@@ -37,7 +37,7 @@ const files = [
   '.agents/skills/ponytail/NOTICE.md',
 ];
 const missing = files.find(file => !existsSync(path.join(root, file)));
-if (missing) throw new Error(`Ponytail sources missing in ${root} (${missing}); run the kit's scripts/setup-skills.mjs with this project path first.`);
+if (missing) throw new Error(`Ponytail sources missing in ${root} (${missing}); run the kit's setup-skills.mjs in this project first.`);
 const matches = directory => files.every(file => existsSync(path.join(directory, file))
   && readFileSync(path.join(directory, file)).equals(readFileSync(path.join(root, file))));
 

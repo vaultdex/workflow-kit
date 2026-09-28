@@ -6,12 +6,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { projectRoot } from './checkout-root.mjs';
 
 const kit = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
-const requestedRoot = realpathSync(resolve(process.argv[2] ?? kit));
-// The installed kit owns only itself or its consumer, never an arbitrary CLI path.
+const requestedRoot = projectRoot();
+// The installed kit owns only itself or the checkout it is vendored into.
 const root = requestedRoot === kit ? kit : resolve(kit, '../..');
-assert.equal(requestedRoot, root, 'Target must own this kit at .vendor/workflow-kit');
+assert.equal(requestedRoot, root, 'Run init-project inside the project that vendors this kit at .vendor/workflow-kit');
 if (root !== kit) assert.equal(relative(root, kit).split(sep).join('/'), '.vendor/workflow-kit', 'Install the kit at .vendor/workflow-kit in the target');
 const existing = process.argv.includes('--existing');
 const check = process.argv.includes('--check');

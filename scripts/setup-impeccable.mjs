@@ -3,14 +3,14 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
   readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { externalTool } from "./checkout-root.mjs";
+import { externalTool, projectRoot } from "./checkout-root.mjs";
 import { link, localDirectory } from "./provider-links.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const root = resolve(process.argv[2] ?? kit);
+const root = projectRoot();
 const source = join(kit, ".vendor/impeccable");
 const state = join(root, ".impeccable");
 const bundle = join(state, "vendor");
@@ -56,18 +56,15 @@ function copyTracked(from, to) {
   }
 }
 
-/** Build one provider package from the pinned upstream plus the reviewed patches. */
+/** Build one provider package from the pinned upstream. */
 function generateSkill(skill, to) {
   // Ignored local binaries/caches must never enter the pinned installation.
   copyTracked(skill, to);
   // Release archives add these root attribution files to every provider package.
   for (const file of ["LICENSE", "NOTICE.md"])
     writeFileSync(join(to, file), text(join(source, file)));
-  // Git for Windows may check upstream out as CRLF. The launchers and their LF patch need LF.
-  for (const name of ["impeccable", "impeccable.cmd"])
-    writeFileSync(join(to, "scripts", name), text(join(to, "scripts", name)));
-  git("apply", "--whitespace=error-all", `--directory=${relative(root, to).split(sep).join("/")}`, join(security, "launchers.patch"));
-  copyFileSync(join(security, "SHA256SUMS"), join(to, "scripts/SHA256SUMS"));
+  // Git for Windows may check upstream out as CRLF; the POSIX launcher needs LF.
+  writeFileSync(join(to, "scripts/impeccable"), text(join(to, "scripts/impeccable")));
   chmodSync(join(to, "scripts/impeccable"), 0o755);
 }
 
@@ -126,7 +123,7 @@ try {
   for (const file of newFiles) copyFileSync(join(bundle, file), join(root, file));
   published = true;
   console.log(`Impeccable ${revision.slice(0, 7)}: five providers linked; tracked Copilot assets and companions refreshed.\n`
-    + "Hook engine/trust unchanged. From the product root: node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .; inside the kit: node scripts/install-impeccable-hooks.mjs .");
+    + "Hook engine and trust unchanged; install the engine with install-impeccable-hooks.mjs.");
 } finally {
   // Only this invocation's generated staging/previous bundle, confined to state.
   assert.equal(dirname(stage), state);

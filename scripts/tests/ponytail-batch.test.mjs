@@ -38,7 +38,7 @@ function fixture(t) {
     + '@@ -1,3 +1,3 @@\n # ponytail\n-base\n+patched\n Grüße 🎴\n');
   for (const script of ['setup-ponytail.mjs', 'checkout-root.mjs', 'provider-links.mjs'])
     copyFileSync(new URL(`../${script}`, import.meta.url), join(kit, 'scripts', script));
-  const run = () => spawnSync(process.execPath, [join(kit, 'scripts/setup-ponytail.mjs'), root], { encoding: 'utf8' });
+  const run = () => spawnSync(process.execPath, [join(kit, 'scripts/setup-ponytail.mjs')], { cwd: root, encoding: 'utf8' });
   return { root, source: join(kit, '.vendor/ponytail'), expected, run };
 }
 const succeeds = result => assert.equal(result.status, 0, result.stderr);

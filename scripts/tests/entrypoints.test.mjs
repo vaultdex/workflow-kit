@@ -6,10 +6,8 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-const installer = fileURLToPath(new URL('../init-project.mjs', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
 const write = (path, value) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); };
 const json = (path, value) => write(path, JSON.stringify(value, null, 2) + '\n');
@@ -25,11 +23,11 @@ function fixture(t) {
   mkdirSync(join(root, '.git'), { recursive: true });
   mkdirSync(join(kit, 'templates'), { recursive: true });
   mkdirSync(join(kit, 'scripts'));
-  copyFileSync(installer, join(kit, 'scripts/init-project.mjs'));
+  for (const script of ['init-project.mjs', 'checkout-root.mjs']) copyFileSync(new URL(`../${script}`, import.meta.url), join(kit, 'scripts', script));
   const receipt = join(root, '.github/workflow-kit.json');
   json(receipt, { files: {}, hooks: {} });
-  const run = (...args) => spawnSync(process.execPath, [join(kit, 'scripts/init-project.mjs'), root, '--existing', ...args],
-    { cwd: base, encoding: 'utf8', timeout: 10000 });
+  const run = (...args) => spawnSync(process.execPath, [join(kit, 'scripts/init-project.mjs'), '--existing', ...args],
+    { cwd: root, encoding: 'utf8', timeout: 10000 });
   const template = (name, value) => json(join(kit, 'templates', name), value);
   return { base, root, kit, receipt, run, template };
 }
@@ -53,7 +51,7 @@ test('owned hooks update in place; foreign handlers, groups and metadata survive
 test('edited owned handlers and templates are refused before any write', t => {
   const f = fixture(t), path = join(f.root, '.cursor/hooks.json');
   f.template('.cursor/hooks.json', manifest(1)); f.template('AGENTS.md', 'kit rules\n');
-  const first = spawnSync(process.execPath, [join(f.kit, 'scripts/init-project.mjs'), f.root], { encoding: 'utf8' });
+  const first = spawnSync(process.execPath, [join(f.kit, 'scripts/init-project.mjs')], { cwd: f.root, encoding: 'utf8' });
   succeeds(first);
   const value = read(path); value.hooks.sessionStart[0].command = 'echo edited'; json(path, value);
   f.template('.cursor/hooks.json', manifest(2));
@@ -94,5 +92,5 @@ test('receipt paths and links cannot reach outside the checkout', t => {
   assert.equal(readFileSync(join(outside, 'keep'), 'utf8'), 'keep');
   const other = join(f.base, 'other');
   mkdirSync(join(other, '.git'), { recursive: true });
-  assert.notEqual(spawnSync(process.execPath, [join(f.kit, 'scripts/init-project.mjs'), other]).status, 0, 'Only the owning checkout');
+  assert.notEqual(spawnSync(process.execPath, [join(f.kit, 'scripts/init-project.mjs')], { cwd: other }).status, 0, 'Only the owning checkout');
 });

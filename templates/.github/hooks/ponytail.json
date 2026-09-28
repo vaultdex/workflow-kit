@@ -4,8 +4,8 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate copilot; else printf '%s\\n' '{\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . and trust the hooks.\"}'; fi",
-        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-9/launch.cmd\"; if (Test-Path -LiteralPath $launcher) { & $launcher activate copilot } else { Write-Output '{\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . and trust the hooks.\"}' }",
+        "bash": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate copilot; else printf '%s\\n' '{\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}'; fi",
+        "powershell": "$launcher=Join-Path $env:USERPROFILE \".ponytail/vaultdex/4.10.0-9/launch.cmd\"; if (Test-Path -LiteralPath $launcher) { & $launcher activate copilot } else { Write-Output '{\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}' }",
         "timeoutSec": 5
       }
     ],

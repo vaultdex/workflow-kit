@@ -1,5 +1,5 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run from the project root: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High
+// Run in the project: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | block ISSUE BLOCKER
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -95,9 +95,22 @@ function set(fieldName) {
   console.log(`#${issue.number} ${fieldName}: ${option.name}`);
 }
 
-const commands = { next, check, status: () => set('Status'), priority: () => set('Priority') };
-if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number)) || (['status', 'priority'].includes(command) && !value)) {
-  console.error('Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High');
+function block() {
+  // The blocker may live in another repository: N or OWNER/REPO#N.
+  const [, blockerOwner = owner, blockerName = name, blockerNumber] = /^(?:([\w.-]+)\/([\w.-]+))?#?(\d+)$/.exec(value);
+  const { id } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id}}}`,
+    { owner: blockerOwner, name: blockerName, number: Number(blockerNumber) }).repository.issue;
+  graphql(`mutation($issue:ID!,$blocker:ID!){addBlockedBy(input:{issueId:$issue,blockingIssueId:$blocker}){issue{number}}}`,
+    { issue: readIssue().id, blocker: id });
+  console.log(`#${number} is blocked by ${value}`);
+}
+
+const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority') };
+// Only numbers and plain names reach gh, so no argument can smuggle in options.
+if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
+  || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
+  || (command === 'block' && !/^(?:[\w.-]+\/[\w.-]+)?#?\d+$/.test(value ?? ''))) {
+  console.error('Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | block ISSUE BLOCKER');
   process.exit(2);
 }
 try {

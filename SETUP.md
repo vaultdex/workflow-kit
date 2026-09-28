@@ -35,7 +35,7 @@ clone it with `--recurse-submodules`.
 
 For an existing repository, work on an issue branch and add the kit only if it is
 absent. Run the [install commands](README.md#install-or-update-in-a-project), then
-`init-project.mjs . --existing --check`. Keep the project's own rules, templates
+`init-project.mjs --existing --check`. Keep the project's own rules, templates
 and CI.
 
 Link `.vendor/workflow-kit/AGENT_RULES.md` from a short root AGENTS.md. Keep that

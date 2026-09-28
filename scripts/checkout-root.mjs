@@ -12,6 +12,15 @@ export function checkoutRoot(path) {
   }
 }
 
+/** The Git checkout containing the working directory: kit commands act on the project they run in,
+ * never on a path taken from their arguments. */
+export function projectRoot() {
+  for (let directory = realpathSync(process.cwd());; directory = dirname(directory)) {
+    if (existsSync(join(directory, '.git'))) return directory;
+    assert.notEqual(dirname(directory), directory, 'Run this command inside a Git checkout');
+  }
+}
+
 /** Resolve an installed CLI (git, gh) outside every checkout containing `paths`, so a checkout
  * cannot substitute it. The returned environment keeps only such PATH entries and stops Windows
  * from searching the working directory first. */

@@ -26,7 +26,7 @@ test('installed hooks run every manifest command without executing checkout prog
   const env = { ...process.env, HOME: path.join(temp, 'home'), USERPROFILE: path.join(temp, 'home'),
     XDG_CONFIG_HOME: path.join(temp, 'config'), PONYTAIL_DEFAULT_MODE: 'full' };
   const installer = fileURLToPath(new URL('../install-ponytail-hooks.mjs', import.meta.url));
-  const install = (extra = {}, node = process.execPath) => spawnSync(node, [installer, checkout], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const install = (extra = {}, node = process.execPath) => spawnSync(node, [installer], { cwd: checkout, env: { ...env, ...extra }, encoding: 'utf8' });
 
   // The snapshot and the Node it pins stay outside Git checkouts; identical reruns are fine.
   const installed = install();

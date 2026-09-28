@@ -32,13 +32,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude; else printf '%s\\n' 'Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . and trust the hooks.'; fi",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude; else printf '%s\\n' 'Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.'; fi",
             "timeout": 5,
             "shell": "bash"
           },
           {
             "type": "command",
-            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then printf '%s\\n' '{\"systemMessage\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs . and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs . and trust the hooks.\"}}'; fi",
+            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then printf '%s\\n' '{\"systemMessage\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\"}}'; fi",
             "timeout": 5
           }
         ]
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude continue; else printf '%s\\n' 'Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . and trust the hooks.'; fi",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate claude continue; else printf '%s\\n' 'Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.'; fi",
             "timeout": 5,
             "shell": "bash"
           }

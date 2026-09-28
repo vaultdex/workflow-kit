@@ -10,15 +10,15 @@ their licenses and notices ship with the generated skills.
 
 ## Install or update in a project
 
-Needs Git, Node 26 and, for the board commands, an authenticated `gh`. From the
-project root:
+Needs Git, Node 26 and, for the board commands, an authenticated `gh`. Kit commands
+act on the Git checkout they run in; from the project root:
 
 ```sh
 git submodule add https://github.com/vaultdex/workflow-kit.git .vendor/workflow-kit  # first time only
 git submodule update --init --recursive
-node .vendor/workflow-kit/scripts/init-project.mjs . --existing  # managed templates, hook files, .gitignore
-node .vendor/workflow-kit/scripts/setup-skills.mjs .             # skills for every agent
-node .vendor/workflow-kit/scripts/check-skills.mjs .             # generated files match the pins
+node .vendor/workflow-kit/scripts/init-project.mjs --existing  # managed templates, hook files, .gitignore
+node .vendor/workflow-kit/scripts/setup-skills.mjs             # skills for every agent
+node .vendor/workflow-kit/scripts/check-skills.mjs             # generated files match the pins
 ```
 
 Commit `.gitmodules`, the kit gitlink, `.github/workflow-kit.json`, the hook files
@@ -38,8 +38,8 @@ The committed hook files call only personal snapshots that you install
 explicitly:
 
 ```sh
-node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .    # Ponytail mode at session start
-node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .  # Impeccable UI checks
+node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs    # Ponytail mode at session start
+node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs  # Impeccable UI checks
 ```
 
 Then review and trust the project hooks in each agent and start a new session:
@@ -52,7 +52,8 @@ and [Impeccable](docs/impeccable.md).
 ## Board commands
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
-`next`, `check ISSUE`, `status ISSUE "In progress"`, `priority ISSUE High`. See
+`next`, `check ISSUE`, `status ISSUE "In progress"`, `priority ISSUE High`,
+`block ISSUE OWNER/REPO#N`. See
 [Starting work](docs/CONTRIBUTING.md#starting-work).
 
 ## Developing the kit
@@ -61,9 +62,8 @@ and [Impeccable](docs/impeccable.md).
 node scripts/setup-skills.mjs
 node --test scripts/tests
 node scripts/check-skills.mjs
-node scripts/init-project.mjs . --existing --check
+node scripts/init-project.mjs --existing --check
 ```
 
-Hook or launcher changes also need `node scripts/check-impeccable.mjs`, which
-downloads the real engine. CI runs the commands above in one Linux job: about 20
+CI runs the commands above in one Linux job: about 20
 runs a month at up to 10 minutes on a free public runner.

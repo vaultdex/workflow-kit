@@ -4,10 +4,10 @@ import { lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { externalTool } from './checkout-root.mjs';
+import { externalTool, projectRoot } from './checkout-root.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const root = resolve(process.argv[2] ?? kit);
+const root = projectRoot();
 const git = externalTool('git', root, kit, process.cwd()).file;
 // Compare regenerated files with real pinned blobs, not a self-asserted receipt.
 for (const name of ['ponytail', 'impeccable']) {
@@ -18,14 +18,14 @@ for (const name of ['ponytail', 'impeccable']) {
 const fixture = mkdtempSync(join(tmpdir(), 'workflow-kit discovery '));
 try {
   execFileSync(git, ['init', '--quiet', fixture]);
-  execFileSync(process.execPath, [join(kit, 'scripts/setup-skills.mjs'), fixture], { stdio: 'pipe' });
+  execFileSync(process.execPath, [join(kit, 'scripts/setup-skills.mjs')], { cwd: fixture, stdio: 'pipe' });
   const normalize = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
   const expected = readdirSync(join(fixture, '.github'), { recursive: true }).filter(p => lstatSync(join(fixture, '.github', p)).isFile());
   for (const file of expected) assert.equal(normalize(join(root, '.github', file)), normalize(join(fixture, '.github', file)), `Regenerate .github/${file} with setup-skills`);
   const actual = readdirSync(join(root, '.github'), { recursive: true }).filter(p => lstatSync(join(root, '.github', p)).isFile()
     && /^(skills[\\/](ponytail[^\\/]*|impeccable)[\\/]|agents[\\/]impeccable-)/.test(p));
   assert.deepEqual(actual.sort(), expected.sort(), 'Stale generated discovery files must be removed');
-  console.log('All Copilot skills, support files and agents match the pinned sources and reviewed patches.');
+  console.log('All Copilot skills, support files and agents match the pinned sources.');
 } finally {
   assert.equal(dirname(fixture), tmpdir());
   assert.ok(!lstatSync(fixture).isSymbolicLink());
