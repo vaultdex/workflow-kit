@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
-  readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+  readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { externalTool, projectRoot } from "./checkout-root.mjs";
@@ -96,14 +96,15 @@ try {
     throw error;
   }
   for (const skill of linkedSkills) link(root, join(root, skill), join(bundle, skill));
-  // Copilot skill and the impeccable* agents/commands are generated: replace them whole, so upstream removals disappear.
-  // A link or file at the Copilot skill directory moves aside first; enumerating through it would delete its target.
+  // Copilot skill and the impeccable* agents/commands are generated and replaced; files upstream no longer
+  // ships (or the project's own) move to .workflow-kit/replaced/.
+  // A link or file at the Copilot skill directory moves aside first; enumerating through it would reach its target.
   const copilot = join(root, ".github/skills/impeccable");
   if (present(copilot) && !present(copilot).isDirectory()) moveAside(root, copilot);
-  // Check every directory first, so a linked companion directory stops setup before anything is deleted.
-  const stale = companionFiles(root), fresh = companionFiles(bundle);
+  // Check every directory first, so a linked companion directory stops setup before anything changes.
+  const fresh = companionFiles(bundle), stale = companionFiles(root).filter((file) => !fresh.includes(file));
   for (const file of [...stale, ...fresh]) localDirectory(root, dirname(join(root, file)));
-  for (const file of stale) unlinkSync(join(root, file));
+  for (const file of stale) moveAside(root, join(root, file));
   for (const file of fresh) {
     // Drop whatever is left at the destination first: copying onto a link would write through it.
     rmSync(join(root, file), { force: true });

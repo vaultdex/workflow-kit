@@ -39,7 +39,7 @@ export function moveAside(root, path) {
   if (!present(path)) return;
   const destination = join(root, '.workflow-kit/replaced', stamp, relative(root, path));
   localDirectory(root, dirname(destination));
-  renameSync(path, destination);
+  rename(path, destination);
   console.log(`Moved ${relative(root, path)} to ${relative(root, destination)}`);
 }
 

@@ -7,7 +7,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalTool, projectRoot } from './checkout-root.mjs';
-import { link, localDirectory, rename } from './provider-links.mjs';
+import { link, localDirectory, moveAside, rename } from './provider-links.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = projectRoot();
@@ -63,10 +63,13 @@ try {
     throw error;
   }
   for (const [dest, from] of links) link(root, join(root, dest), join(bundle, from));
-  // Upstream-shaped names (ponytail, ponytail-*) in .github/skills are generated: rewrite them whole, so dropped skills go too.
+  // Current skills in .github/skills are generated and rewritten whole; other ponytail-* entries
+  // (skills upstream dropped, or the project's own) move to .workflow-kit/replaced/.
   const cloud = join(root, '.github/skills');
   localDirectory(root, cloud);
-  for (const entry of readdirSync(cloud).filter(name => skillName.test(name))) rmSync(join(cloud, entry), { recursive: true, force: true });
+  for (const entry of readdirSync(cloud).filter(name => skillName.test(name)))
+    if (skills.includes(entry)) rmSync(join(cloud, entry), { recursive: true, force: true });
+    else moveAside(root, join(cloud, entry));
   for (const [file, bytes] of Object.entries(outputs)) {
     localDirectory(root, dirname(join(root, file)));
     writeFileSync(join(root, file), bytes);
