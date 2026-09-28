@@ -17,7 +17,7 @@ const existing = process.argv.includes('--existing');
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 // Kit handlers call the personal snapshots under ~/.ponytail/vaultdex or ~/.impeccable/vaultdex.
-const ours = handler => /\.(?:ponytail|impeccable)[\\/]+vaultdex/.test(JSON.stringify(handler));
+const ours = handler => /\.(?:ponytail|impeccable)[\\/]+vaultdex[\\/]/.test(JSON.stringify(handler));
 const isHooks = name => /^(?:\.(?:codex|cursor)\/hooks\.json|\.claude\/settings\.json|\.github\/hooks\/[\w.-]+\.json)$/.test(name);
 
 /** A project file that must stay inside the checkout and must not be a directory or link target elsewhere. */
