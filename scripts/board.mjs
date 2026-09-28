@@ -87,7 +87,7 @@ function next() {
 
 /** A single-select Project field with its options in configured order. */
 function selectField(fieldName) {
-  const field = graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:50){nodes{...on ProjectV2SingleSelectField{
+  const field = graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:100){nodes{...on ProjectV2SingleSelectField{
     id name options{id name} issueField{...on IssueFieldSingleSelect{id options{id name}}}}}}}}}`, { id: project.id })
     .node.fields.nodes.find(candidate => candidate.name === fieldName);
   assert.ok(field, `${project.url} has no single-select ${fieldName} field`);

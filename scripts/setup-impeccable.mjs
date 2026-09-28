@@ -5,7 +5,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { externalTool, projectRoot } from "./checkout-root.mjs";
-import { link, localDirectory, moveAside, rename } from "./provider-links.mjs";
+import { checkDirectory, link, localDirectory, moveAside, rename } from "./provider-links.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -100,6 +100,7 @@ try {
   // Check every output directory before the swap, so a linked one stops setup with nothing replaced.
   const fresh = companionFiles(next), stale = companionFiles(root).filter((file) => !fresh.includes(file));
   for (const file of [...linkedSkills, ...stale, ...fresh]) localDirectory(root, dirname(join(root, file)));
+  checkDirectory(root, join(root, ".workflow-kit/replaced"));
   // A directory where a companion file belongs can't be replaced by a file copy; keep it aside.
   for (const file of fresh) if (present(join(root, file))?.isDirectory()) moveAside(root, join(root, file));
   if (existsSync(bundle)) rename(bundle, previous);

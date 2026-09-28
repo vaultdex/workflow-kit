@@ -7,7 +7,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalTool, projectRoot } from './checkout-root.mjs';
-import { link, localDirectory, moveAside, rename } from './provider-links.mjs';
+import { checkDirectory, link, localDirectory, moveAside, rename } from './provider-links.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = projectRoot();
@@ -62,6 +62,7 @@ try {
   const cloud = join(root, '.github/skills');
   for (const directory of [cloud, ...links.map(([dest]) => dirname(join(root, dest))),
     ...Object.keys(outputs).map(file => dirname(join(root, file)))]) localDirectory(root, directory);
+  checkDirectory(root, join(state, 'replaced'));
   if (existsSync(bundle)) rename(bundle, previous);
   try { rename(next, bundle); }
   catch (error) {
