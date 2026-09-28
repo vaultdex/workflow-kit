@@ -35,36 +35,15 @@ function run(command, cwd = checkout, input = "{}") {
 
 try {
   execFileSync(git, ["clone", "--quiet", "--no-hardlinks", "--local", resolve("."), checkout]);
-  const provenance = () => spawnSync(process.execPath, ["--test", "scripts/tests/impeccable-installation.test.mjs"],
-    { cwd: checkout, env, encoding: "utf8" });
-  const missingSource = provenance();
-  assert.equal(missingSource.status, 1);
-  assert.match(missingSource.stdout, /Initialize the pinned source/);
-  // Use the actual pinned submodule via a local file transport, not another download.
-  execFileSync(git, ["-C", checkout, "config", "submodule..vendor/impeccable.url",
-    pathToFileURL(resolve(".vendor/impeccable")).href]);
-  execFileSync(git, ["-c", "protocol.file.allow=always", "-C", checkout,
-    "submodule", "update", "--init", "--depth", "1", "--", ".vendor/impeccable"]);
-  assert.equal(provenance().status, 0);
-  for (const file of [".github/skills/impeccable/SKILL.md", ...[
-    "asset-producer", "documenter", "finish-reviewer", "manual-edit-applier",
-  ].map((name) => `.github/agents/impeccable-${name}.agent.md`)]) {
-    const target = join(checkout, file);
-    const source = join(checkout, ".vendor/impeccable", file);
-    const original = readFileSync(target);
-    const upstreamOriginal = readFileSync(source);
-    writeFileSync(target, `${original}\nUnregenerated discovery mutation.\n`);
-    const changed = provenance();
-    assert.equal(changed.status, 1, file);
-    assert.ok(changed.stdout.includes(`Regenerate ${file}`), changed.stdout);
-    // Editing both copies must not substitute a working tree for the pinned blobs.
-    copyFileSync(target, source);
-    assert.equal(provenance().status, 1, file);
-    writeFileSync(source, upstreamOriginal);
-    writeFileSync(target, original.toString().replaceAll("\r\n", "\n").replaceAll("\n", "\r\n"));
-    assert.equal(provenance().status, 0, `CRLF: ${file}`);
-    writeFileSync(target, original);
+  // Use the actual pinned submodules via a local file transport, not another download.
+  for (const name of ["impeccable", "ponytail"]) {
+    execFileSync(git, ["-C", checkout, "config", `submodule..vendor/${name}.url`, pathToFileURL(resolve(".vendor", name)).href]);
+    execFileSync(git, ["-c", "protocol.file.allow=always", "-C", checkout,
+      "submodule", "update", "--init", "--depth", "1", "--", `.vendor/${name}`]);
   }
+  // check-skills regenerates every committed discovery file from the pins and compares it.
+  const provenance = () => spawnSync(process.execPath, ["scripts/check-skills.mjs"], { cwd: checkout, env, encoding: "utf8" });
+  assert.equal(provenance().status, 0);
   execFileSync(process.execPath, [join(checkout, "scripts/init-project.mjs"), checkout, "--existing"], { env });
   for (const app of ["frontend", "apps/mobile"]) {
     mkdirSync(join(checkout, app, "src"), { recursive: true });
