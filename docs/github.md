@@ -5,8 +5,9 @@ Backlog → Ready → In progress → Automated review → Human review → Done
 Ready for Review starts Automated review. Move to Human review only after the
 delivered revision's automatic reviews and finding dispositions are complete and
 selected checks pass; disclose confirmed unavailable reviews under the contribution
-workflow's exception. Further edits return to Draft/In progress and another automatic
-review cycle. Human acceptance and merge remain required for Done.
+workflow's exception. Further edits require the live
+[execution check](CONTRIBUTING.md#execution-check) before Draft/In progress and
+another automatic review cycle. Human acceptance and merge remain required for Done.
 
 For an existing five-state board, rename In review to Automated review in place
 and insert Human review immediately before Done. Preserve existing option IDs,
