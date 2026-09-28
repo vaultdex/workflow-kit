@@ -1,12 +1,13 @@
 # Impeccable
 
 Source: `.vendor/impeccable`, pinned to `skill-v4.3.1`. `scripts/impeccable/`
-holds the engine `VERSION`, `SHA256SUMS` and two reviewed patches:
-
-- `launchers.patch` makes the skill's CLI launchers resolve system tools by
-  absolute path, so a checkout cannot substitute `curl`, `git` or `where`.
-- `maintainability.patch` splits `live-browser-ignores.js` without changing
-  behavior; upstream's own test runs against the result.
+holds the engine `VERSION`, `SHA256SUMS` and the reviewed `launchers.patch`. The
+patch makes the skill's CLI launchers verify downloads against the repository's
+`SHA256SUMS`, resolve system tools by absolute path so a checkout cannot
+substitute `curl` or `where`, and use a private staging file per start so
+concurrent first starts don't collide. Consumers should exclude the generated
+`.github/skills/**` and `.github/agents/**` from static analysis: it is
+third-party code.
 
 `setup-skills` builds `.impeccable/vendor` and links it into five providers.
 Copilot gets committed copies in `.github/skills/impeccable` and

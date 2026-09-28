@@ -65,7 +65,8 @@ workflows:
   Create the milestone `Hotfixes · laufend` if the project takes hotfixes.
 - **Reviewers:** authorize the CodeRabbit App and enable Codex automatic reviews for
   this repository, then verify both on the setup PR. Committed configuration
-  doesn't install an App.
+  doesn't install an App. If Sonar or another analyzer runs, exclude the generated
+  third-party code in `.github/skills/**` and `.github/agents/**`.
 - **Rules:** require PRs, human approval and always-reported checks, never a
   path-filtered check that can be absent. If rulesets are unavailable (HTTP 403 on
   the plan), report it; don't change the plan or the visibility.

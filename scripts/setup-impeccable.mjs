@@ -63,11 +63,10 @@ function generateSkill(skill, to) {
   // Release archives add these root attribution files to every provider package.
   for (const file of ["LICENSE", "NOTICE.md"])
     writeFileSync(join(to, file), text(join(source, file)));
-  // Git for Windows may check upstream out as CRLF. Shell scripts and the LF patches need LF.
-  for (const name of ["impeccable", "impeccable.cmd", "live-browser-ignores.js"])
+  // Git for Windows may check upstream out as CRLF. The launchers and their LF patch need LF.
+  for (const name of ["impeccable", "impeccable.cmd"])
     writeFileSync(join(to, "scripts", name), text(join(to, "scripts", name)));
-  for (const patch of ["launchers.patch", "maintainability.patch"])
-    git("apply", "--whitespace=error-all", `--directory=${relative(root, to).split(sep).join("/")}`, join(security, patch));
+  git("apply", "--whitespace=error-all", `--directory=${relative(root, to).split(sep).join("/")}`, join(security, "launchers.patch"));
   copyFileSync(join(security, "SHA256SUMS"), join(to, "scripts/SHA256SUMS"));
   chmodSync(join(to, "scripts/impeccable"), 0o755);
 }
