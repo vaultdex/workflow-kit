@@ -4,12 +4,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmdirSync, rmSync,
-  unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalTool } from './checkout-root.mjs';
-import { assertInside, link, localDirectory, retire } from './provider-links.mjs';
+import { link, localDirectory } from './provider-links.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
@@ -60,18 +59,8 @@ try {
   const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
     ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
     .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
-  // Committed outputs are replaced only while unedited; the receipt authorizes only these paths.
-  const retired = [], retiredSkills = new Set();
-  for (const [file, digest] of Object.entries(old)) {
-    assert.match(file, /^\.github\/skills\/ponytail(?:-[a-z0-9]+)*\/(?:SKILL\.md|LICENSE\.md|NOTICE\.md)$/, 'Invalid Ponytail receipt path');
-    assert.match(digest, /^[a-f0-9]{64}$/, 'Invalid Ponytail receipt hash');
-    if (Object.hasOwn(outputs, file)) continue;
-    const target = join(root, file);
-    assertInside(root, target);
-    assert.ok(!present(target) || (present(target).isFile() && hash(text(target)) === digest), `Retired skill edited; preserved: ${file}`);
-    retired.push(target);
-    if (!skills.includes(file.split('/')[2])) retiredSkills.add(file.split('/')[2]);
-  }
+  // Committed outputs are replaced only while unedited. Files of skills that upstream drops stay
+  // until someone deletes them; check-skills reports them as stale.
   for (const [file, bytes] of Object.entries(outputs)) {
     const target = join(root, file);
     localDirectory(root, dirname(target));
@@ -85,14 +74,7 @@ try {
     throw error;
   }
   for (const [dest, from] of links) link(root, join(root, dest), join(bundle, from));
-  for (const skill of retiredSkills) for (const provider of providers) retire(root, join(root, provider, 'skills', skill), bundle);
   for (const [file, bytes] of Object.entries(outputs)) writeFileSync(join(root, file), bytes);
-  for (const path of retired) if (present(path)) unlinkSync(path);
-  // Only emptied directories go; files someone added next to a retired skill stay.
-  for (const skill of retiredSkills) {
-    const path = join(root, '.github/skills', skill);
-    if (present(path)?.isDirectory() && !readdirSync(path).length) rmdirSync(path);
-  }
   writeFileSync(receiptPath, JSON.stringify({ revision, files: Object.fromEntries(Object.entries(outputs).map(([p, bytes]) => [p, hash(bytes)])) }, null, 2) + '\n');
   published = true;
   console.log(`Ponytail ${revision.slice(0, 7)}: shared source, five local providers linked, Copilot refreshed.`);

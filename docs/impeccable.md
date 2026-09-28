@@ -29,6 +29,3 @@ disposable clone:
 - concurrent cold starts,
 - hostile checkout executables,
 - web and mobile app contexts.
-
-`WORKFLOW_KIT_ENGINE_PROOF=1 node --test scripts/tests/impeccable-hooks.test.mjs`
-also measures Stop against the real engine; CI runs it.

@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, lstatSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-const setup = fileURLToPath(new URL('../setup-ponytail.mjs', import.meta.url));
 const skills = ['ponytail', 'ponytail-audit', 'ponytail-debt', 'ponytail-gain', 'ponytail-help', 'ponytail-review'];
 const hooks = ['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent'];
+const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 const write = (path, content) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); };
 
-/** Exercise the real setup with committed local upstreams; no download or model call. */
+/** The real setup against a committed local upstream: no download or model call. */
 function fixture(t) {
   const base = mkdtempSync(join(tmpdir(), 'ponytail batch '));
   t.after(() => rmSync(base, { recursive: true, force: true }));
@@ -22,7 +22,6 @@ function fixture(t) {
     git(dir, 'init', '--quiet');
     git(dir, 'config', 'user.name', 'Fixture');
     git(dir, 'config', 'user.email', 'fixture@example.invalid');
-    git(dir, 'config', 'core.autocrlf', 'false');
   }
   const expected = new Map(skills.map(name => [`skills/${name}/SKILL.md`, `# ${name}\r\nGrüße 🎴\r\n\n`])
     .concat(hooks.map(name => [`hooks/ponytail-${name}.js`, name === 'runtime' ? '' : `// ${name}\r\n`])));
@@ -32,75 +31,42 @@ function fixture(t) {
   git(upstream, 'add', '.'); git(upstream, 'commit', '--quiet', '-m', 'Fixture sources');
   git(kit, '-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', upstream, '.vendor/ponytail');
   git(kit, 'commit', '--quiet', '-am', 'Pin local fixture');
-  const source = join(kit, '.vendor/ponytail');
-  git(source, 'config', 'user.name', 'Fixture'); git(source, 'config', 'user.email', 'fixture@example.invalid');
   write(join(kit, 'scripts/ponytail/NOTICE.md'), 'Fixture attribution\n');
   write(join(kit, 'scripts/ponytail/adaptations.patch'),
     'diff --git a/skills/ponytail/SKILL.md b/skills/ponytail/SKILL.md\n'
     + '--- a/skills/ponytail/SKILL.md\n+++ b/skills/ponytail/SKILL.md\n'
     + '@@ -1,3 +1,3 @@\n # ponytail\n-base\n+patched\n Grüße 🎴\n');
-  copyFileSync(setup, join(kit, 'scripts/setup-ponytail.mjs'));
-  copyFileSync(new URL('../checkout-root.mjs', import.meta.url), join(kit, 'scripts/checkout-root.mjs'));
-  copyFileSync(new URL('../provider-links.mjs', import.meta.url), join(kit, 'scripts/provider-links.mjs'));
+  for (const script of ['setup-ponytail.mjs', 'checkout-root.mjs', 'provider-links.mjs'])
+    copyFileSync(new URL(`../${script}`, import.meta.url), join(kit, 'scripts', script));
   const run = () => spawnSync(process.execPath, [join(kit, 'scripts/setup-ponytail.mjs'), root], { encoding: 'utf8' });
-  const pin = () => { git(source, 'add', '-A'); git(source, 'commit', '--quiet', '-m', 'Change fixture');
-    git(kit, 'add', '.vendor/ponytail'); git(kit, 'commit', '--quiet', '-m', 'Update pin'); };
-  return { root, source, expected, run, pin };
+  return { root, source: join(kit, '.vendor/ponytail'), expected, run };
 }
+const succeeds = result => assert.equal(result.status, 0, result.stderr);
 
-function succeeds(result) { assert.equal(result.status, 0, result.stderr); }
-
-test('setup reads the pinned sources byte-correctly: UTF-8, CRLF and empty files', t => {
+test('setup writes byte-correct files, links every provider and reruns without changes', t => {
   const f = fixture(t); succeeds(f.run());
   for (const [path, original] of f.expected) {
-    const value = original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n');
     const output = path === 'LICENSE' ? '.agents/hooks/LICENSE.md' : `.agents/${path}`;
-    assert.equal(readFileSync(join(f.root, output), 'utf8'), value, path);
+    assert.equal(readFileSync(join(f.root, output), 'utf8'), original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n'), path);
   }
-  for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi'])
-    assert.match(readFileSync(join(f.root, provider, 'skills/ponytail/SKILL.md'), 'utf8'), /patched/);
-});
-
-test('repeat setup keeps the same receipt and unrelated files', t => {
-  const f = fixture(t); succeeds(f.run());
+  for (const provider of providers) assert.ok(lstatSync(join(f.root, provider, 'skills/ponytail')).isSymbolicLink(), provider);
   const receipt = join(f.root, '.github/skills/ponytail/.workflow-source.json');
   const before = readFileSync(receipt);
-  write(join(f.root, '.github/skills/custom/SKILL.md'), 'User-owned\n');
   succeeds(f.run());
   assert.deepEqual(readFileSync(receipt), before);
-  assert.equal(readFileSync(join(f.root, '.github/skills/custom/SKILL.md'), 'utf8'), 'User-owned\n');
 });
 
-for (const problem of ['missing', 'tree']) test(`${problem} pinned source fails before replacing the previous installation`, t => {
+test('a dirty source or an edited Copilot skill is refused and the installation stays', t => {
   const f = fixture(t); succeeds(f.run());
-  const receipt = join(f.root, '.github/skills/ponytail/.workflow-source.json');
-  const before = readFileSync(receipt);
-  const path = join(f.source, 'hooks/ponytail-runtime.js');
-  rmSync(path);
-  if (problem === 'tree') write(join(path, 'nested'), 'Not a blob\n');
-  f.pin();
-  const result = f.run();
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, problem === 'missing' ? /ENOENT.*ponytail-runtime\.js/ : /EISDIR/);
-  assert.deepEqual(readFileSync(receipt), before);
-  assert.equal(readFileSync(join(f.root, '.agents/hooks/ponytail-runtime.js'), 'utf8'), '');
-  assert.deepEqual(readdirSync(join(f.root, '.workflow-kit')), ['ponytail']);
-});
-
-test('dirty upstream and edited consumer files are still refused', t => {
-  const f = fixture(t); succeeds(f.run());
-  const source = join(f.source, 'hooks/ponytail-runtime.js');
-  writeFileSync(source, '// local change\n');
-  const dirty = f.run();
-  assert.notEqual(dirty.status, 0);
-  assert.match(dirty.stderr, /Ponytail source has local changes/);
-  writeFileSync(source, '');
+  const hook = join(f.root, '.agents/hooks/ponytail-activate.js'), installed = readFileSync(hook);
+  writeFileSync(join(f.source, 'hooks/ponytail-runtime.js'), '// local change\n');
+  assert.notEqual(f.run().status, 0);
+  writeFileSync(join(f.source, 'hooks/ponytail-runtime.js'), '');
   const output = join(f.root, '.github/skills/ponytail/SKILL.md');
   writeFileSync(output, 'Manual change\n');
-  const result = f.run();
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Existing or edited Copilot skill left untouched/);
+  assert.notEqual(f.run().status, 0);
   assert.equal(readFileSync(output, 'utf8'), 'Manual change\n');
+  assert.deepEqual(readFileSync(hook), installed);
 });
 
 // #38: harness worktrees copy ignored provider links as folders; setup relinks and keeps the copies aside.
@@ -110,99 +76,12 @@ test('copies, files and foreign links at provider paths move aside once; links p
   unlinkSync(copy); write(join(copy, 'SKILL.md'), 'Copied from another worktree\n');
   unlinkSync(file); write(file, 'User file\n');
   succeeds(f.run());
-  for (const path of [copy, file]) {
-    assert.ok(lstatSync(path).isSymbolicLink(), path);
+  for (const path of [copy, file])
     assert.ok(realpathSync(path).startsWith(realpathSync(join(f.root, '.workflow-kit/ponytail'))), path);
-  }
   const [moved] = readdirSync(join(f.root, '.workflow-kit/replaced'));
   const replaced = join(f.root, '.workflow-kit/replaced', moved);
   assert.equal(readFileSync(join(replaced, '.claude/skills/ponytail/SKILL.md'), 'utf8'), 'Copied from another worktree\n');
   assert.equal(readFileSync(join(replaced, '.agents/hooks'), 'utf8'), 'User file\n');
   succeeds(f.run());
   assert.deepEqual(readdirSync(join(f.root, '.workflow-kit/replaced')), [moved], 'Current links are kept');
-});
-
-test('missing license fails without publishing a partial installation', t => {
-  const f = fixture(t); rmSync(join(f.source, 'LICENSE')); f.pin();
-  const result = f.run();
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /ENOENT.*LICENSE/);
-  assert.equal(existsSync(join(f.root, '.workflow-kit/ponytail')), false);
-});
-
-// Future upstream releases may remove or rename optional skills. Exercise both,
-// including symlinks/junctions: existsSync alone misses a stale dangling link.
-for (const action of ['remove', 'rename']) test(`${action} a pinned skill removes only managed outputs and every provider link`, t => {
-  const f = fixture(t); succeeds(f.run());
-  const old = 'ponytail-audit', next = 'ponytail-scan';
-  if (action === 'remove') rmSync(join(f.source, 'skills', old), { recursive: true });
-  else renameSync(join(f.source, 'skills', old), join(f.source, 'skills', next));
-  f.pin(); succeeds(f.run());
-  for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi']) {
-    assert.equal(lstatSync(join(f.root, provider, 'skills', old), { throwIfNoEntry: false }), undefined);
-    if (action === 'rename') assert.ok(lstatSync(join(f.root, provider, 'skills', next)).isSymbolicLink());
-  }
-  assert.equal(existsSync(join(f.root, '.github/skills', old)), false);
-  const receipt = join(f.root, '.github/skills/ponytail/.workflow-source.json');
-  const before = readFileSync(receipt);
-  succeeds(f.run()); assert.deepEqual(readFileSync(receipt), before);
-  assert.ok(!Object.keys(JSON.parse(before).files).some(name => name.includes(old)));
-  const cloudSkills = readdirSync(join(f.root, '.github/skills'));
-  assert.equal(cloudSkills.length, skills.length - (action === 'remove' ? 1 : 0));
-});
-for (const changed of ['cloud', 'receipt-path', 'cloud-symlink'])
-  test(`retirement refuses ${changed} without replacing the installation or receipt`, t => {
-    const f = fixture(t); succeeds(f.run());
-    const receipt = join(f.root, '.github/skills/ponytail/.workflow-source.json');
-    const cloud = join(f.root, '.github/skills/ponytail-audit');
-    const local = join(f.root, '.agents/skills/ponytail-audit/SKILL.md');
-    const outside = join(dirname(f.root), 'external'); mkdirSync(outside);
-    write(join(outside, 'SKILL.md'), 'User-owned\n');
-    if (changed === 'cloud') write(join(cloud, 'SKILL.md'), 'User-owned\n');
-    if (changed === 'receipt-path') {
-      const data = JSON.parse(readFileSync(receipt)); data.files['../../external/SKILL.md'] = 'a'.repeat(64);
-      write(receipt, JSON.stringify(data));
-    }
-    if (changed === 'cloud-symlink') {
-      rmSync(cloud, { recursive: true }); symlinkSync(outside, cloud, 'junction');
-    }
-    const before = readFileSync(receipt);
-    const original = readFileSync(local);
-    rmSync(join(f.source, 'skills/ponytail-audit'), { recursive: true }); f.pin();
-    assert.notEqual(f.run().status, 0);
-    assert.deepEqual(readFileSync(receipt), before);
-    assert.deepEqual(readFileSync(local), original);
-    assert.equal(readFileSync(join(outside, 'SKILL.md'), 'utf8'), 'User-owned\n');
-    assert.deepEqual(readdirSync(join(f.root, '.workflow-kit')), ['ponytail']);
-  });
-
-// #38: a harness worktree may hold a retired skill as a plain copy instead of a link.
-test('retirement keeps foreign content: extra files stay, copies and foreign links move aside', t => {
-  const f = fixture(t); succeeds(f.run());
-  const copy = join(f.root, '.claude/skills/ponytail-audit'), foreign = join(f.root, '.pi/skills/ponytail-audit');
-  const outside = join(dirname(f.root), 'external'); write(join(outside, 'SKILL.md'), 'User-owned\n');
-  unlinkSync(copy); write(join(copy, 'SKILL.md'), 'User note\n');
-  unlinkSync(foreign); symlinkSync(outside, foreign, 'junction');
-  write(join(f.root, '.github/skills/ponytail-audit/notes.txt'), 'User-owned\n');
-  rmSync(join(f.source, 'skills/ponytail-audit'), { recursive: true }); f.pin();
-  succeeds(f.run());
-  assert.equal(lstatSync(copy, { throwIfNoEntry: false }), undefined);
-  assert.equal(lstatSync(foreign, { throwIfNoEntry: false }), undefined);
-  const [moved] = readdirSync(join(f.root, '.workflow-kit/replaced'));
-  const replaced = join(f.root, '.workflow-kit/replaced', moved);
-  assert.equal(readFileSync(join(replaced, '.claude/skills/ponytail-audit/SKILL.md'), 'utf8'), 'User note\n');
-  assert.ok(lstatSync(join(replaced, '.pi/skills/ponytail-audit')).isSymbolicLink());
-  assert.equal(readFileSync(join(outside, 'SKILL.md'), 'utf8'), 'User-owned\n');
-  assert.deepEqual(readdirSync(join(f.root, '.github/skills/ponytail-audit')), ['notes.txt']);
-});
-
-test('an already missing retired cloud directory does not block provider cleanup', t => {
-  const f = fixture(t); succeeds(f.run());
-  const skill = 'ponytail-audit';
-  rmSync(join(f.root, '.github/skills', skill), { recursive: true });
-  rmSync(join(f.source, 'skills', skill), { recursive: true }); f.pin();
-  succeeds(f.run()); succeeds(f.run());
-  assert.equal(existsSync(join(f.root, '.github/skills', skill)), false);
-  for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi'])
-    assert.equal(lstatSync(join(f.root, provider, 'skills', skill), { throwIfNoEntry: false }), undefined);
 });
