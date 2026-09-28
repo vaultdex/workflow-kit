@@ -1,51 +1,30 @@
-// Zweck: Gepinnte Ponytail-Skills erzeugen und eigene veraltete Ausgaben sicher entfernen.
+// Zweck: Gepinnte Ponytail-Skills erzeugen und in die lokalen Provider verlinken.
 // Nutzen: Ein Bundle fuer alle lokalen Provider; keine kopierte Laufzeitlogik im Produkt.
 // Aufruf: setup-skills bei Einrichtung oder bewusstem Kit-Update, nicht pro Agenten-Turn.
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
-  realpathSync, readdirSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmdirSync, rmSync,
+  unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkoutRoot } from './checkout-root.mjs';
-import { classifyEntry, directoryState, removeStale } from './stale-entry.mjs';
+import { externalTool } from './checkout-root.mjs';
+import { assertInside, link, localDirectory, retire } from './provider-links.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
 const source = join(kit, '.vendor/ponytail');
 const state = join(root, '.workflow-kit');
 const bundle = join(state, 'ponytail');
+const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
-/** Identify a kit bundle by its regular ownership marker, without trusting its contents. */
-const owned = path => present(join(path, '.owner'))?.isFile() && text(join(path, '.owner')) === 'vaultdex-workflow-kit\n';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const checkouts = [root, kit, process.cwd()].map(p => checkoutRoot(p));
-const outside = p => checkouts.every(base => p !== base && !p.startsWith(base + sep));
-const searchPath = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
-  .filter(p => existsSync(p) && outside(realpathSync(p)));
-const binary = searchPath.map(p => join(p, process.platform === 'win32' ? 'git.exe' : 'git'))
-  .filter(existsSync).map(p => realpathSync(p)).find(outside);
-assert.ok(binary, 'Install Git outside the checkout on an absolute PATH');
-const gitOptions = { cwd: root,
-  env: { ...process.env, PATH: searchPath.join(delimiter), NoDefaultCurrentDirectoryInExePath: '1' } };
-const git = (...args) => execFileSync(binary, args, { ...gitOptions, encoding: 'utf8' });
+const gitTool = externalTool('git', root, kit, process.cwd());
+const git = (...args) => execFileSync(gitTool.file, args, { cwd: root, env: gitTool.env, encoding: 'utf8' });
 
-function directory(p) {
-  let parent = p;
-  while (!present(parent)) parent = dirname(parent);
-  const actual = realpathSync(parent);
-  assert.ok(actual === realpathSync(root) || actual.startsWith(realpathSync(root) + sep), `Directory leaves checkout: ${p}`);
-  mkdirSync(p, { recursive: true });
-}
-
-directory(state);
+localDirectory(root, state);
 assert.ok(!present(bundle)?.isSymbolicLink(), 'Generated Ponytail bundle must not be a link');
-if (existsSync(bundle)) {
-  assert.ok(owned(bundle),
-    'Refusing to replace an unknown .workflow-kit/ponytail directory');
-}
 if (existsSync(join(source, '.git'))) assert.equal(git('-C', source, 'status', '--porcelain', '--untracked-files=all').trim(), '', 'Ponytail source has local changes');
 git('-C', kit, 'submodule', 'update', '--init', '--', '.vendor/ponytail');
 const revision = git('-C', source, 'rev-parse', 'HEAD').trim();
@@ -56,8 +35,8 @@ const files = [...skills.map(s => `skills/${s}/SKILL.md`),
 // Read committed blobs in one Git process. Parse byte lengths before decoding:
 // UTF-8 characters and embedded newlines are not batch-record boundaries.
 const requested = [...files, 'LICENSE'];
-const batch = execFileSync(binary, ['-C', source, 'cat-file', '--batch'], {
-  ...gitOptions, input: requested.map(file => `${revision}:${file}\n`).join(''),
+const batch = execFileSync(gitTool.file, ['-C', source, 'cat-file', '--batch'], {
+  cwd: root, env: gitTool.env, input: requested.map(file => `${revision}:${file}\n`).join(''),
   maxBuffer: 16 * 1024 * 1024,
 });
 let offset = 0;
@@ -97,116 +76,47 @@ try {
   writeFileSync(join(next, '.agents/hooks/LICENSE.md'), license);
   writeFileSync(join(next, '.agents/skills/ponytail/LICENSE.md'), license);
   writeFileSync(join(next, '.agents/skills/ponytail/NOTICE.md'), text(join(kit, 'scripts/ponytail/NOTICE.md')));
-  writeFileSync(join(next, '.owner'), 'vaultdex-workflow-kit\n');
-  const links = ['.agent', '.agents', '.claude', '.opencode', '.pi'].flatMap(p => skills.map(s => [`${p}/skills/${s}`, `.agents/skills/${s}`]));
+  const links = providers.flatMap(p => skills.map(s => [`${p}/skills/${s}`, `.agents/skills/${s}`]));
   links.push(['.agents/hooks', '.agents/hooks']);
   const receiptPath = join(root, '.github/skills/ponytail/.workflow-source.json');
-  directory(dirname(receiptPath));
+  localDirectory(root, dirname(receiptPath));
   assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   const old = existsSync(receiptPath) ? JSON.parse(text(receiptPath)).files : {};
-  // Known generated states of a provider directory: the freshly generated bundle, plus every skill state that
-  // the current or an earlier committed receipt recorded (a harness worktree may copy what an older kit generated).
-  // Git history alone proves no ownership; only the kit's own receipts do.
-  const receipts = [old];
-  const receiptFile = relative(root, receiptPath).split(sep).join('/');
-  if (spawnSync(binary, ['rev-parse', '--verify', '--quiet', 'HEAD'], gitOptions).status === 0) {
-    for (const commit of git('log', '--format=%H', '--diff-filter=d', '--', receiptFile).split('\n').filter(Boolean)) {
-      try { receipts.push(JSON.parse(git('show', `${commit}:${receiptFile}`)).files ?? {}); } catch { /* not a receipt */ }
-    }
-  }
-  /** Complete skill manifests backed by current or committed kit receipts. */
-  const recorded = skill => receipts.map(files => {
-    const prefix = `.github/skills/${skill}/`;
-    const entries = Object.entries(files).filter(([file]) => file.startsWith(prefix)).map(([file, digest]) => [file.slice(prefix.length), digest]);
-    const digests = new Map(entries);
-    return { names: entries.length ? new Set(digests.keys()) : null,
-      matches: (name, bytes) => digests.get(name) === hash(bytes.toString('utf8').replaceAll('\r\n', '\n')) };
-  });
-  /** Only generated or recorded manifests authorize copies; installed bundles are mutable. */
-  const states = from => [directoryState(join(next, from)),
-    ...(from.startsWith('.agents/skills/') ? recorded(from.split('/')[2]) : [])];
-  const stale = [];
-  for (const [dest, from] of links) {
-    const target = join(root, dest);
-    directory(dirname(target));
-    if (!present(target)) continue;
-    const kind = classifyEntry(target, join(bundle, from), relative(root, join(bundle, from)), states(from),
-      to => owned(resolve(to, relative(join(bundle, from), bundle))));
-    if (kind === 'stale') stale.push(target);
-    else assert.equal(kind, 'current', `Existing skill/hook left untouched (${kind}): ${target}. Move or remove it yourself, then rerun setup.`);
-  }
   const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
     ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
     .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
-  // Receipts authorize only these generated outputs, never arbitrary checkout paths.
-  const retired = [], retiredLinks = [], retiredDirectories = new Set();
+  // Committed outputs are replaced only while unedited; the receipt authorizes only these paths.
+  const retired = [], retiredSkills = new Set();
   for (const [file, digest] of Object.entries(old)) {
     assert.match(file, /^\.github\/skills\/ponytail(?:-[a-z0-9]+)*\/(?:SKILL\.md|LICENSE\.md|NOTICE\.md)$/, 'Invalid Ponytail receipt path');
     assert.match(digest, /^[a-f0-9]{64}$/, 'Invalid Ponytail receipt hash');
     if (Object.hasOwn(outputs, file)) continue;
     const target = join(root, file);
-    directory(dirname(target));
+    assertInside(root, target);
     assert.ok(!present(target) || (present(target).isFile() && hash(text(target)) === digest), `Retired skill edited; preserved: ${file}`);
     retired.push(target);
-    const skill = file.split('/')[2];
-    if (!skills.includes(skill)) retiredDirectories.add(skill);
-  }
-  for (const skill of retiredDirectories) {
-    const cloud = join(root, '.github/skills', skill);
-    assert.ok(present(cloud).isDirectory() && !present(cloud).isSymbolicLink(), `Foreign retired skill directory: ${skill}`);
-    // No recursive deletion of user-owned directories or unseen support files.
-    for (const entry of readdirSync(cloud)) {
-      const name = `.github/skills/${skill}/${entry}`;
-      assert.ok(Object.hasOwn(old, name) && !Object.hasOwn(outputs, name), `Foreign file in retired skill; preserved: ${name}`);
-    }
-    const local = join(bundle, '.agents/skills', skill);
-    if (present(local)) {
-      directory(local);
-      assert.ok(present(local).isDirectory() && !present(local).isSymbolicLink(), `Foreign retired bundle entry: ${skill}`);
-      for (const entry of readdirSync(local)) {
-        const expected = old[`.github/skills/${skill}/${entry}`];
-        const path = join(local, entry);
-        assert.ok(expected && present(path).isFile() && hash(text(path)) === expected, `Retired local skill edited; preserved: ${skill}/${entry}`);
-      }
-    }
-    for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi']) {
-      const link = join(root, provider, 'skills', skill);
-      directory(dirname(link));
-      if (!present(link)) continue;
-      // Copied or relocated entries of a retired skill are kit output too, under the same verification.
-      const kind = classifyEntry(link, local, relative(root, local), recorded(skill),
-        to => owned(resolve(to, relative(local, bundle))));
-      assert.ok(kind === 'current' || kind === 'stale', `Foreign retired provider link; preserved (${kind}): ${link}`);
-      retiredLinks.push(link);
-    }
+    if (!skills.includes(file.split('/')[2])) retiredSkills.add(file.split('/')[2]);
   }
   for (const [file, bytes] of Object.entries(outputs)) {
     const target = join(root, file);
-    directory(dirname(target));
-    if (present(target)) {
-      assert.ok(present(target).isFile() && (text(target) === bytes || old[file] === hash(text(target))),
-        `Existing or edited Copilot skill left untouched: ${target}`);
-    }
+    localDirectory(root, dirname(target));
+    if (present(target)) assert.ok(present(target).isFile() && (text(target) === bytes || old[file] === hash(text(target))),
+      `Existing or edited Copilot skill left untouched: ${target}`);
   }
-  assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
   if (existsSync(bundle)) renameSync(bundle, previous);
   try { renameSync(next, bundle); }
   catch (error) {
     if (existsSync(previous)) renameSync(previous, bundle);
     throw error;
   }
-  for (const target of stale) removeStale(target);
-  for (const [dest, from] of links) {
-    const target = join(root, dest);
-    if (!present(target)) symlinkSync(process.platform === 'win32' ? join(bundle, from) : relative(dirname(target), join(bundle, from)),
-      target, process.platform === 'win32' ? 'junction' : 'dir');
-  }
+  for (const [dest, from] of links) link(root, join(root, dest), join(bundle, from));
+  for (const skill of retiredSkills) for (const provider of providers) retire(root, join(root, provider, 'skills', skill), bundle);
   for (const [file, bytes] of Object.entries(outputs)) writeFileSync(join(root, file), bytes);
-  for (const path of retiredLinks) removeStale(path);
   for (const path of retired) if (present(path)) unlinkSync(path);
-  for (const skill of retiredDirectories) {
+  // Only emptied directories go; files someone added next to a retired skill stay.
+  for (const skill of retiredSkills) {
     const path = join(root, '.github/skills', skill);
-    if (readdirSync(path).length === 0) rmdirSync(path);
+    if (present(path)?.isDirectory() && !readdirSync(path).length) rmdirSync(path);
   }
   writeFileSync(receiptPath, JSON.stringify({ revision, files: Object.fromEntries(Object.entries(outputs).map(([p, bytes]) => [p, hash(bytes)])) }, null, 2) + '\n');
   published = true;

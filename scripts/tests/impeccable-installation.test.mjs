@@ -1,27 +1,18 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, isAbsolute, join, sep } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
-import { checkoutRoot } from "../checkout-root.mjs";
+import { externalTool } from "../checkout-root.mjs";
 
-function trustedGit() {
-  const root = checkoutRoot(process.cwd());
-  const outside = p => p !== root && !p.startsWith(root + sep);
-  const binary = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
-    .filter(p => existsSync(p) && outside(realpathSync(p)))
-    .map(path => join(path, process.platform === "win32" ? "git.exe" : "git"))
-    .find(p => existsSync(p) && outside(realpathSync(p)));
-  assert.ok(binary, "Install Git outside the checkout on an absolute PATH");
-  return realpathSync(binary);
-}
+const trustedGit = () => externalTool("git", process.cwd()).file;
 
 test("Copilot discovery assets were generated for the pinned submodule and setup", () => {
   const git = trustedGit();
   const revision = execFileSync(git, ["rev-parse", "HEAD:.vendor/impeccable"], { encoding: "utf8" }).trim();
-  const files = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/stale-entry.mjs", "scripts/impeccable/launchers.patch",
+  const files = ["scripts/setup-impeccable.mjs", "scripts/checkout-root.mjs", "scripts/provider-links.mjs", "scripts/impeccable/launchers.patch",
     "scripts/impeccable/maintainability.patch", "scripts/impeccable/SHA256SUMS", "scripts/impeccable/VERSION"];
   const inputs = createHash("sha256").update(files.map((file) => readFileSync(file, "utf8")
     .replaceAll("\r\n", "\n")).join("\0")).digest("hex");

@@ -1,21 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkoutRoot } from './checkout-root.mjs';
+import { externalTool } from './checkout-root.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(process.argv[2] ?? kit);
-const checkouts = [root, kit, process.cwd()].map(p => checkoutRoot(p));
-const outside = p => checkouts.every(base => p !== base && !p.startsWith(base + sep));
-const binary = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
-  .filter(p => existsSync(p) && outside(realpathSync(p)))
-  .map(p => join(p, process.platform === 'win32' ? 'git.exe' : 'git'))
-  .find(p => existsSync(p) && outside(realpathSync(p)));
-assert.ok(binary, 'Install Git outside the checkout on an absolute PATH');
-const git = realpathSync(binary);
+const git = externalTool('git', root, kit, process.cwd()).file;
 // Compare regenerated files with real pinned blobs, not a self-asserted receipt.
 for (const name of ['ponytail', 'impeccable']) {
   const pin = execFileSync(git, ['-C', kit, 'rev-parse', `HEAD:.vendor/${name}`], { encoding: 'utf8' }).trim();

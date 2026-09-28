@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, lstatSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, lstatSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +42,7 @@ function fixture(t) {
     + '@@ -1,3 +1,3 @@\n # ponytail\n-base\n+patched\n Grüße 🎴\n');
   copyFileSync(setup, join(kit, 'scripts/setup-ponytail.mjs'));
   copyFileSync(new URL('../checkout-root.mjs', import.meta.url), join(kit, 'scripts/checkout-root.mjs'));
-  copyFileSync(new URL('../stale-entry.mjs', import.meta.url), join(kit, 'scripts/stale-entry.mjs'));
+  copyFileSync(new URL('../provider-links.mjs', import.meta.url), join(kit, 'scripts/provider-links.mjs'));
   const trace = join(base, 'git-events.jsonl');
   const run = () => {
     writeFileSync(trace, '');
@@ -117,6 +117,25 @@ test('dirty upstream and edited consumer files are still refused', t => {
   assert.equal(readFileSync(output, 'utf8'), 'Manual change\n');
 });
 
+// #38: harness worktrees copy ignored provider links as folders; setup relinks and keeps the copies aside.
+test('copies, files and foreign links at provider paths move aside once; links point to this bundle', t => {
+  const f = fixture(t); succeeds(f.run());
+  const copy = join(f.root, '.claude/skills/ponytail'), file = join(f.root, '.agents/hooks');
+  unlinkSync(copy); write(join(copy, 'SKILL.md'), 'Copied from another worktree\n');
+  unlinkSync(file); write(file, 'User file\n');
+  succeeds(f.run());
+  for (const path of [copy, file]) {
+    assert.ok(lstatSync(path).isSymbolicLink(), path);
+    assert.ok(realpathSync(path).startsWith(realpathSync(join(f.root, '.workflow-kit/ponytail'))), path);
+  }
+  const [moved] = readdirSync(join(f.root, '.workflow-kit/replaced'));
+  const replaced = join(f.root, '.workflow-kit/replaced', moved);
+  assert.equal(readFileSync(join(replaced, '.claude/skills/ponytail/SKILL.md'), 'utf8'), 'Copied from another worktree\n');
+  assert.equal(readFileSync(join(replaced, '.agents/hooks'), 'utf8'), 'User file\n');
+  succeeds(f.run());
+  assert.deepEqual(readdirSync(join(f.root, '.workflow-kit/replaced')), [moved], 'Current links are kept');
+});
+
 test('missing license fails without publishing a partial installation', t => {
   const f = fixture(t); rmSync(join(f.source, 'LICENSE')); f.pin();
   const result = f.run();
@@ -145,7 +164,7 @@ for (const action of ['remove', 'rename']) test(`${action} a pinned skill remove
   const cloudSkills = readdirSync(join(f.root, '.github/skills'));
   assert.equal(cloudSkills.length, skills.length - (action === 'remove' ? 1 : 0));
 });
-for (const changed of ['cloud', 'local', 'foreign-file', 'foreign-link', 'receipt-path', 'cloud-symlink'])
+for (const changed of ['cloud', 'receipt-path', 'cloud-symlink'])
   test(`retirement refuses ${changed} without replacing the installation or receipt`, t => {
     const f = fixture(t); succeeds(f.run());
     const receipt = join(f.root, '.github/skills/ponytail/.workflow-source.json');
@@ -154,11 +173,6 @@ for (const changed of ['cloud', 'local', 'foreign-file', 'foreign-link', 'receip
     const outside = join(dirname(f.root), 'external'); mkdirSync(outside);
     write(join(outside, 'SKILL.md'), 'User-owned\n');
     if (changed === 'cloud') write(join(cloud, 'SKILL.md'), 'User-owned\n');
-    if (changed === 'local') write(local, 'User-owned\n');
-    if (changed === 'foreign-file') write(join(cloud, 'notes.txt'), 'User-owned\n');
-    if (changed === 'foreign-link') {
-      const link = join(f.root, '.pi/skills/ponytail-audit'); unlinkSync(link); symlinkSync(outside, link, 'junction');
-    }
     if (changed === 'receipt-path') {
       const data = JSON.parse(readFileSync(receipt)); data.files['../../external/SKILL.md'] = 'a'.repeat(64);
       write(receipt, JSON.stringify(data));
@@ -177,22 +191,23 @@ for (const changed of ['cloud', 'local', 'foreign-file', 'foreign-link', 'receip
   });
 
 // #38: a harness worktree may hold a retired skill as a plain copy instead of a link.
-for (const edited of [false, true]) test(`retirement ${edited ? 'keeps an edited' : 'removes an unedited'} copied provider entry`, t => {
+test('retirement keeps foreign content: extra files stay, copies and foreign links move aside', t => {
   const f = fixture(t); succeeds(f.run());
-  const copy = join(f.root, '.claude/skills/ponytail-audit');
-  const content = readFileSync(join(copy, 'SKILL.md'));
-  unlinkSync(copy);
-  write(join(copy, 'SKILL.md'), edited ? 'User note\n' : content);
+  const copy = join(f.root, '.claude/skills/ponytail-audit'), foreign = join(f.root, '.pi/skills/ponytail-audit');
+  const outside = join(dirname(f.root), 'external'); write(join(outside, 'SKILL.md'), 'User-owned\n');
+  unlinkSync(copy); write(join(copy, 'SKILL.md'), 'User note\n');
+  unlinkSync(foreign); symlinkSync(outside, foreign, 'junction');
+  write(join(f.root, '.github/skills/ponytail-audit/notes.txt'), 'User-owned\n');
   rmSync(join(f.source, 'skills/ponytail-audit'), { recursive: true }); f.pin();
-  const result = f.run();
-  if (edited) {
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Foreign retired provider link; preserved \(edited or foreign copy\)/);
-    assert.equal(readFileSync(join(copy, 'SKILL.md'), 'utf8'), 'User note\n');
-  } else {
-    succeeds(result);
-    assert.equal(lstatSync(copy, { throwIfNoEntry: false }), undefined);
-  }
+  succeeds(f.run());
+  assert.equal(lstatSync(copy, { throwIfNoEntry: false }), undefined);
+  assert.equal(lstatSync(foreign, { throwIfNoEntry: false }), undefined);
+  const [moved] = readdirSync(join(f.root, '.workflow-kit/replaced'));
+  const replaced = join(f.root, '.workflow-kit/replaced', moved);
+  assert.equal(readFileSync(join(replaced, '.claude/skills/ponytail-audit/SKILL.md'), 'utf8'), 'User note\n');
+  assert.ok(lstatSync(join(replaced, '.pi/skills/ponytail-audit')).isSymbolicLink());
+  assert.equal(readFileSync(join(outside, 'SKILL.md'), 'utf8'), 'User-owned\n');
+  assert.deepEqual(readdirSync(join(f.root, '.github/skills/ponytail-audit')), ['notes.txt']);
 });
 
 test('an already missing retired cloud directory does not block provider cleanup', t => {

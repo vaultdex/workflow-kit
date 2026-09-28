@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { checkoutRoot } from "./checkout-root.mjs";
+import { externalTool } from "./checkout-root.mjs";
 
 // Real first-use proof: no npm install, vendored binary, or existing engine cache.
 const temporary = mkdtempSync(join(tmpdir(), "vaultdex-impeccable-"));
@@ -20,15 +20,7 @@ const windows = process.platform === "win32";
 const shell = windows ? join(process.env.SystemRoot, "System32/cmd.exe") : "/bin/sh";
 const powershell = windows ? join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe") : null;
 // Resolve developer-installed Git once; never search the checkout/current directory.
-const sourceRoot = realpathSync(resolve("."));
-const sourceCheckout = checkoutRoot(sourceRoot);
-const outside = p => p !== sourceCheckout && !p.startsWith(sourceCheckout + sep);
-const binary = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute)
-  .filter(p => existsSync(p) && outside(realpathSync(p)))
-  .map(directory => join(directory, windows ? "git.exe" : "git"))
-  .find(p => existsSync(p) && outside(realpathSync(p)));
-assert.ok(binary, "Install Git outside the checkout on an absolute PATH");
-const git = realpathSync(binary);
+const git = externalTool("git", resolve(".")).file;
 const bash = windows ? resolve(dirname(git), "../bin/bash.exe") : null;
 const json = (path) => JSON.parse(readFileSync(join(checkout, path), "utf8"));
 let server;
@@ -85,14 +77,14 @@ try {
   writeFileSync(join(checkout, "frontend/PRODUCT.md"), '# Test web product\n\n<!-- impeccable:product-schema 1 -->\n\n## Platform\n\nweb\n');
   writeFileSync(join(checkout, "apps/mobile/PRODUCT.md"), '# Test mobile product\n\n<!-- impeccable:product-schema 1 -->\n\n## Platform\n\nadaptive\n');
   const setup = join(checkout, "scripts/setup-impeccable.mjs");
+  // A foreign skill at a kit path is moved aside, never deleted.
   const foreignSkill = join(checkout, ".agents/skills/impeccable");
   mkdirSync(foreignSkill, { recursive: true });
   writeFileSync(join(foreignSkill, "custom.txt"), "preserve this skill");
-  const refused = spawnSync(process.execPath, [setup], { cwd: checkout, env, encoding: "utf8" });
-  assert.notEqual(refused.status, 0);
-  assert.match(refused.stderr, /Existing skill left untouched/);
-  assert.equal(readFileSync(join(foreignSkill, "custom.txt"), "utf8"), "preserve this skill");
-  rmSync(foreignSkill, { recursive: true }); // Only the fixture created above.
+  execFileSync(process.execPath, [setup], { cwd: checkout, env });
+  const [moved] = readdirSync(join(checkout, ".workflow-kit/replaced"));
+  assert.equal(readFileSync(join(checkout, ".workflow-kit/replaced", moved, ".agents/skills/impeccable/custom.txt"), "utf8"),
+    "preserve this skill");
   const ignoredBinary = ".agents/skills/impeccable/scripts/bin/local-engine";
   mkdirSync(dirname(join(checkout, ".vendor/impeccable", ignoredBinary)), { recursive: true });
   writeFileSync(join(checkout, ".vendor/impeccable", ignoredBinary), "must not be installed");

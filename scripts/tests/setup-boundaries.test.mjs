@@ -10,36 +10,6 @@ for (const [script, state] of [
   ['setup-ponytail.mjs', '.workflow-kit/ponytail'],
   ['setup-impeccable.mjs', '.impeccable/vendor'],
 ]) {
-  for (const linked of [false, true]) {
-    test(`${script} rejects ${linked ? 'linked' : 'unknown'} owner markers without disclosing their contents`, t => {
-      const fixture = mkdtempSync(join(tmpdir(), 'workflow-owner-'));
-      t.after(() => { assert.equal(dirname(fixture), tmpdir()); rmSync(fixture, { recursive: true, force: true }); });
-      const root = join(fixture, 'target checkout'), bin = join(fixture, 'bin');
-      mkdirSync(join(root, state), { recursive: true }); mkdirSync(bin);
-      // Git must not be invoked before the marker is rejected. Node as Git
-      // would reject the first Git option if this preflight were bypassed.
-      const git = join(bin, process.platform === 'win32' ? 'git.exe' : 'git');
-      copyFileSync(process.execPath, git); chmodSync(git, 0o755);
-      const owner = join(root, state, '.owner'), outside = join(fixture, 'private-fixture.txt');
-      const sentinel = 'synthetic value must not appear in an assertion';
-      writeFileSync(outside, sentinel);
-      if (linked) {
-        try { symlinkSync(outside, owner, 'file'); }
-        catch (error) {
-          if (process.platform !== 'win32' || error.code !== 'EPERM') throw error;
-          t.skip('Windows account cannot create file symlinks; Linux runs this case'); return;
-        }
-      } else writeFileSync(owner, sentinel);
-      const result = spawnSync(process.execPath,
-        [fileURLToPath(new URL('../' + script, import.meta.url)), root],
-        { cwd: root, encoding: 'utf8', env: { ...process.env, PATH: bin } });
-      assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /Refusing to replace an unknown/);
-      assert.ok(!(result.stdout + result.stderr).includes(sentinel), 'Marker contents must not reach diagnostic output');
-      assert.equal(readFileSync(outside, 'utf8'), sentinel);
-      assert.equal(existsSync(join(root, '.github')), false, 'No publication on failed owner validation');
-    });
-  }
   for (const [linked, nested] of [[false, false], [false, true], [true, false]]) {
     test(`${script} rejects Git ${linked ? 'file links into the target' : 'inside the invoking checkout'}${nested ? ' when invoked from a subdirectory' : ''}`, t => {
       const fixture = mkdtempSync(join(tmpdir(), 'workflow-git-boundary-'));
@@ -63,7 +33,7 @@ for (const [script, state] of [
         [fileURLToPath(new URL('../' + script, import.meta.url)), root],
         { cwd, encoding: 'utf8', env: { ...process.env, PATH: bin } });
       assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /Install Git.*outside/);
+      assert.match(result.stderr, /Install git outside the checkout/);
       assert.equal(existsSync(join(root, state)), false, 'Reject the interpreter before setup writes');
     });
   }

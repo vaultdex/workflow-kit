@@ -22,7 +22,7 @@ for (const nested of [false, true]) test(`GitHub setup and checks refuse checkou
     cwd, encoding: 'utf8', env: { ...process.env, PATH: ['.', localTools].join(delimiter) },
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Install GitHub CLI in an absolute PATH directory outside/);
+  assert.match(result.stderr, /Install gh outside the checkout/);
   assert.equal(existsSync(join(cwd, 'executed')), false);
   assert.equal(existsSync(join(cwd, '.github/workflow-project.json')), false);
   const localGit = join(localTools, process.platform === 'win32' ? 'git.exe' : 'git');
@@ -32,7 +32,7 @@ for (const nested of [false, true]) test(`GitHub setup and checks refuse checkou
       cwd, encoding: 'utf8', env: {...process.env, PATH: ['.', localTools].join(delimiter)},
     });
     assert.notEqual(check.status, 0, script);
-    assert.match(check.stdout + check.stderr, /Install Git outside the checkout/, script);
+    assert.match(check.stdout + check.stderr, /Install git outside the checkout/, script);
   }
 });
 
