@@ -33,6 +33,7 @@ function check() {
   if (!projectItem(issue)) unknown.push(`issue is not on ${project.url}`);
   else if (!status) unknown.push('the Project status is unset');
   else if (['Backlog', 'Done'].includes(status)) blocked.push(`status is ${status}`);
+  else if (!['Ready', 'In progress', 'Automated review', 'Human review'].includes(status)) unknown.push(`unknown status ${status}`);
   const { totalCount, nodes } = issue.blockedBy;
   const readable = nodes.filter(Boolean);
   if (readable.length < totalCount) unknown.push(`only ${readable.length} of ${totalCount} predecessors are readable`);
@@ -60,7 +61,7 @@ function next() {
   for (let after; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
       pageInfo{hasNextPage endCursor} nodes{...on Issue{number title
-      issueFieldValues(first:20){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
+      issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open -is:blocked`, ...(after && { after }) });

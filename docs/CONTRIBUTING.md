@@ -33,7 +33,7 @@ results, memory, an existing branch or the Ready status are not evidence.
 | --- | --- |
 | STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed. |
 | BLOCKED | An open predecessor, a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, or status Backlog or Done. |
-| UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, or the issue is missing from the Project. Retry the read; never read it as "no blockers". |
+| UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, an unset or unknown status, or the issue is missing from the Project. Retry the read; never read it as "no blockers". |
 
 The check covers native blockers only. Also read the issue's **Abhängigkeiten und
 Wiederaufnahme** section for external prerequisites such as access, releases or
