@@ -97,6 +97,8 @@ try {
   // Check every output directory before the swap, so a linked one stops setup with nothing replaced.
   const fresh = companionFiles(next), stale = companionFiles(root).filter((file) => !fresh.includes(file));
   for (const file of [...linkedSkills, ...stale, ...fresh]) localDirectory(root, dirname(join(root, file)));
+  // A directory where a companion file belongs can't be replaced by a file copy; keep it aside.
+  for (const file of fresh) if (present(join(root, file))?.isDirectory()) moveAside(root, join(root, file));
   if (existsSync(bundle)) rename(bundle, previous);
   try { rename(next, bundle); }
   catch (error) {
