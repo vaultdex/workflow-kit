@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
-  readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+  readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { externalTool, projectRoot } from "./checkout-root.mjs";
-import { link, localDirectory } from "./provider-links.mjs";
+import { link, localDirectory, rename } from "./provider-links.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -87,10 +87,10 @@ try {
     copyTracked(directory, join(next, directory));
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
-  if (existsSync(bundle)) renameSync(bundle, previous);
-  try { renameSync(next, bundle); }
+  if (existsSync(bundle)) rename(bundle, previous);
+  try { rename(next, bundle); }
   catch (error) {
-    if (existsSync(previous)) renameSync(previous, bundle);
+    if (existsSync(previous)) rename(previous, bundle);
     throw error;
   }
   for (const skill of linkedSkills) link(root, join(root, skill), join(bundle, skill));

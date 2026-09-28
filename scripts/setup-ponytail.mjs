@@ -3,11 +3,11 @@
 // Aufruf: setup-skills bei Einrichtung oder bewusstem Kit-Update, nicht pro Agenten-Turn.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalTool, projectRoot } from './checkout-root.mjs';
-import { link, localDirectory } from './provider-links.mjs';
+import { link, localDirectory, rename } from './provider-links.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = projectRoot();
@@ -53,10 +53,10 @@ try {
   const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
     ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
     .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
-  if (existsSync(bundle)) renameSync(bundle, previous);
-  try { renameSync(next, bundle); }
+  if (existsSync(bundle)) rename(bundle, previous);
+  try { rename(next, bundle); }
   catch (error) {
-    if (existsSync(previous)) renameSync(previous, bundle);
+    if (existsSync(previous)) rename(previous, bundle);
     throw error;
   }
   for (const [dest, from] of links) link(root, join(root, dest), join(bundle, from));

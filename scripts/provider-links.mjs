@@ -17,6 +17,18 @@ export function localDirectory(root, path) {
   mkdirSync(path, { recursive: true });
 }
 
+/** renameSync that waits out the short locks Windows antivirus and indexers put on fresh files. */
+export function rename(from, to) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return renameSync(from, to);
+    } catch (error) {
+      if (attempt === 30 || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
+}
+
 /** Make `path` a link to `target`. A matching link stays; anything else moves to .workflow-kit/replaced/. */
 export function link(root, path, target) {
   if (present(path)?.isSymbolicLink() && existsSync(path) && realpathSync(path) === realpathSync(target)) return;
