@@ -1,177 +1,90 @@
-# Agent setup entry
+# Setting up a repository
 
-Give your agent this URL and ask it to set up your project:
-https://github.com/vaultdex/workflow-kit/blob/main/SETUP.md
+For an agent asked to set up or update a project with this kit. Carry the agreed
+setup through to a verified PR. Reuse the kit scripts instead of writing another
+installer. Ask only for missing decisions, access or approvals, and never ask for
+credentials in chat.
 
-Agent: conduct the short conversation below, then perform the agreed setup through
-verification and a reviewable PR. Reuse the scripts in this kit; do not create a
-second installer. The user's answers and existing authorization persist. Ask only
-for missing decisions, access or required approvals, and continue unaffected work.
-Never request credentials in chat or copy personal account configuration.
+## 1. Agree on the target
 
-## 1. Establish the destination
+Read the target's AGENTS.md and contribution rules. Inspect its Git remote and
+status, board, CI, update bots and agent configuration. Don't assume the checkout
+holding this file is the target. Ask one compact round, skipping what you already
+know:
 
-Read the target's applicable AGENTS.md and contribution rules before changing it.
-Inspect the current checkout, Git remote/status, existing board, CI, update bots,
-skills and agent configurations when available. Preserve foreign work and ownership.
-Do not silently assume the checkout hosting this document is the target project.
+- **Repository:** a new one from
+  [project-template](https://github.com/vaultdex/project-template), or an existing
+  one? Get the exact OWNER/REPO and local path. For a new one, also the owner, name
+  and visibility; recommend private.
+- **Board:** an existing GitHub Project number under the same owner, or a copy of
+  the kit's template board?
+- **Tools:** which agents (Codex, Claude Code, Cursor, Copilot, OpenCode/Pi) and
+  reviewers (CodeRabbit, Codex)? Which updater: the existing Renovate or
+  Dependabot, never both? Optional Sonar?
+- **Start policy:** does every start need an explicit human request (the
+  default), or does a human placing an issue in Ready count (`"start": "ready"`)?
 
-Ask a compact first round, using facts already supplied instead of asking again:
+New paid usage, such as Actions on private repositories or reviewer plans, needs
+the user's budget decision first.
 
-- New project from the template, or integrate an existing repository? Obtain the
-  exact OWNER/REPO or URL and local checkout path. For a new repo, confirm owner,
-  name and visibility; recommend private unless the user wants public sharing.
-- Which GitHub Project should own the work: an existing project number under the
-  same owner, or a new project copied from the kit's public board template?
-- Which agents and integrations should be active: Codex, Claude, Cursor, Copilot,
-  OpenCode/Pi; CodeRabbit/Codex reviews; existing Renovate or Dependabot; optional
-  Sonar? Reuse installed org Apps and the existing updater. Ask only about unclear
-  choices; do not enable duplicate update bots or invent product/quality settings.
+## 2. Repository
 
-Explain the intended files and remote settings in a few lines, then carry out the
-authorized choices. Missing rights are a specific blocked step, not a reason to
-stop all setup. New paid usage requires the user's concrete budget decision before
-enabling it. New private repos require checking Actions/reviewer plan limits.
+For a new repository run
+`gh repo create OWNER/REPO --template vaultdex/project-template --private`, then
+clone it with `--recurse-submodules`.
 
-## 2. Obtain and configure the checkout
+For an existing repository, work on an issue branch and add the kit only if it is
+absent. Run the [install commands](README.md#install-or-update-in-a-project) (for a
+new project `init-project.mjs` without `--existing`). Keep the project's own rules,
+templates and CI.
 
-Use installed Git, authenticated `gh` and Node 26. Verify identity/access without
-printing tokens. For a new repository use GitHub's template creation or:
+Link `.vendor/workflow-kit/AGENT_RULES.md` from a short root AGENTS.md. Keep that
+file to 20–40 lines of project facts: build and test commands, architecture docs,
+final proof and exceptions.
 
-```sh
-gh repo create OWNER/REPO --template vaultdex/project-template --private
-git clone --recurse-submodules https://github.com/OWNER/REPO.git
-cd REPO
-```
+## 3. Board and labels
 
-Substitute the agreed owner/name and visibility; do not run placeholder commands.
-The public template must already contain its implementation on main. If its
-bootstrap PR is still pending, report that dependency instead of generating an
-empty repo or merging it without authorization. Do not overwrite an existing path.
+Run `node .vendor/workflow-kit/scripts/setup-github.mjs OWNER/REPO [PROJECT_NUMBER]`.
+It copies or reuses the Project and records it in `.github/workflow-project.json`,
+keeping `"start"`. It also checks the six statuses and Priority, links the
+repository, and adds the missing default labels: ci, documentation, testing,
+security, dependencies, needs-human-input.
 
-For an existing repository, inspect current main and competing work, then use an
-isolated `codex/<issue>-workflow-setup` branch when needed. Reuse the repository's
-task process. Add the kit only if absent; verify an existing gitlink/remote first:
+Then finish in the Project and repository settings; GitHub has no API for Project
+workflows:
 
-```sh
-git submodule add https://github.com/vaultdex/workflow-kit.git .vendor/workflow-kit
-git submodule update --init --recursive
-node .vendor/workflow-kit/scripts/init-project.mjs . --existing
-node .vendor/workflow-kit/scripts/setup-skills.mjs .
-node .vendor/workflow-kit/scripts/init-project.mjs . --existing --check
-node .vendor/workflow-kit/scripts/check-skills.mjs .
-```
+- **Statuses:** exactly Backlog, Ready, In progress, Automated review, Human
+  review, Done. To migrate a five-state board, rename In review to Automated review
+  in place and add Human review before Done, keeping option IDs and cards.
+- **Automation:** auto-add `repo:OWNER/REPO is:issue` to Backlog. Disable
+  automations that move items to Ready or In progress on PR links or bot events,
+  and any that set Human review from PR readiness or CI. Not-planned closures must
+  not become Done.
+- **Priority:** keep an existing scale, even an organization-linked one. A new
+  project-local field gets Urgent, High, Medium, Low. Show Labels and Milestone.
+  Create the milestone `Hotfixes · laufend` if the project takes hotfixes.
+- **Reviewers:** authorize the CodeRabbit App and enable Codex automatic reviews for
+  this repository, then verify both on the setup PR. Committed configuration
+  doesn't install an App. If Sonar or another analyzer runs, exclude the generated
+  third-party code in `.github/skills/**` and `.github/agents/**`.
+- **Rules:** require PRs, human approval and always-reported checks, never a
+  path-filtered check that can be absent. If rulesets are unavailable (HTTP 403 on
+  the plan), report it; don't change the plan or the visibility.
+- **Updater:** add git-submodule and GitHub Actions updates to the existing
+  Renovate rules, or use the template's Dependabot file.
 
-Use the init/setup/check sequence for a new template checkout too, omitting the
-already-present submodule add. Read scripts from the pinned kit, not an unrelated
-download. If a file was intentionally edited, reconcile it with the user/project
-contract; never delete or rewrite the receipt merely to silence a conflict.
+## 4. Agents and hooks
 
-All shared setup, checking and hook installation runs directly from the kit.
-The final `.` selects the consumer, not the kit. No harness wrappers are generated
-in the consumer's `scripts/`. During an update, `init-project` retires the old
-unchanged managed wrappers; update bootstrap callers, CI, tests and documentation
-in the same migration. Edited or unmanaged files are not removed. Product-specific
-database, API and runtime proofs stay in the product, not in this generic kit.
+Run the [hook installers](README.md#hooks) only for the agents the user chose.
+Trusting hooks stays a personal step in each agent. Report each integration as
+enabled, untrusted or unavailable.
 
-To refresh stale consumer copies after updating the kit pin, rerun
-`node .vendor/workflow-kit/scripts/init-project.mjs . --existing` from the consumer
-root, then rerun `node .vendor/workflow-kit/scripts/setup-skills.mjs .`. Review
-generated changes after both commands. Commit intended source/configuration and
-generated Cloud Discovery; leave local bundles uncommitted. The initializer
-updates kit-managed hook files and protects edited or unmanaged content; resolve
-reported conflicts instead of overwriting them.
+## 5. Deliver
 
-Existing-project mode preserves unmanaged files. Link `.vendor/workflow-kit/AGENT_RULES.md`
-from a short root AGENTS.md, retaining project-specific
-rules, architecture, build/test commands and required checks. For new projects,
-ask about language/runtime and checks only if the repository provides no evidence;
-do not claim the kit integration check validates the application itself.
+Commit only intended configuration and the generated `.github` discovery files;
+local bundles, personal settings and credentials stay out. Open the PR, wait for
+the automatic reviews, and fix or link their findings. Finish with:
 
-## 3. Set up GitHub and the board
-
-From the target checkout run:
-
-```sh
-node .vendor/workflow-kit/scripts/setup-github.mjs OWNER/REPO
-```
-
-Pass the chosen existing project number as the final argument when reusing a board.
-The script reuses `.github/workflow-project.json` on retries. A marker naming
-another repo is a conflict to investigate, not permission to change that board.
-
-Complete account settings through supported GitHub/App APIs or their UI; the
-script's success alone is not full setup. Follow [GitHub integration](docs/github.md):
-
-- Verify Backlog, Ready, In progress (Doing), Automated review, Human review and Done;
-  rename existing In review in place, insert Human review before Done and preserve
-  option IDs/card assignments. Follow the review gates in the contribution workflow;
-  PR readiness starts Automated review, not Human review. Preserve existing
-  fields/views. Provide Priority and show Labels/Milestone. Reuse scoped milestones,
-  including the ongoing hotfix milestone where applicable, and appropriate labels.
-- Configure native Auto-add for this exact repository and Item added → Backlog.
-  New issues start Backlog. Human-authorized triage may move feasible work to Ready
-  despite unresolved dependencies. Keep native dependency links and external
-  blocker evidence. Agents skip blocked Ready work and recheck before execution.
-- Disable automatic promotion to Ready/In progress from PR linking or bot events.
-  Implementation/Doing requires a STARTABLE [execution check](docs/CONTRIBUTING.md#execution-check)
-  (or its specific human exception recorded with source, permitted work and remaining gates)
-  and the start policy's authorization: by default an explicit human request; set `"start": "ready"` in
-  `.github/workflow-project.json` only when the user chooses human triage to Ready as
-  that authorization. If Ready is empty, analyze Backlog and propose work, without starting.
-  Cancelled/not-planned closures must not imply accepted/merged Done work.
-- Reuse the selected updater; configure git-submodule and GitHub Actions proposals.
-  Integrate into existing Renovate rules or use the template's Dependabot setup.
-  Keep kit updates reviewable; regenerate managed files and skills in each update PR.
-- Reuse CodeRabbit/Codex App access where present, configure automatic reviews for
-  this exact repo, and verify a real setup PR is reviewed at its current commit.
-  Where new App access or account interaction is required, prepare the precise
-  destination/permissions and let the user complete required authorization. Do not
-  claim that committing configuration installs or authorizes an App.
-- Reuse compatible server rules; require human PR review and actual required checks
-  without bypasses. Never require a path-filtered check that can remain absent.
-  Report unavailable plan features; do not change visibility/plans to obtain them.
-
-No new scheduled agent loop, dashboard sync or all-board worker is needed.
-
-## 4. Activate selected agents and verify
-
-The kit supplies one pinned source per upstream skill and generated discovery for
-the supported providers. Run setup, inspect the resulting links/manifests, and
-preserve unrelated skills and personal plugins. Do not install every provider's
-personal hooks when the user selected only one agent.
-
-Read [hook preflight](docs/agent-hooks.md) and the pinned integration documentation.
-Explain any known blocking security findings before activation. In particular,
-[Ponytail PATH hardening](https://github.com/vaultdex/workflow-kit/issues/3) was fixed
-by [PR #25](https://github.com/vaultdex/workflow-kit/pull/25). Its verified native
-launcher snapshot `4.10.0-8` is documented in [docs/ponytail.md](docs/ponytail.md).
-The launcher protects Node startup from checkout-local PATH executables; review
-provider hook definitions before enabling them.
-
-For supported, reviewed hooks use the provided explicit installers from the product root:
-
-```sh
-node .vendor/workflow-kit/scripts/setup-skills.mjs .
-node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .
-node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs .
-```
-
-Personal host trust remains a user decision. Files and manual runs do not prove automatic hook
-activation. Report confirmed enabled/disabled/unavailable status separately and
-request a fresh agent session only when discovery actually requires it.
-
-Verify managed output before regeneration, source pins, repeated setup, a clean
-recursive checkout where needed, relevant existing checks, and the actual board,
-updater and reviewer configuration. Use the setup issue/PR as evidence; do not
-create test tasks or recurring runs solely to make the board appear active.
-
-Commit only intended source/configuration and generated cloud discovery. Local
-bundles, personal settings, credentials and private artifacts remain uncommitted.
-Deliver the PR, wait for automatic reviews, and fix or link actionable findings.
-Human review/merge remains the default; unavailable integrations stay explicitly
-listed with the exact missing access/decision and next action.
-
-Finish with repository, board and PR links; verified checks/integrations; remaining
-user-only steps. Explain the update path: updater PR → review kit revision → init
-and setup → checks/reviews → merge → developers update submodules and rerun setup.
+- links to the repository, board and PR,
+- what was verified,
+- the remaining user-only steps: App authorization, hook trust and the merge.

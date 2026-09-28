@@ -1,62 +1,84 @@
-# Shared agent rules
+# Agent rules
 
-Read this file once per task with the project's short AGENTS.md. "Project" means
-the consumer checkout (this kit when developing it); configuration and local
-contracts belong there. Links below resolve inside the pinned kit. User instructions
-take precedence within system, permission and safety boundaries.
+Read this once per task together with the project's AGENTS.md. Project rules and
+user instructions add local contracts; they cannot relax the hard rules. Links
+resolve inside the pinned kit: open a linked section only when you reach that
+step, and never load guides or skill trees you don't need.
 
-## Always
+## Hard rules
 
-- Deliver the authorized outcome. Preserve foreign work, ownership and history;
-  no destructive resets, force-push, secret exposure or autonomous merge.
-- Understand affected contracts and callers. Reuse existing code, standard libraries
-  and native features; fix root causes with the smallest complete change. Preserve
-  validation, authorization, privacy, integrity, attribution and accessibility.
-- Start only executable, authorized Ready work. Check current main, ownership,
-  external blockers and competing PRs; record the driver. Before taking or resuming
-  work, including review fixes and every move to In progress, run the live
-  [execution check](docs/CONTRIBUTING.md#execution-check). An open native predecessor
-  or failed/incomplete check means STOP: no claim, In progress or dependent edits,
-  except for the check's specific, recorded human exception with source, permitted
-  work and remaining gates.
-  Ready, an existing branch/driver or a review request does not waive this check;
-  never reinterpret a native blocker as merge-only. New work
-  enters Backlog with milestone, Priority and labels. Never promote it without
-  human authorization; follow the project's configured start policy.
-- Issues own scope/evidence, the configured Project owns status, PRs own review.
-  Separate deliveries need separate complete issues before branching. Use native
-  issue-linked branches and verify PR closing links; never close partial work.
-- Run focused checks early; review corrections rerun affected checks. Existing CI
-  and automatic reviews run together. Project-defined expensive final proof may
-  follow the last automatic correction, but must pass before Human review/merge.
-  Disclose pending proof; missing access is a blocker, not a scheduled final gate.
-- Inspect encountered warnings/deprecations and affected UI behavior/browser
-  console. Investigate concrete signals, reuse existing findings; fix in scope or
-  link a deduplicated actionable follow-up. Blockers need evidence and a revisit
-  condition. Name relevant skipped checks and reasons; untested is not error-free.
-- Finish required reviews and proof before Human review; fix or track every finding.
-  Further changes invalidate affected evidence and require the applicable review
-  cycle. Only humans accept/merge; Done needs acceptance and actual merge.
-- Reuse unchanged context/evidence; refresh live ownership and changed inputs.
-  Read only relevant sections, never recursively load linked guides or skill trees.
-  No routine skill regeneration, installation, polling loops or broad speculative
-  audits. Setup/trust stays explicit; unknown hook status is not failure or success.
-- Minimize tokens and Actions. Use existing workflows; estimate incremental usage
-  before expanding CI and obtain approval if budget is unknown/insufficient.
-  Never weaken required checks or raise spending limits to save time.
+- Humans accept and merge. Never merge, enable auto-merge or set Done before a
+  human merged.
+- Never force-push, rewrite shared history, reset, stash or discard work you don't
+  own, or bypass branch protection, required checks or spending limits.
+- Never expose secrets or commit personal configuration.
+- Start or resume implementation only on a STARTABLE issue that the start policy
+  authorizes you to take ([Starting work](docs/CONTRIBUTING.md#starting-work)).
+- Continue only your own work. Another session's issue, branch or PR needs an
+  explicit handover, even under a shared GitHub login.
 
-## Read at the relevant step
+## Workflow
 
-| Step | Required detail |
+| Status | What you do |
 | --- | --- |
-| Take, resume or create work | [Board/ownership and execution check](docs/CONTRIBUTING.md#board-and-ownership), [issue plan](docs/CONTRIBUTING.md#issue-plans-and-pr-descriptions), [milestones](docs/CONTRIBUTING.md#milestones), [metadata](docs/CONTRIBUTING.md#priority-and-issue-metadata) |
-| Branch, PR or scope boundary | [Issue/branch/PR links](docs/CONTRIBUTING.md#issue-branch-and-pr-links), [blockers and findings](docs/CONTRIBUTING.md#recovery-scope-and-findings) |
-| Change behavior | Affected project architecture/contracts and [Watchdog](WATCHDOG.md) |
-| Publish or rework | [Publication/review](docs/CONTRIBUTING.md#publication-and-review); local test commands and final gates |
-| Missing human decision | [Human input](docs/CONTRIBUTING.md#human-input) |
-| Session hook preflight | [Hook status](docs/agent-hooks.md#agent-hook-preflight), once when native status is accessible |
-| Explicit setup/kit upgrade | [Setup](SETUP.md); source/discovery checks and personal trust boundaries |
+| Backlog | Nothing without a human request; propose, don't implement. |
+| Ready | Start after `board.mjs check` says STARTABLE. |
+| In progress | Implement on the issue-linked branch; the PR stays Draft. |
+| Automated review | PR ready; wait for CI and every review bot; fix or link each finding. |
+| Human review | Hand off. A human accepts and merges. |
+| Done | Merged and accepted. |
 
-Read each relevant section once; reuse it until its rules change. Do not read
-kit-maintainer AGENTS.md from a consumer. Keep local rules to actual project
-contracts and exceptions, not copies of this file.
+Board commands, run in the project (`gh` must be logged in):
+
+```sh
+node .vendor/workflow-kit/scripts/board.mjs next                      # startable Ready issues
+node .vendor/workflow-kit/scripts/board.mjs check 123                 # STARTABLE, BLOCKED or UNKNOWN
+node .vendor/workflow-kit/scripts/board.mjs status 123 "In progress"
+node .vendor/workflow-kit/scripts/board.mjs priority 123 High
+node .vendor/workflow-kit/scripts/board.mjs block 124 123              # 124 is blocked by 123 (or OWNER/REPO#N)
+```
+
+## Engineering
+
+- Understand the affected flow, contracts and callers first. Fix the root cause at
+  the narrowest shared layer with the smallest complete change.
+- Verify each review finding against the code and contract first; fix its
+  neighboring paths in the same push. If the same class of finding returns after
+  two correction pushes, stop patching and re-examine the whole area's states, data
+  flow and assumptions.
+- Take the first option that works: skip speculative needs, reuse repository code,
+  use the standard library or platform, use an installed dependency, and only then
+  write minimal new code. Check the pinned version's docs before reimplementing.
+- Add no speculative abstraction, option, wrapper, dependency or scaffolding.
+  Prefer deleting obsolete code to adding a replacement.
+- Preserve validation, authorization, privacy, data integrity, error handling,
+  attribution and accessibility.
+- Scale proof with risk: focused regression, then cross-component contracts, then
+  security, migration and recovery, then authorized live targets. Add one focused
+  check for new non-trivial behavior in the existing test setup; it must fail on the
+  known faulty behavior and assert its preconditions. Cover a cross-layer change
+  with its whole flow (save → load → display). Mocks don't prove live integration.
+- Treat every warning or deprecation you meet (install, build, lint, tests, CI,
+  runtime, browser console) as a finding. Mark deliberate shortcuts with
+  `ponytail: <ceiling>; replace when <trigger>`.
+- Every finding ends as a verified fix in scope or a linked follow-up issue
+  ([findings](docs/CONTRIBUTING.md#findings-and-follow-ups)). Report skipped checks
+  and why; untested is not error-free.
+
+## Economy
+
+- Tokens and Actions minutes are budgets. Read only what the step needs, reuse
+  evidence whose inputs are unchanged, and wait for CI and reviews with the
+  harness's wait mechanism instead of polling.
+- No routine setup reruns, broad audits, or new CI jobs and triggers without an
+  estimate of the added usage; get approval when the budget is unknown.
+
+## Details
+
+| Step | Read |
+| --- | --- |
+| Pick, start or resume work | [Starting work](docs/CONTRIBUTING.md#starting-work) |
+| Write or change an issue | [Issues](docs/CONTRIBUTING.md#issues) |
+| Branch, PR and review loop | [Delivery](docs/CONTRIBUTING.md#delivery) |
+| Blocked, failed or out-of-scope work | [Blockers and scope](docs/CONTRIBUTING.md#blockers-and-scope) |
+| Set up or update the kit, hooks | [README](README.md), [SETUP](SETUP.md) |

@@ -1,131 +1,47 @@
 # Ponytail
 
-Source: `.vendor/ponytail`, pinned to an upstream release commit. All six current
-skills come from that source; `scripts/ponytail/adaptations.patch` retains repository-test,
-secret-scan, evidence and hook-isolation adaptations. Original MIT license and
-NOTICE accompany generated packages. `scripts/ponytail/NOTICE.md` documents origin.
+Source: `.vendor/ponytail`, pinned to an upstream release (MIT). `setup-skills`
+builds one bundle in `.workflow-kit/ponytail` from the pinned blobs plus
+`scripts/ponytail/adaptations.patch`. The patch changes the test rule, the help
+and debt texts and the hooks' host and state handling
+([provenance](../scripts/ponytail/NOTICE.md)). The bundle is linked into `.agent`,
+`.agents`, `.claude`, `.opencode` and `.pi`; Copilot gets committed copies in
+`.github/skills`.
 
-From a reviewed product checkout, run
-`node .vendor/workflow-kit/scripts/setup-skills.mjs .` explicitly. Local Codex,
-Claude, OpenCode, Antigravity and Pi discovery directories link to one generated
-bundle; Copilot receives committed generated files. No global plugin is required.
-Personal plugin installations remain independent; choose one injection source in
-your agent's settings if duplicate skill names/hooks are enabled.
+Skills: `ponytail`, `ponytail-review`, `ponytail-audit`, `ponytail-debt`,
+`ponytail-gain`, `ponytail-help`. The gain figures are upstream benchmarks, not
+measurements from this project. If a personal Ponytail plugin is also enabled,
+choose one source in the agent's settings.
 
-Run `node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs .` separately to
-install the immutable `~/.ponytail/vaultdex/4.10.0-8/` snapshot. It adds native
-launchers before the unchanged JavaScript hooks. On Windows, explicit provisioning
-compiles the reviewed `launch.cs` with the Windows-provided .NET Framework compiler
-at `%SystemRoot%/Microsoft.NET/Framework64/v4.0.30319/csc.exe` (or `Framework`).
-There is no compiler lookup through PATH, package install or runtime compilation.
-The source and compiled executable's recorded SHA-256 must match on reuse.
-Provision Windows snapshots on Windows; a copied POSIX snapshot lacks that executable.
-Identical snapshots are reused;
-changed bytes at the same version are refused. `vaultdex` is the publisher namespace;
-runtime state is isolated by checkout hash and host. Personal defaults are retained.
+## Hooks
 
-Codex/Claude: SessionStart, UserPromptSubmit, SubagentStart. Copilot: sessionStart,
-subagentStart and userPromptSubmitted (prompt stdout is not injected). Cursor:
-sessionStart/beforeSubmitPrompt; an existing always-on Ponytail rule takes precedence.
-Other providers get skills only. Hook manifests differ because host protocols differ.
-Never run installation from an automatic hook or silently change native trust.
-The launchers locate the checkout by walking to `.git`, without executing Git.
-Before starting Node they skip relative/checkout-local PATH entries and resolve
-executable symlinks/junctions, rejecting targets inside the checkout. External
-Native fnm/nvm installations remain supported. POSIX requires an ELF or Mach-O
-Node executable (including universal Mach-O); the OS `od` utility next to
-`readlink` checks its magic bytes before execution. Script shims are skipped:
-their absolute shebang or body can execute checkout code regardless of PATH.
-Managed native executables outside the checkout remain the user's trust boundary.
-Windows requires the resolved target to retain `.exe` and an MZ header; scripts
-behind `node.exe` links are rejected before starting a child process.
-Windows' native loader validates the executable format itself.
-After selecting Node by its actual path,
-the exported PATH contains only fixed OS directories: `/usr/bin`, `/bin`,
-`/usr/sbin`, `/sbin`, NixOS's system profile, or Windows' native system directory.
-No inherited PATH directory reaches the
-hook: even external directories can expose file links into the checkout.
-Node preload environment variables are removed for this hook
-process. POSIX uses `cd -P` and absolute system `readlink` without GNU-only flags.
-When `/usr/bin/readlink` and `/bin/readlink` are absent, it uses NixOS's root-owned
-`/run/current-system/sw/bin/readlink`, including system-profile file symlinks.
-These fixed OS paths are the bootstrap trust anchor; `readlink` is never selected
-from inherited PATH. Other layouts without these utilities fail closed. Windows
-uses native final-path handles in the installed executable. Its .NET Framework
-`ProcessStartInfo` disables shell execution and passes the existing standard streams
-and exit status through to the verified Node executable. No checkout JavaScript
-runs during bootstrap.
-Version `4.10.0-8` inherits stdin directly. This avoids the UTF-8 preamble that
-.NET Framework's redirected `StandardInput` writer adds before a byte-stream
-copy, which doubled PowerShell's BOM and prevented Cursor prompt JSON parsing.
-Input bytes, including a caller-supplied BOM, remain unchanged; Node owns its
-existing input deadline. The launcher does not change console encoding or policy.
+`install-ponytail-hooks.mjs` copies the generated hooks into
+`~/.ponytail/vaultdex/<version>/`; it refuses a location inside any Git checkout.
+It then writes `launch.sh` and `launch.cmd`, which start the absolute Node binary
+that ran the installer. As a result:
 
-Claude explicitly selects Bash (Git Bash on Windows). Codex uses its native cmd
-override on Windows; Copilot supplies Bash and PowerShell commands. Cursor's
-SessionStart command checks the personal exe/sh launcher and emits a structured
-installation hint if it is absent, preserving spaces in the home path. The
-installed launcher's output and failures pass through unchanged, including silent
-off mode. Cursor's prompt hook still calls the cmd/sh launcher via `~`; a missing
-installation there produces the shell's error. Other hosts retain their
-SessionStart setup hint and silent uninstalled prompt/subagent hooks.
-Review the changed hook definitions and trust the new snapshot explicitly; the
-old `4.10.0-6` and `4.10.0-7` installations are left untouched. Enabled old
-definitions retain their previous behavior until replaced and reviewed.
+- Hooks never search PATH and never run checkout files.
+- `NODE_OPTIONS` and `NODE_PATH` are cleared.
+- A Node inside a checkout is refused.
+- If that Node is removed later, rerun the installer.
 
-Windows execution policy remains enforced: `Restricted` still blocks PowerShell
-script files. The hook no longer executes a `.ps1`, so both Restricted and
-RemoteSigned hosts can start the same reviewed executable without changing policy.
-The installer and launcher never use Bypass, inline PowerShell evaluation or an
-automatic policy change. Missing .NET Framework provisioning tools or an application
-control policy that disallows the compiler/executable is an explicit operator
-prerequisite, not a reason to weaken that policy or fall back to checkout code.
-The operator must separately review the snapshot and grant native hook trust.
+Hook code is immutable per version: a changed snapshot at the same version is
+refused. A new version changes the hook commands, so agents ask for trust again.
+Execution policies are untouched: no PowerShell script file runs.
 
-### Cursor SessionStart command
+| Host | Events |
+| --- | --- |
+| Codex, Claude Code | SessionStart, UserPromptSubmit, SubagentStart |
+| Copilot | sessionStart, userPromptSubmitted, subagentStart |
+| Cursor | sessionStart, beforeSubmitPrompt |
 
-Cursor provides one command string for Windows and POSIX. The inline command uses
-the shells' comment syntax to select the same small existence check as Copilot's
-separate PowerShell/Bash handlers. The first `echo` is only a parser separator:
-POSIX executes an empty comment substitution and discards its output; PowerShell
-ignores the POSIX block and discards the separator's output/errors. This also
-absorbs Cursor's `$input | command` pipeline without printing its payload.
-SessionStart activation intentionally does not read stdin; the prompt hook, which
-does read it, is unchanged. Only the separator suppresses errors; launcher failures
-are never converted to a missing-install hint. The `exit` before the PowerShell
-branch prevents POSIX from interpreting it. No checkout script, PATH utility or
-execution-policy override is used by this dispatch. Review the changed native
-hook definition before granting trust.
-Windows invocation errors return failure even when PowerShell leaves
-`$LASTEXITCODE` unset; a launcher that actually starts retains its own exit code.
+In Cursor, an existing always-on Ponytail rule takes precedence. Cursor needs one
+command string for Windows and POSIX, so its sessionStart hook is a Bash/PowerShell
+[polyglot](https://shogo82148.github.io/blog/2021/12/30/polyglot-of-bash-and-powershell/),
+and `launch.cmd` is a cmd/sh polyglot.
 
-The shell separation follows the [Bash/PowerShell comment technique](https://shogo82148.github.io/blog/2021/12/30/polyglot-of-bash-and-powershell/).
-Tests run the actual manifest with missing, active and off installations, hostile
-PATH entries and a failing installed launcher, using home directories with spaces.
-Windows tests include Cursor's input pipeline described in the pinned
-[adapter verification record](../.vendor/ponytail/docs/cursor-hooks.md).
-They prove command behavior, not live Cursor loading or user trust.
-
-The installer rejects snapshot destinations inside
-any Git checkout, resolving existing directory links/junctions before writing.
-This includes `$HOME` being a Git checkout or `.ponytail` linking into one: the
-launcher itself must be trusted code outside the checkout, not just Node.
-Keep the personal snapshot outside Git roots throughout its lifetime. If moving
-it or turning a parent directory into a checkout, disable hooks and provision a
-personal home outside that checkout before installing and enabling them again.
-No HOME exception or automatic relocation weakens this trust boundary.
-
-The generator reads skill names from the pinned tree. On an upgrade it removes only
-unchanged owned files of retired skills and provider links pointing exactly to those
-old bundles. Edited files, foreign links and unknown directory contents stop the
-migration before publication. The source receipt is updated after cleanup succeeds.
-
-Use `ponytail`, `ponytail-review`, `ponytail-audit`, `ponytail-debt`, `ponytail-gain`
-and `ponytail-help`; gain figures are historical upstream measurements, not savings
-measured for this project. Run the consumer's hook test with its prepared checkout;
-inside the kit itself use `node --test scripts/tests/ponytail-hooks.test.mjs`.
-All `node scripts/...` commands in the kit's own checks refer to kit implementation,
-not to consumer wrappers. New product repositories contain no such harness wrappers.
-
-Platform references: [PowerShell execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1),
-[ProcessStartInfo.UseShellExecute](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.useshellexecute?view=netframework-4.8.1).
+The mode is stored per Git checkout and host under the Ponytail config directory.
+`/ponytail lite|full|ultra|off` switches it, and `/ponytail default <mode>` saves a
+personal default. `node --test scripts/tests/ponytail-hooks.test.mjs` runs the
+real manifest commands with hostile PATH entries. It doesn't prove that an agent
+loaded or trusted them.

@@ -6,16 +6,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate codex; else printf '%s\\n' '{\"systemMessage\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\"}}'; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-8\\launch.exe\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-8\\launch.exe\" activate codex) else (echo {\"systemMessage\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\"}})",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate codex; else printf '%s\\n' '{\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}}'; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" activate codex) else (echo {\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}})",
             "timeout": 5,
             "statusMessage": "Loading Ponytail mode"
           },
           {
             "type": "command",
-            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then printf '%s\\n' '{\"systemMessage\":\"Impeccable fehlt: automatische UI-Pruefung nicht aktiv. Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs . ausfuehren; im Kit selbst: node scripts/install-impeccable-hooks.mjs . Danach Hooks freigeben.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable fehlt: automatische UI-Pruefung nicht aktiv. Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs . ausfuehren; im Kit selbst: node scripts/install-impeccable-hooks.mjs . Danach Hooks freigeben.\"}}'; fi",
+            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then printf '%s\\n' '{\"systemMessage\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\"}}'; fi",
             "timeout": 5,
-            "commandWindows": "if not exist \"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.5\\impeccable.exe\" (echo {\"systemMessage\":\"Impeccable fehlt: automatische UI-Pruefung nicht aktiv. Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs . ausfuehren; im Kit selbst: node scripts/install-impeccable-hooks.mjs . Danach Hooks freigeben.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable fehlt: automatische UI-Pruefung nicht aktiv. Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs . ausfuehren; im Kit selbst: node scripts/install-impeccable-hooks.mjs . Danach Hooks freigeben.\"}})"
+            "commandWindows": "if not exist \"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.5\\impeccable.exe\" (echo {\"systemMessage\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\"}})"
           }
         ]
       },
@@ -24,8 +24,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate codex continue; else printf '%s\\n' '{\"systemMessage\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\"}}'; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-8\\launch.exe\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-8\\launch.exe\" activate codex continue) else (echo {\"systemMessage\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks fehlen: Nach Checkout-Pruefung node .vendor/workflow-kit/scripts/setup-skills.mjs . und danach node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs . ausfuehren; im Kit selbst: node scripts/setup-skills.mjs . und node scripts/install-ponytail-hooks.mjs .; danach Hooks freigeben.\"}})",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate codex continue; else printf '%s\\n' '{\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}}'; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" activate codex continue) else (echo {\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}})",
             "timeout": 5,
             "statusMessage": "Loading Ponytail mode"
           }
@@ -37,8 +37,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" subagent codex; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-8\\launch.exe\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-8\\launch.exe\" subagent codex) else (exit /b 0)",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" subagent codex; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" subagent codex) else (exit /b 0)",
             "timeout": 5,
             "statusMessage": "Loading Ponytail mode"
           }
@@ -50,8 +50,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-8/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" mode-tracker codex; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-8\\launch.exe\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-8\\launch.exe\" mode-tracker codex) else (exit /b 0)",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" mode-tracker codex; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" mode-tracker codex) else (exit /b 0)",
             "timeout": 5
           }
         ]

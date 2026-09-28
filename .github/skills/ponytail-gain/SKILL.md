@@ -13,21 +13,17 @@ description: >
 Display this scoreboard when invoked. One-shot: do NOT change mode, write flag
 files, or persist anything.
 
-The figures are upstream-reported benchmark medians (5 everyday tasks: email
+The figures are the published benchmark medians (5 everyday tasks: email
 validator, debounce, CSV sum, countdown timer, rate limiter; three models:
 Haiku, Sonnet, Opus). They are measured, not computed from the current repo.
-Historical source, pinned to the bundled upstream revision:
-[benchmarks](https://github.com/DietrichGebert/ponytail/tree/e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156/benchmarks)
-and [README](https://github.com/DietrichGebert/ponytail/blob/e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156/README.md).
-Label the card as historical upstream results, not independently reproduced
-Vaultdex measurements. Do not run paid benchmarks when displaying it.
+Source: `benchmarks/` and the README.
 
 ## Scoreboard
 
-Render Unicode block bars (UTF-8). The bar length shows the measured range; the label
+Render plain ASCII bars. The bar length shows the measured range; the label
 carries the exact figure:
 
-```text
+```
   ponytail gain                     benchmark median · 5 tasks · 3 models
 
   Lines of code   no-skill  ████████████████████  100%

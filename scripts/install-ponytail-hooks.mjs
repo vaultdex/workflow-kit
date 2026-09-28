@@ -1,76 +1,56 @@
 // Zweck: Einen geprueften Ponytail-Snapshot im Benutzerverzeichnis installieren.
-// Nutzen: Automatische Hooks muessen keine veraenderlichen Checkout-Skripte ausfuehren.
+// Nutzen: Automatische Hooks fuehren weder veraenderliche Checkout-Dateien noch ein Node aus dem PATH aus.
 // Aufruf: Explizit aus dem Kit mit dem Projektpfad; persoenliche Hook-Freigabe bleibt getrennt.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { projectRoot } from './checkout-root.mjs';
 
-// Run explicitly from a reviewed checkout. Automatic hooks execute this installed
-// snapshot, never the installer or mutable JavaScript in the working tree.
-const root = path.resolve(process.argv[2] ?? fileURLToPath(new URL('../', import.meta.url)));
-const parent = path.join(homedir(), '.ponytail', 'vaultdex');
-const destination = path.join(parent, '4.10.0-8');
-const windows = process.platform === 'win32';
-// The bootstrap itself must remain personal trusted code, outside every checkout.
-// Resolve the existing prefix before checking ancestors, including junctions.
+const root = projectRoot();
+const version = '4.10.0-9';
+const destination = path.join(homedir(), '.ponytail', 'vaultdex', version);
+const insideCheckout = directory => {
+  for (;; directory = path.dirname(directory)) {
+    if (existsSync(path.join(directory, '.git'))) return true;
+    if (directory === path.dirname(directory)) return false;
+  }
+};
+// The snapshot and the Node that runs it must stay personal trusted code, outside every checkout.
+// Resolve the existing part of the destination, including junctions, before looking for Git roots.
 let existing = destination;
 const missingParts = [];
-while (!existsSync(existing) && existing !== path.dirname(existing)) {
+while (!existsSync(existing)) {
   missingParts.unshift(path.basename(existing));
   existing = path.dirname(existing);
 }
-for (let directory = path.join(realpathSync(existing), ...missingParts);; directory = path.dirname(directory)) {
-  if (existsSync(path.join(directory, '.git'))) {
-    throw new Error('Ponytail snapshot must be outside Git checkouts. Use a personal home/snapshot location outside the checkout before installing or enabling hooks.');
-  }
-  if (directory === path.dirname(directory)) break;
-}
+if (insideCheckout(path.join(realpathSync(existing), ...missingParts)))
+  throw new Error('Ponytail snapshot must be outside Git checkouts. Use a personal home outside any checkout before installing or enabling hooks.');
+// Version managers start Node through per-shell links; pin the installation behind them.
+const node = realpathSync(process.execPath);
+if (insideCheckout(path.dirname(node))) throw new Error('Run the installer with a Node installed outside Git checkouts.');
+
 const files = [
   '.agents/hooks/LICENSE.md',
-  ...['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent']
-    .map(name => `.agents/hooks/ponytail-${name}.js`),
+  ...['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent'].map(name => `.agents/hooks/ponytail-${name}.js`),
   '.agents/skills/ponytail/SKILL.md',
   '.agents/skills/ponytail/LICENSE.md',
   '.agents/skills/ponytail/NOTICE.md',
 ];
-const source = fileURLToPath(new URL('./ponytail/', import.meta.url));
-const inputs = Object.fromEntries(files.map(file => [file, path.join(root, file)]));
-for (const name of ['launch.sh', 'launch.cs', 'launch.cmd']) inputs[name] = path.join(source, name);
+const missing = files.find(file => !existsSync(path.join(root, file)));
+if (missing) throw new Error(`Ponytail sources missing in ${root} (${missing}); run the kit's setup-skills.mjs in this project first.`);
+const matches = directory => files.every(file => existsSync(path.join(directory, file))
+  && readFileSync(path.join(directory, file)).equals(readFileSync(path.join(root, file))));
 
-const binaryHash = directory => createHash('sha256').update(readFileSync(path.join(directory, 'launch.exe'))).digest('hex');
-
-function matches(directory) {
-  return Object.entries(inputs).every(([file, input]) => existsSync(path.join(directory, file)) &&
-    readFileSync(path.join(directory, file)).equals(readFileSync(input))) &&
-    (!windows || (existsSync(path.join(directory, 'launch.exe')) && existsSync(path.join(directory, 'launch.sha256')) &&
-      readFileSync(path.join(directory, 'launch.sha256'), 'utf8') === binaryHash(directory) + '\n'));
-}
-
-const missing = files.filter(file => !existsSync(path.join(root, file)));
-if (missing.length) throw new Error(`Ponytail sources missing in ${root} (${missing[0]}); run the kit's scripts/setup-skills.mjs with this project path first.`);
-
+// Hook code is immutable per version: a trusted hook definition must keep running the reviewed bytes.
 if (existsSync(destination)) {
-  if (!matches(destination)) throw new Error('Ponytail 4.10.0-8 differs from this checkout or lacks its Windows executable. Review and provision a new personal snapshot; existing installation was not replaced.');
+  if (!matches(destination)) throw new Error(`Ponytail ${version} differs from this checkout; the existing installation was not replaced.`);
 } else {
-  mkdirSync(parent, { recursive: true });
-  const staging = mkdtempSync(path.join(parent, '.install-'));
+  mkdirSync(path.dirname(destination), { recursive: true });
+  const staging = mkdtempSync(path.join(path.dirname(destination), '.install-'));
   try {
-    for (const [file, input] of Object.entries(inputs)) {
-      const target = path.join(staging, file);
-      mkdirSync(path.dirname(target), { recursive: true });
-      writeFileSync(target, readFileSync(input), { mode: file === 'launch.cmd' ? 0o755 : 0o644 });
-    }
-    if (windows) {
-      // Use only the Windows-provided compiler during explicit installation, never inherited PATH or a hook.
-      const compiler = ['Framework64', 'Framework'].map(architecture =>
-        path.join(process.env.SystemRoot, 'Microsoft.NET', architecture, 'v4.0.30319', 'csc.exe')).find(existsSync);
-      if (!compiler) throw new Error('Ponytail: Windows .NET Framework compiler required for reviewed provisioning; no policy or installation was changed.');
-      execFileSync(compiler, ['/nologo', '/target:exe', '/optimize+', '/out:' + path.join(staging, 'launch.exe'),
-        path.join(staging, 'launch.cs')], { windowsHide: true, stdio: 'pipe' });
-      writeFileSync(path.join(staging, 'launch.sha256'), binaryHash(staging) + '\n');
+    for (const file of files) {
+      mkdirSync(path.dirname(path.join(staging, file)), { recursive: true });
+      copyFileSync(path.join(root, file), path.join(staging, file));
     }
     try {
       renameSync(staging, destination);
@@ -82,5 +62,36 @@ if (existsSync(destination)) {
     rmSync(staging, { recursive: true, force: true });
   }
 }
-console.log(`Ponytail hooks installed: ${destination}`);
+
+// The launchers only bind this Node; rerunning the installer after a Node change rewrites them.
+const hooks = path.join(destination, '.agents', 'hooks');
+const shellQuote = String.raw`'\''`;
+const sh = value => `'${value.replaceAll('\\', '/').replaceAll("'", shellQuote)}'`;
+const cmd = value => value.replaceAll('%', '%%');
+const launchers = {
+  'launch.sh': `#!/bin/sh
+# Generated by install-ponytail-hooks.mjs: starts the Node that ran the installer, never a PATH lookup.
+case "$1" in activate|subagent|mode-tracker) ;; *) exit 2;; esac
+unset NODE_OPTIONS NODE_PATH
+exec ${sh(node)} ${sh(hooks)}'/ponytail-'"$1"'.js' "$2" "\${3:-}"
+`,
+  // One file for cmd.exe and POSIX shells: cmd skips the ':' label line, sh skips the heredoc.
+  'launch.cmd': `: <<'WINDOWS'
+@echo off
+setlocal
+set NODE_OPTIONS=
+set NODE_PATH=
+if not "%~1"=="activate" if not "%~1"=="subagent" if not "%~1"=="mode-tracker" exit /b 2
+"${cmd(node)}" "${cmd(hooks)}\\ponytail-%~1.js" %2 %3
+exit /b %errorlevel%
+WINDOWS
+exec /bin/sh "\${0%/*}/launch.sh" "$@"
+`,
+};
+for (const [name, content] of Object.entries(launchers)) {
+  const temporary = path.join(destination, `.${name}.tmp`);
+  writeFileSync(temporary, content, { mode: 0o755 });
+  renameSync(temporary, path.join(destination, name));
+}
+console.log(`Ponytail hooks installed: ${destination} (Node ${node})`);
 console.log('Review and enable the project hooks in your agent; start a fresh session. No hook trust or personal agent settings were changed.');

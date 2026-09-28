@@ -1,14 +1,12 @@
 # Workflow Kit contributors
 
-Follow [shared agent rules](AGENT_RULES.md). The kit is the project here.
-Only load the detailed sections needed for the current step.
+Follow [AGENT_RULES.md](AGENT_RULES.md); here the kit itself is the project, so
+kit paths drop the `.vendor/workflow-kit/` prefix (`node scripts/board.mjs check 123`).
 
-## Kit contracts
-
-Use pinned upstream submodules and reviewed patches; never edit generated skills.
-For setup, source, template or test changes run `node scripts/setup-skills.mjs`,
-`node --test scripts/tests` and `node scripts/check-skills.mjs`.
-Documentation-only changes need diff/link review, not skill regeneration;
-required CI still applies. Hook/launcher changes additionally require
-`node scripts/check-impeccable.mjs` with its real isolated engine proof.
-No npm install, automatic installer hooks, secrets or private product files.
+- Skills come only from the pinned submodules plus the reviewed patches in
+  `scripts/`. Never edit generated skills or `.github/skills`.
+- After changing scripts, templates or patches, run `node scripts/init-project.mjs --existing`,
+  `node scripts/setup-skills.mjs` and `node --test scripts/tests`, and commit the regenerated files.
+- Tests cover behavior that protects users (no checkout code in hooks, no lost
+  files, board verdicts), never wording. Don't add tests for text or upstream logic.
+- Add no npm dependencies, automatic installers, secrets or private product content.

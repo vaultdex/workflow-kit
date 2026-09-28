@@ -1,151 +1,5 @@
---- a/skills/ponytail/SKILL.md
-+++ b/skills/ponytail/SKILL.md
-@@ -13,7 +13,6 @@
-   over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT
-   use for non-coding requests (general knowledge, prose, translation,
-   summaries, recipes).
--argument-hint: "[lite|full|ultra]"
- license: MIT
- ---
- 
-@@ -107,9 +106,9 @@
- Lazy code without its check is unfinished. Non-trivial logic (a branch, a
- loop, a parser, a money/security path) leaves ONE runnable check behind, the
- smallest thing that fails if the logic breaks: an `assert`-based
--`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no
--fixtures, no per-function suites unless asked. Trivial one-liners need no
--test, YAGNI applies to tests too.
-+`demo()`/`__main__` self-check or one focused test in the repository's existing
-+test infrastructure. Keep required repository checks; add no new framework
-+for this minimum. Trivial one-liners need no extra test, YAGNI applies to tests too.
- 
- ## Boundaries
- 
---- a/skills/ponytail-debt/SKILL.md
-+++ b/skills/ponytail-debt/SKILL.md
-@@ -14,10 +14,13 @@
- 
- ## Scan
- 
--Grep the repo for comment markers, skipping `node_modules`, `.git`, and build
--output:
-+Search application code for comment markers, skipping dependencies, build
-+output and vendored skills. Scan files for secrets before reading their contents,
-+as required by repository AGENTS.md. Include Vaultdex's existing `watchdog:`
-+markers; do not rename them merely to use this report.
- 
--`grep -rnE '(#|//) ?ponytail:' .`  (add other comment prefixes if your stack uses them)
-+Use `rg -n '(#|//) ?(ponytail|watchdog):'` on the scanned source files
-+(add other comment prefixes if your stack uses them).
- 
- Each hit is one ledger row. The comment prefix keeps prose that merely mentions
- the convention out of the ledger.
-@@ -32,13 +35,13 @@
- and the trigger straight from the comment. Want an owner per row too? add
- `git blame -L<line>,<line>`.
- 
--Flag the rot risk: any `ponytail:` comment that names no upgrade path or
-+Flag the rot risk: any shortcut comment that names no upgrade path or
- trigger gets a `no-trigger` tag, those are the ones that silently rot.
- 
--End with `<N> markers, <M> with no trigger.` Nothing found: `No ponytail: debt. Clean ledger.`
-+End with `<N> markers, <M> with no trigger.` Nothing found: `No shortcut markers found.`
- 
- ## Boundaries
- 
--Reads and reports only, changes nothing. To persist it, ask and it writes the
--ledger to a file (e.g. `PONYTAIL-DEBT.md`). One-shot. "stop ponytail-debt" or
--"normal mode" to revert.
-+Reads and reports only, changes nothing. Follow repository CONTRIBUTING.md for
-+durable findings in existing issues; do not create a second task ledger.
-+One-shot. "stop ponytail-debt" or "normal mode" to revert.
---- a/skills/ponytail-gain/SKILL.md
-+++ b/skills/ponytail-gain/SKILL.md
-@@ -13,17 +13,21 @@
- Display this scoreboard when invoked. One-shot: do NOT change mode, write flag
- files, or persist anything.
- 
--The figures are the published benchmark medians (5 everyday tasks: email
-+The figures are upstream-reported benchmark medians (5 everyday tasks: email
- validator, debounce, CSV sum, countdown timer, rate limiter; three models:
- Haiku, Sonnet, Opus). They are measured, not computed from the current repo.
--Source: `benchmarks/` and the README.
-+Historical source, pinned to the bundled upstream revision:
-+[benchmarks](https://github.com/DietrichGebert/ponytail/tree/e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156/benchmarks)
-+and [README](https://github.com/DietrichGebert/ponytail/blob/e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156/README.md).
-+Label the card as historical upstream results, not independently reproduced
-+Vaultdex measurements. Do not run paid benchmarks when displaying it.
- 
- ## Scoreboard
- 
--Render plain ASCII bars. The bar length shows the measured range; the label
-+Render Unicode block bars (UTF-8). The bar length shows the measured range; the label
- carries the exact figure:
- 
--```
-+```text
-   ponytail gain                     benchmark median · 5 tasks · 3 models
- 
-   Lines of code   no-skill  ████████████████████  100%
---- a/skills/ponytail-help/SKILL.md
-+++ b/skills/ponytail-help/SKILL.md
-@@ -32,39 +32,31 @@
- | **ponytail-gain** | `/ponytail-gain` | Measured-impact scoreboard: less code, less cost, more speed. |
- | **ponytail-help** | `/ponytail-help` | This card. |
- 
--Codex uses `@ponytail`, `@ponytail-review`, and `@ponytail-help`; Claude Code
--and OpenCode use the slash-command forms above (OpenCode ships all six as
--slash commands).
-+Select the repository skill in your agent's skill picker. Codex CLI supports
-+`$ponytail`; desktop picker syntax can vary. Claude Code uses the slash-command
-+forms above. Other hosts can load the named skill or its `SKILL.md` explicitly.
- 
- ## Deactivate
- 
--Say "stop ponytail" or "normal mode". Resume anytime with `/ponytail`.
--`/ponytail off` also works.
-+Say "stop ponytail" or "normal mode". With hooks, `/ponytail off` also works;
-+resume with `/ponytail full` (bare `/ponytail` reports the current mode).
- 
--## Configure Default Mode
-+## Checkout scope
- 
--Default mode = `full`, auto-active every session. Change it:
--
--**Environment variable** (highest priority):
--```bash
--export PONYTAIL_DEFAULT_MODE=ultra
--```
--
--**Config file** (`~/.config/ponytail/config.json`, Windows: `%APPDATA%\ponytail\config.json`):
--```json
--{ "defaultMode": "lite" }
--```
--
--Set `"off"` to disable auto-activation on session start, activate manually
--with `/ponytail` when wanted.
--
--Resolution: env var > config file > `full`.
-+This checkout bundles skills plus Node.js lifecycle hooks for Codex, Claude Code,
-+Copilot and Cursor. From a reviewed checkout, initialize them with
-+`node scripts/install-ponytail-hooks.mjs`, then enable the host's project trust/hooks
-+to activate the default mode at session start. Default priority: `PONYTAIL_DEFAULT_MODE`, then personal
-+Ponytail config `defaultMode`, then `full`. Supported defaults: off/lite/full/ultra.
-+`/ponytail default lite` saves a personal default; ordinary mode switches do not.
-+No global statusline or automatic plugin update is installed. Other hosts use
-+the skills directly. Repository workflow, validation and security rules remain authoritative.
- 
- ## Update
- 
--Enable auto-update once: open `/plugin`, go to Marketplaces, pick ponytail, Enable auto-update. Claude Code then pulls new versions at startup (run `/reload-plugins` when it prompts). Manual refresh: `/plugin marketplace update ponytail` then `/reload-plugins`.
--
--If `/plugin` is not recognized, your Claude Code is out of date. Update it (`npm install -g @anthropic-ai/claude-code@latest`, or `brew upgrade claude-code`) and restart. Other hosts use their own update flow.
-+Updates arrive through repository changes. See
-+[checkout usage and updates](https://github.com/vaultdex/workflow-kit/blob/main/README.md#updates).
-+Regenerate local links and cloud files together; retain patches and MIT attribution.
- 
- ## More
- 
+diff --git a/hooks/ponytail-activate.js b/hooks/ponytail-activate.js
+index 35d741e..2adf5e6 100644
 --- a/hooks/ponytail-activate.js
 +++ b/hooks/ponytail-activate.js
 @@ -3,13 +3,10 @@
@@ -164,7 +18,7 @@
  const { getPonytailInstructions } = require('./ponytail-instructions');
  const {
    clearMode,
-@@ -18,21 +15,22 @@
+@@ -18,21 +15,22 @@ const {
    isCodex,
    isCopilot,
    isCursor,
@@ -179,7 +33,7 @@
 -const mode = getDefaultMode();
 +// Native matcher groups pass this flag for resume/compact (and Claude forks).
 +// No stdin read: activation must also work when the host leaves its pipe open.
-+const mode = process.argv[4] === 'continue' ? readMode() || 'off' : getDefaultMode();
++const mode = process.argv[3] === 'continue' ? readMode() || 'off' : getDefaultMode();
  
  // "off" mode — skip activation entirely, don't write flag or emit rules
  if (mode === 'off') {
@@ -191,7 +45,7 @@
  }
  
  // Cursor with the always-on rule in the workspace: the rule already carries the
-@@ -46,7 +44,7 @@
+@@ -46,7 +44,7 @@ if (isCursor) {
      } catch (e) {
        // Silent fail — stdout closed/EPIPE at hook exit must not surface as a hook failure
      }
@@ -200,7 +54,7 @@
    }
  }
  
-@@ -58,55 +56,9 @@
+@@ -58,55 +56,9 @@ try {
  }
  
  // 2. Emit the ponytail ruleset, filtered to the active intensity level.
@@ -258,9 +112,11 @@
  
  try {
    writeHookOutput('SessionStart', mode, output);
+diff --git a/hooks/ponytail-mode-tracker.js b/hooks/ponytail-mode-tracker.js
+index 59877fe..62b3aa2 100644
 --- a/hooks/ponytail-mode-tracker.js
 +++ b/hooks/ponytail-mode-tracker.js
-@@ -7,6 +7,7 @@
+@@ -7,6 +7,7 @@ const {
    clearMode,
    cursorRuleNotice,
    cursorRulePath,
@@ -268,15 +124,15 @@
    isCursor,
    isQoder,
    readMode,
-@@ -70,18 +71,17 @@
+@@ -70,18 +71,17 @@ function finish() {
          else if (arg === 'off') mode = 'off';
          else if (arg === '') {
            isReportOnly = true;
+-          mode = readMode() || getDefaultMode();
 +          mode = readMode() || 'off';
-+        } else {
-           mode = readMode() || getDefaultMode();
--        } else {
+         } else {
 -          mode = getDefaultMode();
++          mode = readMode() || getDefaultMode();
          }
        }
  
@@ -293,7 +149,7 @@
        } else if (mode && mode !== 'off') {
          setMode(mode);
          modeSwitched = true;
-@@ -89,14 +89,14 @@
+@@ -89,14 +89,14 @@ function finish() {
          // switch happens we fold the confirmation into the ruleset output
          // below (one JSON on stdout) instead of emitting two separate writes.
          if (!isQoder) {
@@ -310,7 +166,7 @@
            );
          }
        } else if (mode === 'off') {
-@@ -151,5 +151,10 @@
+@@ -151,5 +151,10 @@ process.stdin.on('end', finish);
  // mode if data came without EOF) and exit. unref() keeps the timer from adding
  // latency to the normal path, where 'end' fires first. Mirrors the best-effort,
  // never-block contract the other lifecycle hooks already follow.
@@ -323,6 +179,8 @@
 +}
 +process.stdin.on('error', finishInput);
 +setTimeout(finishInput, 1000).unref();
+diff --git a/hooks/ponytail-runtime.js b/hooks/ponytail-runtime.js
+index 1e24c18..5ef47ee 100644
 --- a/hooks/ponytail-runtime.js
 +++ b/hooks/ponytail-runtime.js
 @@ -1,9 +1,14 @@
@@ -340,7 +198,7 @@
  
  // ponytail: VS Code Copilot never sets COPILOT_PLUGIN_DATA — it only injects
  // CLAUDE_PLUGIN_ROOT, pointed at an install path under .vscode/agent-plugins/
-@@ -16,25 +21,31 @@
+@@ -16,25 +21,32 @@ function isVsCodeCopilotRoot(pluginRoot) {
      pluginRoot.toLowerCase().includes('.vscode');
  }
  
@@ -371,13 +229,14 @@
 +if (projectHost) {
 +  // ponytail: mode is shared by sessions of one host in one checkout, as upstream;
 +  // use session-keyed state if independent concurrent modes become necessary.
-+  const checkout = createHash('sha256').update(path.resolve(process.argv[3] || path.join(__dirname, '../..'))).digest('hex');
-+  stateDir = path.join(getConfigDir(), 'vaultdex', checkout, projectHost);
++  let checkout = fs.realpathSync(process.cwd());
++  while (!fs.existsSync(path.join(checkout, '.git')) && path.dirname(checkout) !== checkout) checkout = path.dirname(checkout);
++  stateDir = path.join(getConfigDir(), 'vaultdex', createHash('sha256').update(checkout).digest('hex'), projectHost);
 +}
  
  const statePath = path.join(stateDir, STATE_FILE);
  
-@@ -79,9 +90,9 @@
+@@ -79,9 +91,9 @@ function cursorRuleNotice(rule) {
  
  function writeHookOutput(event, mode, context = '') {
    if (isCopilot) {
@@ -389,9 +248,11 @@
      return;
    }
    if (isCodex) {
+diff --git a/hooks/ponytail-subagent.js b/hooks/ponytail-subagent.js
+index f2a7c77..5d33008 100644
 --- a/hooks/ponytail-subagent.js
 +++ b/hooks/ponytail-subagent.js
-@@ -44,7 +44,7 @@
+@@ -44,7 +44,7 @@ try {
  // subagent spawn.
  if (!matcherRe) {
    inject();
@@ -400,7 +261,7 @@
  }
  
  // Matcher set → read agent_type from stdin and skip only on a definite
-@@ -60,7 +60,8 @@
+@@ -60,7 +60,8 @@ function finish() {
    let agentType = '';
    try {
      // Strip UTF-8 BOM some shells prepend when piping (breaks JSON.parse)
@@ -410,7 +271,7 @@
    } catch (e) {
      // Unparseable payload — fall through and inject to be safe.
    }
-@@ -73,5 +74,10 @@
+@@ -73,5 +74,10 @@ function finish() {
  process.stdin.on('data', chunk => { input += chunk; });
  process.stdin.on('end', finish);
  // Never block the session (#443): recover on stdin error or a short fallback.
@@ -423,3 +284,103 @@
 +}
 +process.stdin.on('error', finishInput);
 +setTimeout(finishInput, 1000).unref();
+diff --git a/skills/ponytail-debt/SKILL.md b/skills/ponytail-debt/SKILL.md
+index ecbc0ca..48b7eed 100644
+--- a/skills/ponytail-debt/SKILL.md
++++ b/skills/ponytail-debt/SKILL.md
+@@ -39,6 +39,6 @@ End with `<N> markers, <M> with no trigger.` Nothing found: `No ponytail: debt.
+ 
+ ## Boundaries
+ 
+-Reads and reports only, changes nothing. To persist it, ask and it writes the
+-ledger to a file (e.g. `PONYTAIL-DEBT.md`). One-shot. "stop ponytail-debt" or
+-"normal mode" to revert.
++Reads and reports only, changes nothing. Track durable findings as issues under
++the repository's CONTRIBUTING.md, not in a second ledger file. One-shot.
++"stop ponytail-debt" or "normal mode" to revert.
+diff --git a/skills/ponytail-help/SKILL.md b/skills/ponytail-help/SKILL.md
+index ba145c0..2374e87 100644
+--- a/skills/ponytail-help/SKILL.md
++++ b/skills/ponytail-help/SKILL.md
+@@ -32,39 +32,31 @@ Level sticks until changed or session end.
+ | **ponytail-gain** | `/ponytail-gain` | Measured-impact scoreboard: less code, less cost, more speed. |
+ | **ponytail-help** | `/ponytail-help` | This card. |
+ 
+-Codex uses `@ponytail`, `@ponytail-review`, and `@ponytail-help`; Claude Code
+-and OpenCode use the slash-command forms above (OpenCode ships all six as
+-slash commands).
++Select the repository skill in your agent's skill picker. Codex CLI supports
++`$ponytail`; desktop picker syntax can vary. Claude Code uses the slash-command
++forms above. Other hosts can load the named skill or its `SKILL.md` explicitly.
+ 
+ ## Deactivate
+ 
+-Say "stop ponytail" or "normal mode". Resume anytime with `/ponytail`.
+-`/ponytail off` also works.
++Say "stop ponytail" or "normal mode". With hooks, `/ponytail off` also works;
++resume with `/ponytail full` (bare `/ponytail` reports the current mode).
+ 
+-## Configure Default Mode
++## Checkout scope
+ 
+-Default mode = `full`, auto-active every session. Change it:
+-
+-**Environment variable** (highest priority):
+-```bash
+-export PONYTAIL_DEFAULT_MODE=ultra
+-```
+-
+-**Config file** (`~/.config/ponytail/config.json`, Windows: `%APPDATA%\ponytail\config.json`):
+-```json
+-{ "defaultMode": "lite" }
+-```
+-
+-Set `"off"` to disable auto-activation on session start, activate manually
+-with `/ponytail` when wanted.
+-
+-Resolution: env var > config file > `full`.
++This checkout bundles skills plus Node.js lifecycle hooks for Codex, Claude Code,
++Copilot and Cursor. From a reviewed checkout, initialize them with
++`node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs`, then enable the host's project trust/hooks
++to activate the default mode at session start. Default priority: `PONYTAIL_DEFAULT_MODE`, then personal
++Ponytail config `defaultMode`, then `full`. Supported defaults: off/lite/full/ultra.
++`/ponytail default lite` saves a personal default; ordinary mode switches do not.
++No global statusline or automatic plugin update is installed. Other hosts use
++the skills directly. Repository workflow, validation and security rules remain authoritative.
+ 
+ ## Update
+ 
+-Enable auto-update once: open `/plugin`, go to Marketplaces, pick ponytail, Enable auto-update. Claude Code then pulls new versions at startup (run `/reload-plugins` when it prompts). Manual refresh: `/plugin marketplace update ponytail` then `/reload-plugins`.
+-
+-If `/plugin` is not recognized, your Claude Code is out of date. Update it (`npm install -g @anthropic-ai/claude-code@latest`, or `brew upgrade claude-code`) and restart. Other hosts use their own update flow.
++Updates arrive through repository changes. See
++[checkout usage and updates](https://github.com/vaultdex/workflow-kit/blob/main/README.md#install-or-update-in-a-project).
++Regenerate local links and cloud files together; retain patches and MIT attribution.
+ 
+ ## More
+ 
+diff --git a/skills/ponytail/SKILL.md b/skills/ponytail/SKILL.md
+index 02c0712..bc4e068 100644
+--- a/skills/ponytail/SKILL.md
++++ b/skills/ponytail/SKILL.md
+@@ -13,7 +13,6 @@ description: >
+   over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT
+   use for non-coding requests (general knowledge, prose, translation,
+   summaries, recipes).
+-argument-hint: "[lite|full|ultra]"
+ license: MIT
+ ---
+ 
+@@ -107,9 +106,9 @@ just less code, the physical world needs tuning a minimal model can't see.
+ Lazy code without its check is unfinished. Non-trivial logic (a branch, a
+ loop, a parser, a money/security path) leaves ONE runnable check behind, the
+ smallest thing that fails if the logic breaks: an `assert`-based
+-`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no
+-fixtures, no per-function suites unless asked. Trivial one-liners need no
+-test, YAGNI applies to tests too.
++`demo()`/`__main__` self-check or one focused test in the repository's existing
++test infrastructure. Keep required repository checks; add no new framework
++for this minimum. Trivial one-liners need no extra test, YAGNI applies to tests too.
+ 
+ ## Boundaries
+ 
