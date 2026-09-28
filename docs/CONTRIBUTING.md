@@ -84,7 +84,13 @@ gh issue view ISSUE --repo OWNER/REPO --json state,blockedBy,assignees,projectIt
 ```
 
 Require a successful command, an open issue, the authorized Project status and
-ownership, and complete native dependency data. Compare `blockedBy.totalCount`
+ownership, and complete native dependency data. The command's `projectItems`
+contains titles/statuses, not Project identity: separately query native Project
+items with their `project.id` and status, matching the configured Project ID in
+`.github/workflow-project.json` and this issue. Resolve owner/number to that ID if
+needed; paginate until the matching item is found or all items are exhausted.
+Never accept a same-title board's status; missing/ambiguous identity is UNKNOWN.
+Compare `blockedBy.totalCount`
 with `blockedBy.nodes.length`; check every predecessor's current state and URL,
 including other repositories. If the CLI lacks this field or returns fewer nodes,
 read issue state/ownership without that field and use the native dependency API
@@ -404,7 +410,8 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    delivered issue links and closure intent under [issue, branch and PR links](#issue-branch-and-pr-links).
    Once that verification, implementation and focused pre-review checks are
    complete, immediately mark Ready for Review / Automated review. Selected CI and
-   automatic reviews run together; failed CI returns to Draft/In progress. Automatic
+   automatic reviews run together; failed CI enters step 5's execution check before
+   any return to Draft/In progress. Automatic
    reviews start outside Draft; never wait for them while the PR is Draft.
    Optional extra self-reviews, subagents or analyses are not new gates delaying
    this transition. Their actionable findings enter the same rework cycle below.
