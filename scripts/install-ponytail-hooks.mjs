@@ -65,7 +65,8 @@ if (existsSync(destination)) {
 
 // The launchers only bind this Node; rerunning the installer after a Node change rewrites them.
 const hooks = path.join(destination, '.agents', 'hooks');
-const sh = value => `'${value.replaceAll('\\', '/').replaceAll("'", String.raw`'\''`)}'`;
+const shellQuote = String.raw`'\''`;
+const sh = value => `'${value.replaceAll('\\', '/').replaceAll("'", shellQuote)}'`;
 const cmd = value => value.replaceAll('%', '%%');
 const launchers = {
   'launch.sh': `#!/bin/sh
