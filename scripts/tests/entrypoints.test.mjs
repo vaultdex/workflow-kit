@@ -1,16 +1,15 @@
 // Zweck: Echte Generator-Migration ohne Netzwerk testen.
-// Nutzen: Wrapper, alte Handler und Metadaten nur entfernen, wenn ihre Herkunft belegt ist.
+// Nutzen: Alte Handler, Dateien und Metadaten nur entfernen, wenn ihre Herkunft belegt ist.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const installer = fileURLToPath(new URL('../init-project.mjs', import.meta.url));
-const wrappers = ['setup-skills', 'check-skills', 'install-ponytail-hooks', 'install-impeccable-hooks'];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const write = (path, value) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); };
 const json = (path, value) => write(path, JSON.stringify(value, null, 2) + '\n');
@@ -19,7 +18,7 @@ const own = { command: 'echo managed' }, foreign = { command: 'echo user-owned' 
 const manifest = version => ({ version, hooks: { sessionStart: [own] } });
 
 /** Build a consumer with the real installer and harmless, versioned hook fixtures. */
-function fixture(t, old = true) {
+function fixture(t) {
   const base = mkdtempSync(join(tmpdir(), 'kit migration '));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const root = join(base, 'consumer'), kit = join(root, '.vendor/workflow-kit');
@@ -27,13 +26,8 @@ function fixture(t, old = true) {
   mkdirSync(join(kit, 'scripts'), { recursive: true });
   mkdirSync(join(kit, 'templates'), { recursive: true });
   copyFileSync(installer, join(kit, 'scripts/init-project.mjs'));
-  const files = {};
-  if (old) for (const name of wrappers) {
-    const path = `scripts/${name}.mjs`, value = `// managed old ${name}\n`;
-    write(join(root, path), value); files[path] = hash(value);
-  }
   const receipt = join(root, '.github/workflow-kit.json');
-  json(receipt, { files, hooks: {} });
+  json(receipt, { files: {}, hooks: {} });
   const run = (...args) => spawnSync(process.execPath, [join(kit, 'scripts/init-project.mjs'), root, '--existing', ...args], {
     cwd: base, encoding: 'utf8', timeout: 10000,
   });
@@ -42,38 +36,19 @@ function fixture(t, old = true) {
 }
 const succeeds = result => assert.equal(result.status, 0, result.stderr);
 
-test('all managed wrappers retire together; repeat setup and check do not drift', t => {
-  const f = fixture(t);
-  write(join(f.root, 'scripts/custom.mjs'), '// user-owned\n');
-  const before = readFileSync(f.receipt);
-  assert.notEqual(f.run('--check').status, 0);
-  assert.deepEqual(readFileSync(f.receipt), before);
-  for (const name of wrappers) assert.ok(existsSync(join(f.root, `scripts/${name}.mjs`)));
-  succeeds(f.run());
-  for (const name of wrappers) assert.equal(existsSync(join(f.root, `scripts/${name}.mjs`)), false);
-  assert.equal(readFileSync(join(f.root, 'scripts/custom.mjs'), 'utf8'), '// user-owned\n');
-  assert.deepEqual(read(f.receipt).files, {});
-  const after = readFileSync(f.receipt);
-  succeeds(f.run()); succeeds(f.run('--check'));
-  assert.deepEqual(readFileSync(f.receipt), after);
-});
-for (const name of wrappers) test(`edited ${name} is preserved before any migration write`, t => {
-  const f = fixture(t);
-  const path = join(f.root, `scripts/${name}.mjs`);
-  write(path, '// local change\n');
-  f.template('.cursor/hooks.json', manifest(1));
+test('a retired managed file is removed only while unedited', t => {
+  const f = fixture(t), name = 'CONTRIBUTING.md', path = join(f.root, name);
+  write(path, 'kit text\n'); json(f.receipt, { files: { [name]: hash('kit text\n') }, hooks: {} });
+  write(join(f.root, 'README.md'), 'user-owned\n');
+  write(path, 'edited\n');
   const before = readFileSync(f.receipt);
   assert.notEqual(f.run().status, 0);
-  assert.equal(readFileSync(path, 'utf8'), '// local change\n');
-  assert.deepEqual(readFileSync(f.receipt), before);
-  assert.equal(existsSync(join(f.root, '.cursor/hooks.json')), false);
-});
-test('fresh integration creates no scripts and leaves unowned wrappers alone', t => {
-  const f = fixture(t, false); succeeds(f.run());
-  assert.equal(existsSync(join(f.root, 'scripts')), false);
-  for (const name of wrappers) write(join(f.root, `scripts/${name}.mjs`), '// user-owned\n');
+  assert.equal(readFileSync(path, 'utf8'), 'edited\n'); assert.deepEqual(readFileSync(f.receipt), before);
+  write(path, 'kit text\n');
+  assert.notEqual(f.run('--check').status, 0);
   succeeds(f.run()); succeeds(f.run('--check'));
-  for (const name of wrappers) assert.equal(readFileSync(join(f.root, `scripts/${name}.mjs`), 'utf8'), '// user-owned\n');
+  assert.equal(existsSync(path), false); assert.deepEqual(read(f.receipt).files, {});
+  assert.equal(readFileSync(join(f.root, 'README.md'), 'utf8'), 'user-owned\n');
 });
 test('owned schema version advances; unrelated metadata and handlers survive', t => {
   const f = fixture(t); f.template('.cursor/hooks.json', manifest(1)); succeeds(f.run());
@@ -147,20 +122,19 @@ test('edited retired handlers fail before publishing their replacement', t => {
 test('receipt traversal and symlink escapes cannot delete an outside file', t => {
   const f = fixture(t); const outside = join(f.base, 'outside'); mkdirSync(outside);
   write(join(outside, 'keep'), 'keep');
-  for (const name of ['../outside/keep', '.github/../.git/config', 'scripts/../../outside/keep']) {
+  for (const name of ['../outside/keep', '.github/../.git/config', '.github/ISSUE_TEMPLATE/../../../outside/keep']) {
     json(f.receipt, { files: { [name]: hash('keep') }, hooks: {} });
     assert.notEqual(f.run().status, 0);
     assert.equal(readFileSync(join(outside, 'keep'), 'utf8'), 'keep');
   }
   json(f.receipt, { files: {}, hooks: {} });
   // An allowed receipt name must still reject a symlinked deletion parent.
-  rmSync(join(f.root, 'scripts'), { recursive: true });
-  write(join(outside, 'check-skills.mjs'), 'keep');
-  symlinkSync(outside, join(f.root, 'scripts'), 'junction');
-  json(f.receipt, { files: { 'scripts/check-skills.mjs': hash('keep') }, hooks: {} });
+  write(join(outside, 'task.yml'), 'keep');
+  symlinkSync(outside, join(f.root, '.github/ISSUE_TEMPLATE'), 'junction');
+  json(f.receipt, { files: { '.github/ISSUE_TEMPLATE/task.yml': hash('keep') }, hooks: {} });
   assert.notEqual(f.run().status, 0);
-  assert.equal(readFileSync(join(outside, 'check-skills.mjs'), 'utf8'), 'keep');
-  rmSync(join(f.root, 'scripts'));
+  assert.equal(readFileSync(join(outside, 'task.yml'), 'utf8'), 'keep');
+  rmSync(join(f.root, '.github/ISSUE_TEMPLATE'));
   json(f.receipt, { files: {}, hooks: {} });
   symlinkSync(outside, join(f.root, '.cursor'), 'junction');
   f.template('.cursor/hooks.json', manifest(1));
@@ -176,38 +150,7 @@ test('an unrelated checkout cannot be selected through CLI arguments', t => {
   assert.equal(existsSync(join(outside, '.github')), false);
 });
 
-test('interrupted hook writes resume; foreign edits remain protected', t => {
-  const f = fixture(t), name = '.cursor/hooks.json', target = join(f.root, name);
-  f.template(name, manifest(1)); succeeds(f.run());
-  const value = read(target); value.hooks.sessionStart.push(foreign); json(target, value);
-  const next = { version: 2, hooks: { sessionStart: [{ command: 'echo new' }] } };
-  f.template(name, next);
-  // Fail the next real write after the hook output, before the final receipt.
-  const fault = join(f.base, 'fault.mjs');
-  write(fault, `import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module';
-const write = fs.writeFileSync; let changed = false;
-fs.writeFileSync = (path, ...args) => {
-  if (changed) throw new Error('injected write failure');
-  const result = write(path, ...args);
-  if (String(path) === ${JSON.stringify(target)}) changed = true;
-  return result;
-}; syncBuiltinESMExports();`);
-  const failed = spawnSync(process.execPath, ['--import', pathToFileURL(fault).href, join(f.kit, 'scripts/init-project.mjs'), f.root, '--existing'], { encoding: 'utf8' });
-  assert.notEqual(failed.status, 0); assert.match(failed.stderr, /injected write failure/);
-  const interrupted = readFileSync(f.receipt), updated = readFileSync(target);
-  assert.ok(read(f.receipt).planned[name]);
-  assert.notEqual(f.run('--check').status, 0);
-  assert.deepEqual(readFileSync(f.receipt), interrupted);
-  const edited = read(target); edited.hooks.sessionStart.at(-1).command = 'echo user edit'; json(target, edited);
-  assert.notEqual(f.run().status, 0);
-  assert.deepEqual(read(target), edited);
-  writeFileSync(target, updated);
-  succeeds(f.run()); succeeds(f.run('--check'));
-  assert.deepEqual(read(target).hooks.sessionStart, [foreign, ...next.hooks.sessionStart]);
-  assert.equal(read(f.receipt).planned, undefined);
-});
-
-test('interrupted retirement tolerates an already removed manifest', t => {
+test('retirement tolerates an already removed manifest', t => {
   const f = fixture(t), name = '.github/hooks/old.json';
   f.template(name, manifest(1)); succeeds(f.run());
   rmSync(join(f.kit, 'templates', name)); rmSync(join(f.root, name));

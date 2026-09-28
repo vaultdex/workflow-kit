@@ -2,8 +2,8 @@
 // Aufruf: Bei Einrichtung oder Kit-Updates; --check schreibt nichts.
 // Nutzen: Gemeinsame Logik bleibt im Kit; Migrationen erhalten fremde Dateien und Handler.
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,14 +23,13 @@ const present = p => lstatSync(p, { throwIfNoEntry: false });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const isHooks = name => /^(?:\.(?:codex|cursor)\/hooks\.json|\.claude\/settings\.json|\.github\/hooks\/[A-Za-z0-9_.-]+\.json)$/.test(name);
 const managedFile = name => ['AGENTS.md', 'CONTRIBUTING.md', '.coderabbit.yaml', '.github/PULL_REQUEST_TEMPLATE.md', '.github/dependabot.yml'].includes(name)
-  || /^\.github\/ISSUE_TEMPLATE\/[A-Za-z0-9_.-]+$/.test(name)
-  || /^scripts\/(?:setup-skills|check-skills|install-ponytail-hooks|install-impeccable-hooks)\.mjs$/.test(name);
+  || /^\.github\/ISSUE_TEMPLATE\/[A-Za-z0-9_.-]+$/.test(name);
 assert.ok(existsSync(root), 'Initialize the target Git checkout first');
 assert.ok(existsSync(join(root, '.git')), 'Target must be a Git repository/worktree');
 const receipt = '.github/workflow-kit.json';
 const prior = existsSync(safe(receipt)) ? JSON.parse(text(safe(receipt))) : { files: {}, hooks: {} };
 for (const name of Object.keys(prior.files)) assert.ok(managedFile(name), `Invalid managed file in receipt: ${name}`);
-for (const name of [...Object.keys(prior.hooks), ...Object.keys(prior.hookMetadata ?? {}), ...Object.keys(prior.planned ?? {})])
+for (const name of [...Object.keys(prior.hooks), ...Object.keys(prior.hookMetadata ?? {})])
   assert.ok(isHooks(name), `Invalid managed hook path: ${name}`);
 const files = {}, hooks = {}, hookMetadata = {}, pending = {}, removed = new Set();
 if (check) {
@@ -49,17 +48,6 @@ function safe(file) {
   assert.ok(actual === realpathSync(root) || actual.startsWith(realpathSync(root) + sep), `Target leaves checkout: ${file}`);
   assert.ok(!present(target) || present(target).isFile(), `Refusing non-file target: ${file}`);
   return target;
-}
-
-function writeReceipt(value) {
-  const target = safe(receipt), temporary = safe(`${receipt}.${randomUUID()}.tmp`);
-  mkdirSync(dirname(target), { recursive: true });
-  try {
-    writeFileSync(temporary, value, { flag: 'wx' });
-    renameSync(temporary, target);
-  } finally {
-    if (existsSync(temporary)) unlinkSync(temporary);
-  }
 }
 
 // Drop only the fragments a previous receipt owns; foreign groups and handlers stay.
@@ -91,7 +79,7 @@ function migrateEvents(name, current, old, incoming) {
     const groups = current.hooks[event] ?? [];
     const owned = old[event] ?? [];
     for (const digest of owned) assert.ok(groups.flatMap(fragments).some(group => fingerprint(group) === digest),
-      `Managed hook edited or disabled; preserved without replacement: ${name}/${event}`);
+      `Managed hook edited or disabled; preserved without replacement: ${name}/${event}. After an interrupted run, restore the file with git and rerun.`);
     const retained = withoutOwned(groups, owned);
     addIncoming(retained, (incoming?.hooks[event] ?? []).flatMap(fragments));
     if (retained.length) current.hooks[event] = retained;
@@ -119,21 +107,13 @@ function migrateMetadata(name, current, oldMetadata, incoming) {
   return newMetadata;
 }
 
-// A journaled full-file hash proves which ownership snapshot applies after a crash.
 function migrateHooks(name, incoming) {
   const target = safe(name);
   if (!incoming && !existsSync(target)) return;
   const value = existsSync(target) ? text(target) : '';
-  const resumed = prior.planned?.[name];
-  const applied = resumed?.digest === hash(value);
   const current = value ? JSON.parse(value) : {};
-  if (applied) {
-    prior.hooks[name] = resumed.hooks;
-    prior.hookMetadata ??= {};
-    prior.hookMetadata[name] = resumed.metadata;
-  }
-  const old = (applied ? resumed.hooks : prior.hooks[name]) ?? {};
-  const oldMetadata = (applied ? resumed.metadata : prior.hookMetadata?.[name]) ?? {};
+  const old = prior.hooks[name] ?? {};
+  const oldMetadata = prior.hookMetadata?.[name] ?? {};
   current.hooks ??= {};
   migrateEvents(name, current, old, incoming);
   const newMetadata = migrateMetadata(name, current, oldMetadata, incoming);
@@ -181,25 +161,20 @@ for (const file of Object.keys(prior.files).filter(file => !Object.hasOwn(files,
 const sorted = values => Object.fromEntries(Object.keys(values).sort().map(key => [key, values[key]]));
 pending[receipt] = JSON.stringify({ files: sorted(files), hooks: sorted(hooks), hookMetadata: sorted(hookMetadata) }, null, 2) + '\n';
 if (check) {
-  assert.equal(Object.keys(prior.planned ?? {}).length, 0, 'Interrupted hook migration; run init-project to resume');
   assert.equal(removed.size, 0, 'Retired managed outputs; run init-project and review removal');
   for (const [file, value] of Object.entries(pending))
     assert.ok(existsSync(safe(file)) && text(safe(file)) === value, `Managed output is stale; run init-project and review changes: ${file}`);
 } else {
-  const planned = Object.fromEntries(Object.entries(pending).filter(([name]) => isHooks(name))
-    .map(([name, value]) => [name, { digest: hash(value), hooks: hooks[name] ?? {}, metadata: hookMetadata[name] ?? {} }]));
-  if (Object.keys(planned).length) {
-    writeReceipt(JSON.stringify({ ...prior, planned }, null, 2) + '\n');
-  }
-  for (const [file, value] of Object.entries(pending)) {
-    if (file === receipt) continue;
+  // Every target is tracked by Git, so an interrupted run is recovered by restoring files, not a journal.
+  // The receipt is written last: until then the old ownership stays recorded.
+  const write = file => {
     const target = safe(file);
     mkdirSync(dirname(target), { recursive: true });
-    if (!existsSync(target) || text(target) !== value) writeFileSync(target, value);
-  }
+    if (!existsSync(target) || text(target) !== pending[file]) writeFileSync(target, pending[file]);
+  };
+  for (const file of Object.keys(pending)) if (file !== receipt) write(file);
   for (const file of removed) if (existsSync(safe(file))) unlinkSync(safe(file));
-  // Retain the old receipt until every planned migration succeeded.
-  if (!existsSync(safe(receipt)) || text(safe(receipt)) !== pending[receipt]) writeReceipt(pending[receipt]);
+  write(receipt);
 }
 console.log(check ? 'Managed files and hook snapshots match the pinned kit; no files written.'
   : 'Project files configured. Run the kit setup-skills script with this project path; install/review hooks explicitly.');
