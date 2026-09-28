@@ -101,6 +101,8 @@ try {
   }
   for (const file of companionFiles(bundle)) {
     localDirectory(root, dirname(join(root, file)));
+    // Drop whatever is left at the destination first: copying onto a link would write through it.
+    rmSync(join(root, file), { force: true });
     copyFileSync(join(bundle, file), join(root, file));
   }
   published = true;
