@@ -18,8 +18,8 @@ request. A human request to implement a Backlog issue covers moving it through
 Ready. Authorization for an issue covers its review fixes; a different issue needs
 its own. Automations and bots never authorize a start.
 
-**Finding work.** `board.mjs next` lists open Ready issues without open native
-blockers, highest Priority first. If nothing is startable, report the blockers and
+**Finding work.** `board.mjs next` lists open Ready issues whose native
+predecessors all closed as completed, highest Priority first. If nothing is startable, report the blockers and
 propose the next issue from Backlog with a short reason; don't implement it or
 change its status.
 

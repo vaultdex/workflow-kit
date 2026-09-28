@@ -60,7 +60,7 @@ function next() {
   const nodes = [];
   for (let after; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
-      pageInfo{hasNextPage endCursor} nodes{...on Issue{number title
+      pageInfo{hasNextPage endCursor} nodes{...on Issue{number title blockedBy(first:100){totalCount nodes{stateReason}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
@@ -75,11 +75,14 @@ function next() {
   const order = priority => rank.includes(priority) ? rank.indexOf(priority) : rank.length;
   const ready = nodes.map(issue => ({ ...issue, item: projectItem(issue) }))
     .filter(issue => issue.item?.status?.name === 'Ready')
+    // As in check: only predecessors closed as completed count as delivered.
+    .filter(({ blockedBy }) => blockedBy.nodes.length === blockedBy.totalCount
+      && blockedBy.nodes.every(predecessor => predecessor?.stateReason === 'COMPLETED'))
     .map(issue => ({ ...issue, priority: issue.item.priority?.name
       ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name }))
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);
   for (const issue of ready) console.log(`#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`);
-  console.log(ready.length ? 'Run board.mjs check ISSUE before claiming one.' : 'No Ready issue without open blockers.');
+  console.log(ready.length ? 'Run board.mjs check ISSUE before claiming one.' : 'No Ready issue whose blockers are all completed.');
 }
 
 /** A single-select Project field with its options in configured order. */
