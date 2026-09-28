@@ -42,6 +42,10 @@ node .vendor/workflow-kit/scripts/board.mjs block 124 123              # 124 is 
 
 - Understand the affected flow, contracts and callers first. Fix the root cause at
   the narrowest shared layer with the smallest complete change.
+- Verify each review finding against the code and contract first; fix its
+  neighboring paths in the same push. If the same class of finding returns after
+  two correction pushes, stop patching and re-examine the whole area's states, data
+  flow and assumptions.
 - Take the first option that works: skip speculative needs, reuse repository code,
   use the standard library or platform, use an installed dependency, and only then
   write minimal new code. Check the pinned version's docs before reimplementing.
@@ -51,8 +55,9 @@ node .vendor/workflow-kit/scripts/board.mjs block 124 123              # 124 is 
   attribution and accessibility.
 - Scale proof with risk: focused regression, then cross-component contracts, then
   security, migration and recovery, then authorized live targets. Add one focused
-  check for new non-trivial behavior in the existing test setup. Mocks don't prove
-  live integration.
+  check for new non-trivial behavior in the existing test setup; it must fail on the
+  known faulty behavior and assert its preconditions. Cover a cross-layer change
+  with its whole flow (save → load → display). Mocks don't prove live integration.
 - Treat every warning or deprecation you meet (install, build, lint, tests, CI,
   runtime, browser console) as a finding. Mark deliberate shortcuts with
   `ponytail: <ceiling>; replace when <trigger>`.

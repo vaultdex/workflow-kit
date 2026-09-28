@@ -68,8 +68,9 @@ Use the issue form's sections:
   expected behavior.
 - **Was bringt es uns?** The concrete benefit or avoided harm.
 - **Was muss gemacht werden?** The complete outcome and its non-goals.
-- **Wie soll es umgesetzt werden?** Steps, files, contracts, data, and failure and
-  retry cases.
+- **Wie soll es umgesetzt werden?** Steps, files, callers, contracts, data, the
+  properties that must not break, and failure and retry cases (in depth for
+  bookings, migrations and process control).
 - **Woran erkennen wir, dass es fertig ist?** Checkable criteria with commands;
   say which proof is a mock and which is live.
 - **Abhängigkeiten und Wiederaufnahme.** Prerequisites with evidence and the next
@@ -136,7 +137,8 @@ and empty sections.
    harness's waiting, not polling. Pending, cancelled or missing expected checks are
    not success. Read all findings, including every page of analyzer results such
    as Sonar issues and hotspots. A green quality gate does not mean zero findings,
-   and a missing or stale analysis is not clean.
+   and a missing or stale analysis is not clean. Don't re-request a review that is
+   running or finished for the current commit without a concrete reason.
 4. To change code: run the execution check, set the PR to Draft and the issue to In
    progress, batch the fixes, rerun the affected checks, mark the PR Ready for
    Review, set Automated review and wait again. Merge main only for conflicts or a
