@@ -19,6 +19,7 @@ const present = p => lstatSync(p, { throwIfNoEntry: false });
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 const gitTool = externalTool('git', root, kit, process.cwd());
 const git = (...args) => execFileSync(gitTool.file, args, { cwd: root, env: gitTool.env, encoding: 'utf8' });
+const skillName = /^ponytail(?:-[a-z0-9]+)*$/;
 
 localDirectory(root, state);
 assert.ok(!present(bundle)?.isSymbolicLink(), 'Generated Ponytail bundle must not be a link');
@@ -26,7 +27,7 @@ if (existsSync(join(source, '.git'))) assert.equal(git('-C', source, 'status', '
 git('-C', kit, 'submodule', 'update', '--init', '--', '.vendor/ponytail');
 const revision = git('-C', source, 'rev-parse', 'HEAD').trim();
 const skills = git('-C', source, 'ls-tree', '-d', '--name-only', `${revision}:skills`).trim().split('\n');
-assert.ok(skills.includes('ponytail') && skills.every(s => /^ponytail(?:-[a-z0-9]+)*$/.test(s)), 'Invalid pinned skill names');
+assert.ok(skills.includes('ponytail') && skills.every(s => skillName.test(s)), 'Invalid pinned skill names');
 const files = [...skills.map(s => `skills/${s}/SKILL.md`),
   ...['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent'].map(n => `hooks/ponytail-${n}.js`)];
 // The source is clean and at the pin, so its working tree holds the pinned files.
@@ -60,10 +61,10 @@ try {
     throw error;
   }
   for (const [dest, from] of links) link(root, join(root, dest), join(bundle, from));
-  // .github/skills/ponytail* is generated: rewrite it whole, so skills upstream drops disappear too.
+  // Upstream-shaped names (ponytail, ponytail-*) in .github/skills are generated: rewrite them whole, so dropped skills go too.
   const cloud = join(root, '.github/skills');
   localDirectory(root, cloud);
-  for (const entry of readdirSync(cloud).filter(name => name.startsWith('ponytail'))) rmSync(join(cloud, entry), { recursive: true, force: true });
+  for (const entry of readdirSync(cloud).filter(name => skillName.test(name))) rmSync(join(cloud, entry), { recursive: true, force: true });
   for (const [file, bytes] of Object.entries(outputs)) {
     localDirectory(root, dirname(join(root, file)));
     writeFileSync(join(root, file), bytes);
