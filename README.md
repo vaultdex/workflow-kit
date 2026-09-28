@@ -28,7 +28,8 @@ Setup regenerates `.github/skills` and `.github/agents` for the kit's skills and
 anything else found at its local skill paths to `.workflow-kit/replaced/`.
 Commit `.gitmodules`, the kit gitlink, the hook files and the generated `.github`
 files; local skill links and bundles stay ignored. In CI, run both commands and then
-`git diff --exit-code`: any diff means committed outputs were stale.
+`git add --intent-to-add --all && git diff --exit-code`: any diff, including a new
+file, means committed outputs were stale.
 
 A kit update is a PR that bumps the gitlink, reruns `init-project` and
 `setup-skills`, and commits the result. Each developer then updates the submodule
@@ -63,7 +64,7 @@ and [Impeccable](docs/impeccable.md).
 ```sh
 node scripts/init-project.mjs --existing
 node scripts/setup-skills.mjs
-git diff --exit-code
+git status --short    # commit everything listed
 node --test scripts/tests
 ```
 

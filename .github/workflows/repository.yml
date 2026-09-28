@@ -30,5 +30,6 @@ jobs:
       # Regenerate everything, then Git proves the committed outputs were current.
       - run: node scripts/init-project.mjs --existing
       - run: node scripts/setup-skills.mjs
-      - run: git diff --exit-code
+      # Intent-to-add makes newly generated files show up in the diff too.
+      - run: git add --intent-to-add --all && git diff --exit-code
       - run: node --test scripts/tests

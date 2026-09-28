@@ -56,6 +56,10 @@ try {
   const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
     ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
     .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
+  // Check every output directory before the swap, so a linked one stops setup with nothing replaced.
+  const cloud = join(root, '.github/skills');
+  for (const directory of [cloud, ...links.map(([dest]) => dirname(join(root, dest))),
+    ...Object.keys(outputs).map(file => dirname(join(root, file)))]) localDirectory(root, directory);
   if (existsSync(bundle)) rename(bundle, previous);
   try { rename(next, bundle); }
   catch (error) {
@@ -65,8 +69,6 @@ try {
   for (const [dest, from] of links) link(root, join(root, dest), join(bundle, from));
   // Current skills in .github/skills are generated and rewritten whole; other ponytail-* entries
   // (skills upstream dropped, or the project's own) move to .workflow-kit/replaced/.
-  const cloud = join(root, '.github/skills');
-  localDirectory(root, cloud);
   for (const entry of readdirSync(cloud).filter(name => skillName.test(name)))
     if (skills.includes(entry)) rmSync(join(cloud, entry), { recursive: true, force: true });
     else moveAside(root, join(cloud, entry));

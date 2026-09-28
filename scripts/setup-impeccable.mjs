@@ -89,6 +89,14 @@ try {
     copyTracked(directory, join(next, directory));
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
+  // Copilot skill and the impeccable* agents/commands are generated and replaced; files upstream no longer
+  // ships (or the project's own) move to .workflow-kit/replaced/.
+  // A link or file at the Copilot skill directory moves aside first; enumerating through it would reach its target.
+  const copilot = join(root, ".github/skills/impeccable");
+  if (present(copilot) && !present(copilot).isDirectory()) moveAside(root, copilot);
+  // Check every output directory before the swap, so a linked one stops setup with nothing replaced.
+  const fresh = companionFiles(next), stale = companionFiles(root).filter((file) => !fresh.includes(file));
+  for (const file of [...linkedSkills, ...stale, ...fresh]) localDirectory(root, dirname(join(root, file)));
   if (existsSync(bundle)) rename(bundle, previous);
   try { rename(next, bundle); }
   catch (error) {
@@ -96,14 +104,6 @@ try {
     throw error;
   }
   for (const skill of linkedSkills) link(root, join(root, skill), join(bundle, skill));
-  // Copilot skill and the impeccable* agents/commands are generated and replaced; files upstream no longer
-  // ships (or the project's own) move to .workflow-kit/replaced/.
-  // A link or file at the Copilot skill directory moves aside first; enumerating through it would reach its target.
-  const copilot = join(root, ".github/skills/impeccable");
-  if (present(copilot) && !present(copilot).isDirectory()) moveAside(root, copilot);
-  // Check every directory first, so a linked companion directory stops setup before anything changes.
-  const fresh = companionFiles(bundle), stale = companionFiles(root).filter((file) => !fresh.includes(file));
-  for (const file of [...stale, ...fresh]) localDirectory(root, dirname(join(root, file)));
   for (const file of stale) moveAside(root, join(root, file));
   for (const file of fresh) {
     // Drop whatever is left at the destination first: copying onto a link would write through it.
