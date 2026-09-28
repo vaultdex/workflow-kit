@@ -16,7 +16,7 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 | --- | --- |
 | Backlog | Newly proposed, awaiting human triage, or still infeasible after blockers resolve; record reasons. |
 | Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement authorizes a start only under `"start": "ready"` (start policy below). |
-| In progress | Taken from Ready under the start policy after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
+| In progress | Taken from Ready under the start policy and execution check, including its bounded human exception; one driver and linked session, branch/PR. This is the Doing state. |
 | Automated review | Ready PR with focused local checks passed; selected CI and automatic reviews run together. Disclose pending project-defined final proof. |
 | Human review | Ready for human acceptance: selected checks passed, automatic reviews finished and every finding fixed or linked to an actionable follow-up; disclose confirmed unavailable reviews under the exception below. |
 | Done | Acceptance satisfied; delivered repository work actually merged. |
@@ -51,7 +51,9 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   unrelated work. Analysis permission is not implementation permission.
 - A human request to implement a Backlog issue authorizes preparing/checking Ready:
   record the instruction and accepted scope, move through Ready,
-  then start In progress only after resolving execution blockers. Do not skip unresolved dependencies or required approval.
+  then start In progress only after the execution check passes or its specific human
+  exception is recorded with source, permitted work and remaining gates. Do not skip
+  unresolved dependencies or required approval outside that recorded exception.
   Existing authorization covers verification/review fixes within the same active
   scope, subject to the execution check; starting another issue needs new
   authorization under the start policy. Native automations must
@@ -115,7 +117,7 @@ comments. If prerequisites change during work, stop affected edits and refresh t
 decision. Recheck before Human review; unresolved integration/acceptance blockers
 prevent that handoff even when isolated tests pass or bounded edits were authorized.
 
-Review these cases when changing these rules:
+Review these cases without a specific human exception when changing these rules:
 
 | Case | Required decision |
 | --- | --- |
@@ -343,8 +345,8 @@ Label gemeinsam aktuell; keine neue Automation, Chat-Brücke oder Polling-Schlei
   previously triaged feasible work to Ready with explicit blockers, release
   assignment and verify. Untriaged or inherently infeasible work stays Backlog.
   Anyone may refine unowned blockers;
-  preserve approvals. Resume after verified unblocking and fresh ownership/dependency
-  checks, never merely elapsed time.
+  preserve approvals. Resume only under the execution check, including its bounded
+  human exception, and fresh ownership/dependency checks, never merely elapsed time.
 - Inspect actual Git/GitHub state after failure; correct the cause and resume the
   same branch/PR. No resets, duplicate PRs, credential/protection changes or repo
   workarounds for invocation mistakes. Report tool/service defects with reproduction.
