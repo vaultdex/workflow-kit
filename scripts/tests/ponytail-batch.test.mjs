@@ -50,23 +50,26 @@ test('setup writes byte-correct files, links every provider and reruns without c
     assert.equal(readFileSync(join(f.root, output), 'utf8'), original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n'), path);
   }
   for (const provider of providers) assert.ok(lstatSync(join(f.root, provider, 'skills/ponytail')).isSymbolicLink(), provider);
-  const receipt = join(f.root, '.github/skills/ponytail/.workflow-source.json');
-  const before = readFileSync(receipt);
+  const copilot = join(f.root, '.github/skills/ponytail/SKILL.md');
+  const before = readFileSync(copilot);
   succeeds(f.run());
-  assert.deepEqual(readFileSync(receipt), before);
+  assert.deepEqual(readFileSync(copilot), before);
 });
 
-test('a dirty source or an edited Copilot skill is refused and the installation stays', t => {
+test('a dirty source is refused; generated Copilot skills are regenerated, stale ones removed', t => {
   const f = fixture(t); succeeds(f.run());
   const hook = join(f.root, '.agents/hooks/ponytail-activate.js'), installed = readFileSync(hook);
   writeFileSync(join(f.source, 'hooks/ponytail-runtime.js'), '// local change\n');
   assert.notEqual(f.run().status, 0);
+  assert.deepEqual(readFileSync(hook), installed, 'The installation stays');
   writeFileSync(join(f.source, 'hooks/ponytail-runtime.js'), '');
-  const output = join(f.root, '.github/skills/ponytail/SKILL.md');
+  const output = join(f.root, '.github/skills/ponytail/SKILL.md'), generated = readFileSync(output);
   writeFileSync(output, 'Manual change\n');
-  assert.notEqual(f.run().status, 0);
-  assert.equal(readFileSync(output, 'utf8'), 'Manual change\n');
-  assert.deepEqual(readFileSync(hook), installed);
+  write(join(f.root, '.github/skills/ponytail-retired/SKILL.md'), 'Dropped upstream\n');
+  write(join(f.root, '.github/skills/custom/SKILL.md'), 'User skill\n');
+  succeeds(f.run());
+  assert.deepEqual(readFileSync(output), generated);
+  assert.deepEqual(readdirSync(join(f.root, '.github/skills')).sort(), ['custom', ...skills].sort());
 });
 
 // #38: harness worktrees copy ignored provider links as folders; setup relinks and keeps the copies aside.

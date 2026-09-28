@@ -3,8 +3,7 @@
 // Aufruf: setup-skills bei Einrichtung oder bewusstem Kit-Update, nicht pro Agenten-Turn.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalTool, projectRoot } from './checkout-root.mjs';
@@ -18,7 +17,6 @@ const bundle = join(state, 'ponytail');
 const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
 const present = p => lstatSync(p, { throwIfNoEntry: false });
 const text = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
-const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const gitTool = externalTool('git', root, kit, process.cwd());
 const git = (...args) => execFileSync(gitTool.file, args, { cwd: root, env: gitTool.env, encoding: 'utf8' });
 
@@ -52,21 +50,9 @@ try {
   writeFileSync(join(next, '.agents/skills/ponytail/NOTICE.md'), text(join(kit, 'scripts/ponytail/NOTICE.md')));
   const links = providers.flatMap(p => skills.map(s => [`${p}/skills/${s}`, `.agents/skills/${s}`]));
   links.push(['.agents/hooks', '.agents/hooks']);
-  const receiptPath = join(root, '.github/skills/ponytail/.workflow-source.json');
-  localDirectory(root, dirname(receiptPath));
-  assert.ok(!present(receiptPath) || present(receiptPath).isFile(), 'Receipt must be a regular file');
-  const old = existsSync(receiptPath) ? JSON.parse(text(receiptPath)).files : {};
   const outputs = Object.fromEntries([...skills.map(s => [`skills/${s}/SKILL.md`, `.github/skills/${s}/SKILL.md`]),
     ...['LICENSE.md', 'NOTICE.md'].map(n => [`skills/ponytail/${n}`, `.github/skills/ponytail/${n}`])]
     .map(([from, dest]) => [dest, text(join(next, '.agents', from))]));
-  // Committed outputs are replaced only while unedited. Files of skills that upstream drops stay
-  // until someone deletes them; check-skills reports them as stale.
-  for (const [file, bytes] of Object.entries(outputs)) {
-    const target = join(root, file);
-    localDirectory(root, dirname(target));
-    if (present(target)) assert.ok(present(target).isFile() && (text(target) === bytes || old[file] === hash(text(target))),
-      `Existing or edited Copilot skill left untouched: ${target}`);
-  }
   if (existsSync(bundle)) renameSync(bundle, previous);
   try { renameSync(next, bundle); }
   catch (error) {
@@ -74,8 +60,14 @@ try {
     throw error;
   }
   for (const [dest, from] of links) link(root, join(root, dest), join(bundle, from));
-  for (const [file, bytes] of Object.entries(outputs)) writeFileSync(join(root, file), bytes);
-  writeFileSync(receiptPath, JSON.stringify({ revision, files: Object.fromEntries(Object.entries(outputs).map(([p, bytes]) => [p, hash(bytes)])) }, null, 2) + '\n');
+  // .github/skills/ponytail* is generated: rewrite it whole, so skills upstream drops disappear too.
+  const cloud = join(root, '.github/skills');
+  localDirectory(root, cloud);
+  for (const entry of readdirSync(cloud).filter(name => /^ponytail/.test(name))) rmSync(join(cloud, entry), { recursive: true, force: true });
+  for (const [file, bytes] of Object.entries(outputs)) {
+    localDirectory(root, dirname(join(root, file)));
+    writeFileSync(join(root, file), bytes);
+  }
   published = true;
   console.log(`Ponytail ${revision.slice(0, 7)}: shared source, five local providers linked, Copilot refreshed.`);
 } finally {

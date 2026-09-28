@@ -27,8 +27,8 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - run: node scripts/check-skills.mjs
-      - run: node scripts/init-project.mjs --existing --check
+      # Regenerate everything, then Git proves the committed outputs were current.
+      - run: node scripts/init-project.mjs --existing
       - run: node scripts/setup-skills.mjs
+      - run: git diff --exit-code
       - run: node --test scripts/tests
-      - run: git diff --exit-code -- .github .codex .claude .cursor

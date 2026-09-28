@@ -16,17 +16,19 @@ act on the Git checkout they run in; from the project root:
 ```sh
 git submodule add https://github.com/vaultdex/workflow-kit.git .vendor/workflow-kit  # first time only
 git submodule update --init --recursive
-node .vendor/workflow-kit/scripts/init-project.mjs --existing  # managed templates, hook files, .gitignore
+node .vendor/workflow-kit/scripts/init-project.mjs --existing  # kit hooks and .gitignore
 node .vendor/workflow-kit/scripts/setup-skills.mjs             # skills for every agent
-node .vendor/workflow-kit/scripts/check-skills.mjs             # generated files match the pins
 ```
 
-Commit `.gitmodules`, the kit gitlink, `.github/workflow-kit.json`, the hook files
-and the generated `.github/skills` and `.github/agents` files. Local skill links and
-bundles stay ignored. `init-project` updates the files and hook handlers it manages
-only while they are unedited, keeps foreign hooks, and fails on conflicts;
-`--check` verifies without writing. Setup moves anything else found at the kit's
-local skill paths to `.workflow-kit/replaced/` and reports it.
+Without `--existing`, `init-project` also creates the starter files (AGENTS.md,
+CONTRIBUTING.md, issue and PR templates) that are missing; afterwards they belong to
+the project and are never overwritten. It recognizes its own hook handlers by the
+snapshot paths they call and replaces only those; foreign hooks and settings stay.
+Setup regenerates `.github/skills` and `.github/agents` for the kit's skills and moves
+anything else found at its local skill paths to `.workflow-kit/replaced/`.
+Commit `.gitmodules`, the kit gitlink, the hook files and the generated `.github`
+files; local skill links and bundles stay ignored. In CI, run both commands and then
+`git diff --exit-code`: any diff means committed outputs were stale.
 
 A kit update is a PR that bumps the gitlink, reruns `init-project` and
 `setup-skills`, and commits the result. Each developer then updates the submodule
@@ -59,10 +61,10 @@ and [Impeccable](docs/impeccable.md).
 ## Developing the kit
 
 ```sh
+node scripts/init-project.mjs --existing
 node scripts/setup-skills.mjs
+git diff --exit-code
 node --test scripts/tests
-node scripts/check-skills.mjs
-node scripts/init-project.mjs --existing --check
 ```
 
 CI runs the commands above in one Linux job: about 20

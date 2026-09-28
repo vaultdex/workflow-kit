@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -13,19 +13,11 @@ const temporary = (t, name) => {
   return path;
 };
 
-test('setup-skills links every provider in a fresh checkout and keeps a foreign tracked companion', t => {
+test('setup-skills links every provider in a fresh checkout and reruns cleanly', t => {
   const fixture = temporary(t, 'workflow-kit setup ');
   execFileSync('git', ['init', '--quiet', fixture]);
   copyFileSync(join(kit, '.gitattributes'), join(fixture, '.gitattributes'));
   const setup = name => spawnSync(process.execPath, [join(kit, 'scripts', name)], { cwd: fixture, encoding: 'utf8' });
-  const collision = join(fixture, '.github/agents/impeccable-documenter.agent.md');
-  mkdirSync(dirname(collision), { recursive: true });
-  writeFileSync(collision, 'foreign tracked agent\n');
-  execFileSync('git', ['-C', fixture, 'add', '.github/agents']);
-  assert.notEqual(setup('setup-impeccable.mjs').status, 0);
-  assert.equal(readFileSync(collision, 'utf8'), 'foreign tracked agent\n');
-  execFileSync('git', ['-C', fixture, 'rm', '--cached', '--quiet', '-r', '.github/agents']);
-  rmSync(collision);
   for (let run = 0; run < 2; run++) {
     const result = setup('setup-skills.mjs');
     assert.equal(result.status, 0, result.stderr);

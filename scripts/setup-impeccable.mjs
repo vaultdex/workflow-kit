@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
   readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
@@ -23,7 +22,6 @@ const text = (path) => readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 const gitTool = externalTool("git", root, kit, process.cwd());
 const git = (...args) => execFileSync(gitTool.file, args, { cwd: root, env: gitTool.env, encoding: "utf8" });
 const present = (path) => lstatSync(path, { throwIfNoEntry: false });
-const digest = path => createHash("sha256").update(text(path)).digest("hex");
 
 function companionFiles(base) {
   const copilot = ".github/skills/impeccable";
@@ -70,10 +68,6 @@ function generateSkill(skill, to) {
 
 localDirectory(root, state);
 assert.ok(!present(bundle)?.isSymbolicLink(), "Generated bundle must not be a link");
-const receipt = ".github/skills/impeccable/.vaultdex-source.json";
-localDirectory(root, dirname(join(root, receipt)));
-assert.ok(!present(join(root, receipt)) || present(join(root, receipt)).isFile(),
-  "Receipt must be a regular file");
 git("-C", kit, "submodule", "update", "--init", "--", ".vendor/impeccable");
 assert.equal(git("-C", source, "status", "--porcelain", "--untracked-files=all").trim(), "",
   "Impeccable submodule has local changes; preserve/review them before setup");
@@ -93,24 +87,6 @@ try {
     copyTracked(directory, join(next, directory));
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
-  const recorded = existsSync(join(root, receipt)) ? JSON.parse(text(join(root, receipt))) : null;
-  const files = Object.fromEntries(companionFiles(next).sort().map(file => [file, digest(join(next, file))]));
-  writeFileSync(join(next, receipt), JSON.stringify({ revision, files }, null, 2) + "\n");
-  const oldFiles = companionFiles(bundle);
-  const newFiles = companionFiles(next);
-  const trackedCopilot = new Set(git("ls-files", "-z", "--", ".github/skills/impeccable",
-    ".github/agents/impeccable*").split("\0").filter(Boolean));
-  // Companions outside the bundle are replaced or removed only while they match a known generated state.
-  for (const file of new Set([...oldFiles, ...newFiles, ...trackedCopilot])) {
-    const target = join(root, file);
-    localDirectory(root, dirname(target));
-    if (!present(target)) continue;
-    assert.ok(lstatSync(target).isFile() && (file === receipt
-      || recorded?.files?.[file] === digest(target)
-      || (newFiles.includes(file) && digest(target) === digest(join(next, file)))
-      || (oldFiles.includes(file) && readFileSync(target).equals(readFileSync(join(bundle, file))))),
-    `Existing or edited companion left untouched: ${target}`);
-  }
   if (existsSync(bundle)) renameSync(bundle, previous);
   try { renameSync(next, bundle); }
   catch (error) {
@@ -118,9 +94,15 @@ try {
     throw error;
   }
   for (const skill of linkedSkills) link(root, join(root, skill), join(bundle, skill));
-  for (const file of new Set([...oldFiles, ...trackedCopilot].filter((file) => !newFiles.includes(file))))
-    if (present(join(root, file))) unlinkSync(join(root, file));
-  for (const file of newFiles) copyFileSync(join(bundle, file), join(root, file));
+  // Copilot skill and the impeccable* agents/commands are generated: replace them whole, so upstream removals disappear.
+  for (const file of companionFiles(root)) {
+    localDirectory(root, dirname(join(root, file)));
+    unlinkSync(join(root, file));
+  }
+  for (const file of companionFiles(bundle)) {
+    localDirectory(root, dirname(join(root, file)));
+    copyFileSync(join(bundle, file), join(root, file));
+  }
   published = true;
   console.log(`Impeccable ${revision.slice(0, 7)}: five providers linked; tracked Copilot assets and companions refreshed.\n`
     + "Hook engine and trust unchanged; install the engine with install-impeccable-hooks.mjs.");
