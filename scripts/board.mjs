@@ -10,7 +10,6 @@ const project = JSON.parse(readFileSync('.github/workflow-project.json', 'utf8')
 const [owner, name] = project.repository.split('/');
 const number = Number(String(ref).replace(/^#/, ''));
 const gh = externalTool('gh', process.cwd());
-const rank = ['Urgent', 'High', 'Medium', 'Low'];
 
 function graphql(query, variables = {}) {
   // Organization-linked Priority fields live on the issue and need this preview header.
@@ -62,6 +61,8 @@ function next() {
     projectItems(first:20){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
       priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
   { q: `repo:${project.repository} is:issue is:open -is:blocked` }).search;
+  // The Priority field's option order is the ranking, whatever the scale (High/Low, P0/P1, …).
+  const rank = selectField('Priority').choices.map(choice => choice.name);
   const order = priority => rank.includes(priority) ? rank.indexOf(priority) : rank.length;
   const ready = nodes.map(issue => ({ ...issue, item: projectItem(issue) }))
     .filter(issue => issue.item?.status?.name === 'Ready')
@@ -73,15 +74,20 @@ function next() {
   if (issueCount > nodes.length) console.log(`Only the first ${nodes.length} of ${issueCount} unblocked open issues were read.`);
 }
 
-function set(fieldName) {
-  const issue = readIssue();
+/** A single-select Project field with its options in configured order. */
+function selectField(fieldName) {
   const field = graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:50){nodes{...on ProjectV2SingleSelectField{
     id name options{id name} issueField{...on IssueFieldSingleSelect{id options{id name}}}}}}}}}`, { id: project.id })
     .node.fields.nodes.find(candidate => candidate.name === fieldName);
   assert.ok(field, `${project.url} has no single-select ${fieldName} field`);
   // An empty Project option list means the field mirrors an organization issue field.
   const linked = !field.options.length && field.issueField;
-  const choices = linked ? linked.options : field.options;
+  return { field, linked, choices: linked ? linked.options : field.options };
+}
+
+function set(fieldName) {
+  const issue = readIssue();
+  const { field, linked, choices } = selectField(fieldName);
   const option = choices.find(choice => choice.name.toLowerCase() === String(value).toLowerCase());
   assert.ok(option, `Use one of: ${choices.map(choice => choice.name).join(', ')}`);
   if (linked) {
