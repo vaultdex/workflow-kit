@@ -73,6 +73,9 @@ assert.equal(git("-C", source, "status", "--porcelain", "--untracked-files=all")
   "Impeccable submodule has local changes; preserve/review them before setup");
 // assume-unchanged (lowercase tag) or skip-worktree (S) would hide edits from the status check above.
 assert.ok(!/^(?:[a-z]|S) /m.test(git("-C", source, "ls-files", "-v")), "Impeccable source hides local changes from git status");
+// submodule.<name>.update=none skips the checkout above; only the kit's pin may be packaged.
+assert.equal(git("-C", source, "rev-parse", "HEAD").trim(), git("-C", kit, "rev-parse", ":.vendor/impeccable").trim(),
+  "Impeccable source is not at the kit pin");
 const version = text(join(security, "VERSION")).trim();
 const stage = mkdtempSync(join(state, "setup-"));
 const next = join(stage, "next");
