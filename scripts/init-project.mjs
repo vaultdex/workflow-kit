@@ -6,6 +6,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projectRoot } from './checkout-root.mjs';
+import { checkDirectory } from './provider-links.mjs';
 
 const kit = realpathSync.native(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
 const requestedRoot = projectRoot();
@@ -20,13 +21,10 @@ const present = p => lstatSync(p, { throwIfNoEntry: false });
 const ours = handler => /\.(?:ponytail|impeccable)[\\/]+vaultdex[\\/]/.test(JSON.stringify(handler));
 const isHooks = name => /^(?:\.(?:codex|cursor)\/hooks\.json|\.claude\/settings\.json|\.github\/hooks\/[\w.-]+\.json)$/.test(name);
 
-/** A project file that must stay inside the checkout and must not be a directory or link target elsewhere. */
+/** A project file below the checkout, reached without links, that is a plain file if it exists. */
 function safe(file) {
   const target = join(root, file);
-  let p = target;
-  while (!present(p)) p = dirname(p);
-  const actual = realpathSync(p);
-  assert.ok(actual === realpathSync(root) || actual.startsWith(realpathSync(root) + sep), `Target leaves checkout: ${file}`);
+  checkDirectory(root, dirname(target));
   assert.ok(!present(target) || present(target).isFile(), `Refusing non-file target: ${file}`);
   return target;
 }
@@ -51,7 +49,8 @@ function mergeHooks(name, template) {
     if (kept.length) hooks[event] = kept;
   }
   for (const [event, groups] of Object.entries(template?.hooks ?? {})) hooks[event] = [...(hooks[event] ?? []), ...groups];
-  const merged = { ...template, ...current, hooks };
+  // Template keys are schema metadata (version, description) and advance with the kit; other settings stay.
+  const merged = { ...template, ...current, ...template, hooks };
   // A file that held only kit handlers and schema metadata goes when its template is retired.
   if (!template && !Object.keys(hooks).length && Object.keys(merged).every(key => ['hooks', 'version', 'description'].includes(key))) {
     if (existsSync(target)) unlinkSync(target);

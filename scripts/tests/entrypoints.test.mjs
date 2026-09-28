@@ -21,7 +21,7 @@ function fixture(t) {
   mkdirSync(join(root, '.git'), { recursive: true });
   mkdirSync(join(kit, 'templates'), { recursive: true });
   mkdirSync(join(kit, 'scripts'));
-  for (const script of ['init-project.mjs', 'checkout-root.mjs']) copyFileSync(new URL(`../${script}`, import.meta.url), join(kit, 'scripts', script));
+  for (const script of ['init-project.mjs', 'checkout-root.mjs', 'provider-links.mjs']) copyFileSync(new URL(`../${script}`, import.meta.url), join(kit, 'scripts', script));
   const run = (...args) => spawnSync(process.execPath, [join(kit, 'scripts/init-project.mjs'), ...args], { cwd: root, encoding: 'utf8' });
   const template = (name, value) => (typeof value === 'string' ? write : json)(join(kit, 'templates', name), value);
   return { base, root, kit, run, template };

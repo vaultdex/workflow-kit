@@ -8,8 +8,8 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 const present = path => lstatSync(path, { throwIfNoEntry: false });
 const stamp = new Date().toISOString().replaceAll(':', '-');
 
-/** Create `path` as a directory below `root`; no existing component may be a link or a file (no redirected state). */
-export function localDirectory(root, path) {
+/** Assert `path` lies below `root` and no existing component on the way is a link or a file (no redirected state). */
+export function checkDirectory(root, path) {
   const inside = relative(root, path);
   assert.ok(!isAbsolute(inside) && inside.split(sep)[0] !== '..', `Directory leaves checkout: ${path}`);
   let current = root;
@@ -19,6 +19,11 @@ export function localDirectory(root, path) {
     if (!entry) break;
     assert.ok(entry.isDirectory(), `Refusing linked or non-directory path: ${relative(root, current)}`);
   }
+}
+
+/** Create `path` as a directory below `root` after `checkDirectory`. */
+export function localDirectory(root, path) {
+  checkDirectory(root, path);
   mkdirSync(path, { recursive: true });
 }
 

@@ -25,8 +25,10 @@ export function projectRoot() {
  * cannot substitute it. The returned environment keeps only such PATH entries and stops Windows
  * from searching the working directory first. */
 export function externalTool(name, ...paths) {
-  const checkouts = paths.map(checkoutRoot);
-  const outside = path => checkouts.every(base => path !== base && !path.startsWith(base + sep));
+  // Windows paths compare case-insensitively; don't rely on realpath returning one casing.
+  const fold = path => process.platform === 'win32' ? path.toLowerCase() : path;
+  const checkouts = paths.map(path => fold(checkoutRoot(path)));
+  const outside = path => checkouts.every(base => fold(path) !== base && !fold(path).startsWith(base + sep));
   const directories = (process.env.PATH ?? '').split(delimiter).filter(isAbsolute)
     .filter(path => existsSync(path) && outside(realpathSync.native(path)));
   const file = directories.map(path => join(path, process.platform === 'win32' ? `${name}.exe` : name))
