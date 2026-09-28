@@ -32,7 +32,8 @@ function check() {
   const blocked = [], unknown = [];
   if (issue.state !== 'OPEN') blocked.push('issue is closed');
   if (!projectItem(issue)) unknown.push(`issue is not on ${project.url}`);
-  else if (!status || ['Backlog', 'Done'].includes(status)) blocked.push(`status is ${status ?? 'unset'}`);
+  else if (!status) unknown.push('the Project status is unset');
+  else if (['Backlog', 'Done'].includes(status)) blocked.push(`status is ${status}`);
   const { totalCount, nodes } = issue.blockedBy;
   const readable = nodes.filter(Boolean);
   if (readable.length < totalCount) unknown.push(`only ${readable.length} of ${totalCount} predecessors are readable`);

@@ -8,7 +8,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projectRoot } from './checkout-root.mjs';
 
-const kit = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+const kit = realpathSync.native(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
 const requestedRoot = projectRoot();
 // The installed kit owns only itself or the checkout it is vendored into.
 const root = requestedRoot === kit ? kit : resolve(kit, '../..');
