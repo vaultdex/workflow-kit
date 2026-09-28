@@ -16,7 +16,7 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
 | --- | --- |
 | Backlog | Newly proposed, awaiting human triage, or still infeasible after blockers resolve; record reasons. |
 | Ready | Human-approved feasible work; unresolved dependencies/blockers may remain. Placement authorizes a start only under `"start": "ready"` (start policy below). |
-| In progress | Taken from Ready under the start policy after all execution blockers are resolved; one driver and linked session, branch/PR. This is the Doing state. |
+| In progress | Taken from Ready under the start policy and execution check, including its bounded human exception; one driver and linked session, branch/PR. This is the Doing state. |
 | Automated review | Ready PR with focused local checks passed; selected CI and automatic reviews run together. Disclose pending project-defined final proof. |
 | Human review | Ready for human acceptance: selected checks passed, automatic reviews finished and every finding fixed or linked to an actionable follow-up; disclose confirmed unavailable reviews under the exception below. |
 | Done | Acceptance satisfied; delivered repository work actually merged. |
@@ -29,10 +29,10 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   implementation or moving to In progress; under `"start": "ready"`, Ready placement
   from human-authorized triage is that authorization (start policy below).
   Preserve native dependency links and explicit external blocker/recovery evidence.
-  Before selecting Ready work, recheck blockers and skip blocked items: GitHub
-  resolves dependency relationships when predecessors close, but Ready itself is
-  not an execution gate. If no Ready issue is executable, report its blockers;
-  never bypass them or treat waiting as permission.
+  Before selecting Ready work, run the [execution check](#execution-check) and skip
+  blocked items. Closed predecessors remain linked; verify their delivery rather
+  than treating Ready or closure alone as clearance. If no Ready issue is executable,
+  report its blockers; never bypass them or treat waiting as permission.
 - Before adding work, inspect relevant open/closed issues, cards and competing PRs.
   Extend compatible unowned work; coordinate foreign active scope. Plans specify
   outcome, files/contracts, non-goals, steps, acceptance, checks, real dependencies,
@@ -51,12 +51,17 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   unrelated work. Analysis permission is not implementation permission.
 - A human request to implement a Backlog issue authorizes preparing/checking Ready:
   record the instruction and accepted scope, move through Ready,
-  then start In progress only after resolving execution blockers. Do not skip unresolved dependencies or required approval.
+  then start In progress only after the execution check passes or its specific human
+  exception is recorded with source, permitted work and remaining gates. Do not skip
+  unresolved dependencies or required approval outside that recorded exception.
   Existing authorization covers verification/review fixes within the same active
-  scope; starting another issue needs new authorization under the start policy. Native automations must
+  scope, subject to the execution check; starting another issue needs new
+  authorization under the start policy. Native automations must
   not promote work to Ready/In progress just because a PR was linked or a bot acted.
 - Before taking work, refresh main, status, assignee, dependencies and linked PRs.
-  Record driver/session/branch, assign and set In progress, then re-read. Shared
+  Only after the execution check passes (or its specific human exception is recorded
+  with source, permitted work and remaining gates), record evidence and driver/session/branch,
+  assign and set In progress, then re-read ownership and blockers before editing. Shared
   GitHub logins still need distinct sessions. Edits are not atomic claims; competing
   ownership/overlap stops affected work pending coordination. Inactivity grants nothing.
 - Driver owns integration, decisions, proof and delivery. Delegated slices need
@@ -67,6 +72,68 @@ claim/paired-research/completion PRs, dashboard synchronizer or automatic all-bo
   workflow/migration boundaries and recovery → authorized live targets/operator
   evidence. Old R0–R4 labels and agent-merge exceptions are retired. Human review
   and merge remain default; green checks, labels or board edits grant no authority.
+
+### Execution check
+
+Run immediately before taking work, resuming after interruption or handoff, and
+every move to In progress, including review corrections. Earlier comments, memory,
+Ready placement, an existing branch/PR or the same driver are not current evidence.
+
+```sh
+gh issue view ISSUE --repo OWNER/REPO --json state,blockedBy,assignees,projectItems
+```
+
+Require a successful command, an open issue, the authorized Project status and
+ownership, and complete native dependency data. The command's `projectItems`
+contains titles/statuses, not Project identity: separately query native Project
+items with their `project.id` and status, matching the configured Project ID in
+`.github/workflow-project.json` and this issue. Resolve owner/number to that ID if
+needed; paginate until the matching item is found or all items are exhausted.
+Never accept a same-title board's status; missing/ambiguous identity is UNKNOWN.
+Compare `blockedBy.totalCount`
+with `blockedBy.nodes.length`; check every predecessor's current state and URL,
+including other repositories. If the CLI lacks this field or returns fewer nodes,
+read issue state/ownership without that field and use the native dependency API
+with full pagination. Both reads must succeed:
+
+```sh
+gh issue view ISSUE --repo OWNER/REPO --json state,assignees,projectItems
+gh api --paginate repos/OWNER/REPO/issues/ISSUE/dependencies/blocked_by
+```
+
+Any open native predecessor means **BLOCKED**. A failed request, inaccessible
+predecessor, missing field or incomplete response means **UNKNOWN**, never an empty
+blocker list. For closed predecessors verify actual required delivery or an accepted
+disposition; closure/Not Planned alone is insufficient. Read current issue scope,
+decisions and external prerequisites too: an empty native list does not clear them.
+
+BLOCKED or UNKNOWN forbids claiming the issue, moving it to In progress or starting
+dependent implementation. Preserve existing work; use [recovery](#recovery-scope-and-findings).
+Do not remove dependencies, silently narrow acceptance or call a native blocker
+"merge-only" to make work executable. Unaffected work means another authorized,
+executable issue or read-only investigation. A specific human instruction may
+authorize a bounded exception despite a named blocker or specified unavailable or
+incomplete check: record its source, permitted work and remaining gates before
+acting. Preserve the BLOCKED/UNKNOWN result; the exception authorizes only its
+recorded work. A general "continue", review request or
+Ready placement is not such an exception; it grants no acceptance or merge waiver.
+
+In the existing takeover/handoff record, keep a short dated result: checked issue,
+native predecessor states and delivery evidence, external blockers, driver/session
+and STARTABLE/BLOCKED/UNKNOWN. No separate ledger or repeated unchanged-blocker
+comments. If prerequisites change during work, stop affected edits and refresh this
+decision. Recheck before Human review; unresolved integration/acceptance blockers
+prevent that handoff even when isolated tests pass or bounded edits were authorized.
+
+Review these cases without a specific human exception when changing these rules:
+
+| Case | Required decision |
+| --- | --- |
+| Ready with an open native predecessor | BLOCKED; no claim or In progress. |
+| Previously cleared predecessor reopens before resume | BLOCKED; preserve branch/PR and wait for verified resolution. |
+| Review requests a fix while a native predecessor is open | BLOCKED; ordinary review authorization does not waive it. |
+| API failure or incomplete native dependency list | UNKNOWN; recover the read, never infer no blockers. |
+| Predecessor closed without required delivery/disposition | No start until evidence resolves the prerequisite. |
 
 ## Issue plans and PR descriptions
 
@@ -110,8 +177,10 @@ issues; record real prerequisites with native `blocked by` links. Splitting work
 grants no start/scope permission. A kit delivery and its consumer update need
 separate issues/PRs; the consumer starts only after its prerequisite is satisfied.
 
-After Ready, authorization and ownership checks, create the issue-linked branch
-through Development or the native CLI, using the actual approved base:
+After Ready, authorization, ownership and a STARTABLE [execution check](#execution-check)
+(or its specific human exception recorded with source, permitted work and remaining gates),
+create the issue-linked branch through Development or the native CLI, using the
+actual approved base:
 
 ```sh
 gh issue develop ISSUE --repo OWNER/REPO --list
@@ -278,18 +347,21 @@ Label gemeinsam aktuell; keine neue Automation, Chat-Brücke oder Polling-Schlei
 
 ## Recovery, scope and findings
 
-- Block only affected work: record failure, unblocking evidence needed, next action
+- Apply the [execution check](#execution-check) before recovery work. Block affected
+  implementation, not read-only investigation or other executable authorized issues.
+  Record failure, unblocking evidence needed, next action
   and prior driver/branch/commit/PR; preserve partial work. Store handoff, return
   previously triaged feasible work to Ready with explicit blockers, release
   assignment and verify. Untriaged or inherently infeasible work stays Backlog.
   Anyone may refine unowned blockers;
-  preserve approvals. Resume after verified unblocking and fresh ownership/dependency
-  checks, never merely elapsed time.
+  preserve approvals. Resume only under the execution check, including its bounded
+  human exception, and fresh ownership/dependency checks, never merely elapsed time.
 - Inspect actual Git/GitHub state after failure; correct the cause and resume the
   same branch/PR. No resets, duplicate PRs, credential/protection changes or repo
   workarounds for invocation mistakes. Report tool/service defects with reproduction.
   Missing credentials, metadata or evidence remain explicit gaps.
-- Requested corrections return work to In progress and PR to Draft until settled.
+- Requested corrections return work to In progress and PR to Draft only after the
+  execution check passes (or its specific human exception is recorded).
   PR rejection/closure is not delivery or permission to take ownership. Cancellation
   needs a human not-planned disposition; preserve history, never mark implemented/Done.
   Reopening requires reconciling scope/status.
@@ -340,7 +412,8 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    delivered issue links and closure intent under [issue, branch and PR links](#issue-branch-and-pr-links).
    Once that verification, implementation and focused pre-review checks are
    complete, immediately mark Ready for Review / Automated review. Selected CI and
-   automatic reviews run together; failed CI returns to Draft/In progress. Automatic
+   automatic reviews run together; failed CI enters step 5's execution check before
+   any return to Draft/In progress. Automatic
    reviews start outside Draft; never wait for them while the PR is Draft.
    Optional extra self-reviews, subagents or analyses are not new gates delaying
    this transition. Their actionable findings enter the same rework cycle below.
@@ -352,8 +425,10 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    quality gate does not mean zero findings. Re-query after the final push and record
    remaining counts/dispositions. Missing or stale analysis is not a clean result;
    apply step 6 only for confirmed service limitations.
-5. Further work, including review fixes, returns PR to Draft and issue to In progress
-   before edits, including corrections requested during Human review. Finish changes
+5. Before further work, including review fixes or corrections requested during Human
+   review, repeat the [execution check](#execution-check). Only after it passes (or
+   its specific human exception is recorded), return PR to Draft and issue to
+   In progress before edits. Finish changes
    and affected checks, then mark Ready for Review / Automated review again and await
    the new review cycle; batch related corrections and rerun affected checks.
    After the last automatic correction, run the project's required expensive final
@@ -365,6 +440,8 @@ ownership conflicts. Use `codex/ISSUE-topic` branches from current origin/main.
    finding with verification or link an actionable follow-up issue under
    [findings disposition](#recovery-scope-and-findings). Record dispositions in PR;
    creating follow-ups does not waive this PR's acceptance or required checks.
+   Recheck native and external prerequisites; unresolved integration or acceptance
+   blockers forbid Human review, including under the review-service exception below.
    Once these gates are satisfied, move the issue to Human review and hand off for
    human acceptance. Ready for Review alone never means Human review.
 6. If automatic reviews cannot run because of exhausted tokens/quota, service failure

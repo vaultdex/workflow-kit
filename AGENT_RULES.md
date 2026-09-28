@@ -13,7 +13,14 @@ take precedence within system, permission and safety boundaries.
   and native features; fix root causes with the smallest complete change. Preserve
   validation, authorization, privacy, integrity, attribution and accessibility.
 - Start only executable, authorized Ready work. Check current main, ownership,
-  dependencies, external blockers and competing PRs; record the driver. New work
+  external blockers and competing PRs; record the driver. Before taking or resuming
+  work, including review fixes and every move to In progress, run the live
+  [execution check](docs/CONTRIBUTING.md#execution-check). An open native predecessor
+  or failed/incomplete check means STOP: no claim, In progress or dependent edits,
+  except for the check's specific, recorded human exception with source, permitted
+  work and remaining gates.
+  Ready, an existing branch/driver or a review request does not waive this check;
+  never reinterpret a native blocker as merge-only. New work
   enters Backlog with milestone, Priority and labels. Never promote it without
   human authorization; follow the project's configured start policy.
 - Issues own scope/evidence, the configured Project owns status, PRs own review.
@@ -42,7 +49,7 @@ take precedence within system, permission and safety boundaries.
 
 | Step | Required detail |
 | --- | --- |
-| Take or create work | [Board/ownership](docs/CONTRIBUTING.md#board-and-ownership), [issue plan](docs/CONTRIBUTING.md#issue-plans-and-pr-descriptions), [milestones](docs/CONTRIBUTING.md#milestones), [metadata](docs/CONTRIBUTING.md#priority-and-issue-metadata) |
+| Take, resume or create work | [Board/ownership and execution check](docs/CONTRIBUTING.md#board-and-ownership), [issue plan](docs/CONTRIBUTING.md#issue-plans-and-pr-descriptions), [milestones](docs/CONTRIBUTING.md#milestones), [metadata](docs/CONTRIBUTING.md#priority-and-issue-metadata) |
 | Branch, PR or scope boundary | [Issue/branch/PR links](docs/CONTRIBUTING.md#issue-branch-and-pr-links), [blockers and findings](docs/CONTRIBUTING.md#recovery-scope-and-findings) |
 | Change behavior | Affected project architecture/contracts and [Watchdog](WATCHDOG.md) |
 | Publish or rework | [Publication/review](docs/CONTRIBUTING.md#publication-and-review); local test commands and final gates |
