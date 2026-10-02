@@ -29,12 +29,15 @@ test('generated skills and hook sources survive a plain clone without setup', t 
   const clone = temporary(t, 'workflow-kit clone ');
   execFileSync('git', ['clone', '--quiet', '--no-local', fixture, clone]);
   const skills = readdirSync(join(fixture, '.agents/skills')).filter(name => lstatSync(join(fixture, '.agents/skills', name)).isDirectory());
-  assert.ok(skills.includes('ponytail') && skills.includes('impeccable') && skills.includes('tdd'));
+  assert.ok(skills.includes('ponytail') && skills.includes('impeccable') && skills.includes('tdd') && skills.includes('find-skills'));
   for (const provider of ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'])
     for (const skill of skills) {
       const path = join(provider, 'skills', skill);
       assert.ok(lstatSync(join(clone, path)).isDirectory(), path);
       assert.deepEqual(readFileSync(join(clone, path, 'SKILL.md')), readFileSync(join(fixture, path, 'SKILL.md')), path);
+      if (skill === 'find-skills')
+        for (const file of ['SKILL.md', 'LICENSE', 'NOTICE.md'])
+          assert.deepEqual(readFileSync(join(clone, path, file)), readFileSync(join(kit, '.agents/skills/find-skills', file)));
     }
   assert.ok(lstatSync(join(clone, '.agents/hooks/ponytail-activate.js')).isFile());
   assert.ok(lstatSync(join(clone, '.codex/agents/impeccable_finish_reviewer.toml')).isFile());

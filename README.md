@@ -1,8 +1,9 @@
 # Workflow Kit
 
 Contribution workflow, GitHub Project setup and agent skills (Ponytail,
-Impeccable and Matt Pocock's complete collection) for agent-driven development,
-maintained by Vaultdex under MIT. Sources are pinned upstream submodules;
+Impeccable, Matt Pocock's complete collection and Vercel's `find-skills`) for
+agent-driven development, maintained by Vaultdex under MIT. Sources are pinned
+upstream submodules or the small [find-skills snapshot](.agents/skills/find-skills/NOTICE.md);
 their licenses, notices and reviewed adaptations ship with generated skills.
 
 - Agents start at [AGENT_RULES.md](AGENT_RULES.md), linked from the project's AGENTS.md.
