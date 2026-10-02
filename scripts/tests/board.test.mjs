@@ -81,7 +81,9 @@ test('In progress requires a startable issue assigned to the authenticated user 
   writeIssue(assigned());
   for (const failure of ['fail', 'fail-viewer']) {
     writeFileSync(join(checkout, failure), '');
-    assert.notEqual(run('status', '1', 'In progress').status, 0);
+    const result = run('status', '1', 'In progress');
+    assert.notEqual(result.status, 0);
+    if (failure === 'fail-viewer') assert.match(result.stdout, /STARTABLE/);
     assert.equal(existsSync(mutations), false, 'API failure must not mutate status');
     rmSync(join(checkout, failure));
   }
