@@ -32,9 +32,20 @@ Generated discovery files are ordinary committed files in `.agent`, `.agents`,
 `.claude`, `.github`, `.opencode` and `.pi`, plus Codex agents in `.codex/agents`.
 Changed content or old links at a kit path move to `.workflow-kit/replaced/`;
 foreign hooks and settings stay. Equal generated files remain untouched.
+
+### Commit generated files
+
 Commit `.gitmodules`, the kit gitlink, hook definitions, `.agents/hooks` sources
 and all generated discovery files. Personal state, download caches and replaced
-files stay ignored. In CI, run both commands and then
+files stay ignored. After staging the intended files, preserve Unix launcher modes
+in Git explicitly, including on Windows and with `core.filemode=false`:
+
+```sh
+git add --chmod=+x -- ":(glob)**/skills/impeccable/scripts/impeccable" ":(glob)**/skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh"
+```
+
+The clone test verifies all twelve executable Git entries. In Linux CI, regenerate
+and then run
 `git add --intent-to-add --all && git diff --exit-code HEAD`: any diff, including a new
 file, means committed outputs were stale.
 

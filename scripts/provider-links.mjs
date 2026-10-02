@@ -1,6 +1,6 @@
 // Provider discovery files are ordinary, committable files. Replaced local content stays recoverable.
 import assert from 'node:assert/strict';
-import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs';
+import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 const present = path => lstatSync(path, { throwIfNoEntry: false });
@@ -41,10 +41,18 @@ export function rename(from, to) {
 export function moveAside(root, path) {
   // Through a linked ancestor, `path` would name an entry somewhere else.
   checkDirectory(root, dirname(path));
-  if (!present(path)) return;
+  const entry = present(path);
+  if (!entry) return;
   const destination = join(root, '.workflow-kit/replaced', stamp, relative(root, path));
   localDirectory(root, dirname(destination));
-  rename(path, destination);
+  const target = entry.isSymbolicLink() ? readlinkSync(path) : null;
+  if (process.platform !== 'win32' && target && !isAbsolute(target)) {
+    // Moving a relative link verbatim would break recovery. Keep its original target
+    // without reading through it; remove the old link only after the backup exists.
+    // Preserve `..` after symlink components rather than normalizing it lexically.
+    symlinkSync(dirname(path) + sep + target, destination);
+    unlinkSync(path);
+  } else rename(path, destination);
   console.log(`Moved ${relative(root, path)} to ${relative(root, destination)}`);
 }
 

@@ -17,6 +17,7 @@ const temporary = (t, name) => {
 test('generated skills and hook sources survive a plain clone without setup', t => {
   const fixture = temporary(t, 'workflow-kit setup ');
   execFileSync('git', ['init', '--quiet', fixture]);
+  execFileSync('git', ['-C', fixture, 'config', 'core.filemode', 'false']);
   copyFileSync(join(kit, '.gitattributes'), join(fixture, '.gitattributes'));
   const setup = name => spawnSync(process.execPath, [join(kit, 'scripts', name)], { cwd: fixture, encoding: 'utf8' });
   for (let run = 0; run < 2; run++) {
@@ -25,9 +26,16 @@ test('generated skills and hook sources survive a plain clone without setup', t 
   }
   // Only discovery files enter the commit; no ignored staging bundles or upstream submodules.
   execFileSync('git', ['-C', fixture, 'add', '.gitattributes', '.agent', '.agents', '.claude', '.github', '.codex', '.opencode', '.pi']);
+  const executablePaths = ['**/skills/impeccable/scripts/impeccable', '**/skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh']
+    .map(path => `:(glob)${path}`);
+  // The documented commit step preserves modes even on Windows/core.filemode=false.
+  execFileSync('git', ['-C', fixture, 'add', '--chmod=+x', '--', ...executablePaths]);
   execFileSync('git', ['-C', fixture, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'Generated discovery']);
   const clone = temporary(t, 'workflow-kit clone ');
   execFileSync('git', ['clone', '--quiet', '--no-local', fixture, clone]);
+  const executableEntries = execFileSync('git', ['-C', clone, 'ls-files', '--stage', '--', ...executablePaths], { encoding: 'utf8' }).trim().split('\n');
+  assert.equal(executableEntries.length, 12);
+  assert.ok(executableEntries.every(entry => entry.startsWith('100755 ')), 'Git clone preserves every Unix executable mode even with core.filemode=false');
   const skills = readdirSync(join(fixture, '.agents/skills')).filter(name => lstatSync(join(fixture, '.agents/skills', name)).isDirectory());
   assert.ok(skills.includes('ponytail') && skills.includes('impeccable') && skills.includes('tdd') && skills.includes('find-skills'));
   for (const provider of ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'])

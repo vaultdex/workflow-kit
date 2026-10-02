@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -77,7 +77,15 @@ test('copies, files and old provider junctions become ordinary files; originals 
   const copy = join(f.root, '.claude/skills/ponytail'), file = join(f.root, '.agents/hooks'), link = join(f.root, '.pi/skills/ponytail');
   write(join(copy, 'SKILL.md'), 'Copied from another worktree\n');
   rmSync(file, { recursive: true }); write(file, 'User file\n');
-  rmSync(link, { recursive: true }); symlinkSync(join(f.source, 'skills/ponytail'), link, 'junction');
+  const legacy = join(f.root, '.workflow-kit/old-ponytail');
+  const oldTarget = join(legacy, 'skills/ponytail');
+  write(join(oldTarget, 'SKILL.md'), 'Personal legacy customization\n');
+  const alias = join(f.root, 'legacy-alias');
+  if (process.platform !== 'win32') symlinkSync(join(legacy, 'skills'), alias, 'dir');
+  rmSync(link, { recursive: true });
+  // `..` following a symlink must keep filesystem semantics, not lexical normalization.
+  symlinkSync(process.platform === 'win32' ? oldTarget : `${relative(dirname(link), alias)}/../skills/ponytail`, link,
+    process.platform === 'win32' ? 'junction' : 'dir');
   succeeds(f.run());
   for (const path of [copy, file, link]) assert.ok(lstatSync(path).isDirectory(), path);
   assert.equal(readFileSync(join(f.source, 'skills/ponytail/SKILL.md'), 'utf8').replaceAll('\r\n', '\n'),
@@ -87,6 +95,9 @@ test('copies, files and old provider junctions become ordinary files; originals 
   assert.equal(readFileSync(join(replaced, '.claude/skills/ponytail/SKILL.md'), 'utf8'), 'Copied from another worktree\n');
   assert.equal(readFileSync(join(replaced, '.agents/hooks'), 'utf8'), 'User file\n');
   assert.ok(lstatSync(join(replaced, '.pi/skills/ponytail')).isSymbolicLink());
+  assert.equal(readFileSync(join(replaced, '.pi/skills/ponytail/SKILL.md'), 'utf8'), 'Personal legacy customization\n',
+    'The preserved link still exposes personal contents');
+  assert.equal(readFileSync(join(oldTarget, 'SKILL.md'), 'utf8'), 'Personal legacy customization\n');
   succeeds(f.run());
   assert.deepEqual(readdirSync(join(f.root, '.workflow-kit/replaced')), [moved], 'Equal generated files are kept');
 });

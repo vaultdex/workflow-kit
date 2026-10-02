@@ -81,7 +81,8 @@ enabled, untrusted or unavailable.
 
 ## 5. Deliver
 
-Commit intended configuration, generated discovery files for every provider and
+Follow [Commit generated files](README.md#commit-generated-files), including the
+explicit Git executable modes. Commit intended configuration, discovery files for every provider and
 `.agents/hooks` sources. Personal settings, staging bundles, backups and credentials
 stay out. Verify a plain clone has ordinary skill files and companions without
 running setup; verify hook snapshots and trust separately. Open the PR, wait for
