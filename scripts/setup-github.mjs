@@ -54,5 +54,5 @@ for (const [label, color] of [['ci', '1d76db'], ['documentation', '0075ca'], ['t
   if (!labels.has(label)) gh('label', 'create', label, '--repo', repo, '--color', color);
 saveProject();
 console.log(`Project linked: ${project.url}\nLabels configured; existing labels preserved.\n`
-  + `Remaining account settings: authorize CodeRabbit; enable Codex automatic review; configure Project Auto-add for repo:${repo} is:issue.\n`
+  + `Remaining account settings: enable only the chosen reviewers; configure Project Auto-add for repo:${repo} is:issue.\n`
   + 'Verify native automation, permissions and required checks in GitHub; configuration is not proof of an active integration.');

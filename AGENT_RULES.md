@@ -14,6 +14,10 @@ details only for the current step.
 
 ## Start or resume
 
+First installation without the kit or Project binding uses the bounded
+[bootstrap procedure](SETUP.md#2-repository), then returns here. Existing-project
+API, authentication or dependency failures do not qualify.
+
 The driver completes these steps before implementation, including review fixes:
 
 1. Read the issue, comments and [start policy](docs/CONTRIBUTING.md#starting-work).

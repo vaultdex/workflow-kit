@@ -5,8 +5,8 @@ for missing decisions, access or approvals; never request credentials in chat.
 
 ## 1. Agree on the target
 
-Read target AGENTS.md and contribution rules; inspect remote, Git status, board,
-CI, update bots and agent configuration. Confirm the actual target, which may
+Read any existing target AGENTS.md and contribution rules; inspect its remote,
+Git status, board, CI, update bots and agent configuration. Confirm the target, which may
 differ from this checkout. Resolve only missing choices in one compact round:
 
 - **Repository:** a new one from
@@ -30,8 +30,18 @@ For a new repository run
 `gh repo create OWNER/REPO --template vaultdex/project-template --private`, then
 clone it with `--recurse-submodules`.
 
-For an existing repository, follow [Starting work](docs/CONTRIBUTING.md#starting-work)
-and use its issue branch. Add the kit only if absent. Run the
+With a working kit and `.github/workflow-project.json`, follow
+[Start or resume](AGENT_RULES.md#start-or-resume) before setup edits.
+
+**First installation:** the explicit setup request authorizes only bootstrapping
+the missing kit/Project binding. Follow existing project rules; create or reuse
+the setup issue and its linked branch, switch to it, assign yourself and record
+your session, scope and unavailable checks or metadata before editing. Verify
+ownership and native/external prerequisites; missing tooling is not STARTABLE
+and does not waive blockers or unreadable dependencies.
+Limit edits to establishing the kit and board below, then complete the normal start.
+
+Add the kit only if absent. Run the
 [install commands](README.md#install-or-update-in-a-project); new projects use
 `init-project.mjs` without `--existing`. Preserve project rules, templates and CI.
 
@@ -40,24 +50,36 @@ of project facts and routes to build/tests, architecture, final proof and except
 
 ## 3. Board and labels
 
+Before reusing a board, configure exactly Backlog, Ready, In progress, Automated
+review, Human review, Done, plus a usable Priority scale. Migrate In review by
+renaming it to Automated review in place and adding Human review before Done;
+preserve option IDs, cards and existing Priority, including organization fields.
+
 Run `node .vendor/workflow-kit/scripts/setup-github.mjs OWNER/REPO [PROJECT_NUMBER]`.
 It copies or reuses the Project and records it in `.github/workflow-project.json`,
 keeping `"start"`. It also checks the six statuses and Priority, links the
 repository, and adds the missing default labels: ci, documentation, testing,
 security, dependencies, needs-human-input.
 
+If field validation fails, correct that board and repeat the same command; a
+copied board is already recorded, so do not create a replacement. Write and verify
+the agreed policy: `"start": "ready"`, or omit `start` for explicit requests.
+The script preserves an existing policy rather than choosing one.
+
+For first installation, add the setup issue to this Project, complete its
+[metadata](docs/CONTRIBUTING.md#issues), and set Ready under the explicit setup
+request. Now complete [Start or resume](AGENT_RULES.md#start-or-resume) before
+continuing. Failed checks stop dependent work; never label bootstrap as a passed check.
+
 Finish and verify these settings in the Project and repository; Project workflows
 require UI configuration:
 
-- **Statuses:** exactly Backlog, Ready, In progress, Automated review, Human
-  review, Done. To migrate a five-state board, rename In review to Automated review
-  in place and add Human review before Done, keeping option IDs and cards.
 - **Automation:** auto-add `repo:OWNER/REPO is:issue` to Backlog. Disable
   automations that move items to Ready or In progress on PR links or bot events,
   and any that set Human review from PR readiness or CI. Not-planned closures must
   not become Done.
-- **Priority:** keep an existing scale, even an organization-linked one. A new
-  project-local field gets Urgent, High, Medium, Low. Show Labels and Milestone.
+- **Metadata:** a new project-local Priority field gets Urgent, High, Medium, Low.
+  Show Labels and Milestone.
   Create the milestone `Hotfixes · laufend` if the project takes hotfixes.
 - **Reviewers:** enable only the chosen reviewers (CodeRabbit needs App
   authorization; Codex needs automatic reviews enabled), then verify each on the
