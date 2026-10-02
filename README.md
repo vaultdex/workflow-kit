@@ -1,10 +1,10 @@
 # Workflow Kit
 
-Contribution workflow, GitHub Project setup and agent skills (Ponytail,
-Impeccable, Matt Pocock's complete collection and Vercel's `find-skills`) for
-agent-driven development, maintained by Vaultdex under MIT. Sources are pinned
-upstream submodules or the small [find-skills snapshot](.agents/skills/find-skills/NOTICE.md);
-their licenses, notices and reviewed adaptations ship with generated skills.
+Contribution workflow, GitHub Project setup and agent skills: Ponytail,
+Impeccable, Matt Pocock's complete collection and Vercel's `find-skills`.
+Maintained by Vaultdex under MIT. Pinned upstream submodules and the
+[find-skills snapshot](.agents/skills/find-skills/NOTICE.md) retain their licenses,
+notices and reviewed adaptations in generated skills.
 
 - Agents start at [AGENT_RULES.md](AGENT_RULES.md), linked from the project's AGENTS.md.
 - To set up a repository, give your agent [SETUP.md](SETUP.md).
@@ -25,13 +25,19 @@ Without `--existing`, `init-project` also creates the starter files (AGENTS.md,
 CONTRIBUTING.md, issue and PR templates) that are missing; afterwards they belong to
 the project and are never overwritten.
 
-What the kit owns and rewrites: hook handlers that mention its snapshot directories
-`~/.ponytail/vaultdex/` or `~/.impeccable/vaultdex/` (don't point your own hooks
-there), and the skills, agents and commands the pinned upstreams ship, by name.
-Generated discovery files are ordinary committed files in `.agent`, `.agents`,
-`.claude`, `.github`, `.opencode` and `.pi`, plus Codex agents in `.codex/agents`.
-Changed content or old links at a kit path move to `.workflow-kit/replaced/`;
-foreign hooks and settings stay. Equal generated files remain untouched.
+### Generated files and ownership
+
+The kit owns hook handlers pointing into `~/.ponytail/vaultdex/` or
+`~/.impeccable/vaultdex/` (keep personal hooks elsewhere), and upstream skills, agents and
+commands by name. Generated discovery files are ordinary committed files in
+`.agent`, `.agents`, `.claude`, `.github`, `.opencode` and `.pi`, plus
+`.codex/agents`. Equal files stay untouched; changed content and old links move to
+`.workflow-kit/replaced/`. Foreign hooks and settings stay.
+
+A fresh clone/worktree discovers these files without generation, links or dependency
+installation. Generate only during kit installation/update. An update PR bumps the
+gitlink, reruns both generators above and commits their intended outputs. Changed
+hook snapshots also need the [installers](#hooks).
 
 ### Commit generated files
 
@@ -44,49 +50,41 @@ in Git explicitly, including on Windows and with `core.filemode=false`:
 git add --chmod=+x -- ":(glob)**/skills/impeccable/scripts/impeccable" ":(glob)**/skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh"
 ```
 
-The clone test verifies all twelve executable Git entries. In Linux CI, regenerate
-and then run
+The clone test verifies all twelve executable Git entries. In Linux CI, regenerate,
+then run
 `git add --intent-to-add --all && git diff --exit-code HEAD`: any diff, including a new
 file, means committed outputs were stale.
 
-A kit update is a PR that bumps the gitlink, reruns `init-project` and
-`setup-skills`, and commits the result. A fresh clone or worktree already contains
-skills and companions in each agent's discovery paths: no generation, links or
-dependency installation is needed to discover them. Run generators only when
-installing or updating the kit. A changed hook snapshot needs the installers below.
-
 ## Hooks
 
-The committed hook files call only personal snapshots that you install
-explicitly, once per machine and snapshot version. All checkouts reuse them:
+Committed hooks call explicitly installed personal snapshots. Install once per
+machine and snapshot version; all checkouts reuse them:
 
 ```sh
 node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs    # Ponytail mode at session start
 node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs  # Impeccable UI checks
 ```
 
-Then review and trust the project hooks in each agent and start a new session:
+Review and trust project hooks in each agent, then start a new session:
 `/hooks` in Codex CLI or Claude Code, the hooks view in the Codex app settings,
-Settings → Hooks in Cursor, `.github/hooks` for Copilot. While a snapshot is
-missing, the SessionStart hook prints an install hint. Hook files and manual runs
-don't prove that an agent loaded or trusted them. New definitions still require
-personal review and trust; a worktree does not need another snapshot installation.
-See [Ponytail](docs/ponytail.md)
-and [Impeccable](docs/impeccable.md).
+Settings → Hooks in Cursor, `.github/hooks` for Copilot. Missing snapshots produce
+a SessionStart install hint. Files and manual runs don't prove agent loading or
+trust; new definitions need personal review and trust. See
+[Ponytail](docs/ponytail.md) and [Impeccable](docs/impeccable.md) for hook behavior.
 
 ## Board commands
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
-`next`, `check ISSUE`, `status ISSUE "In progress"`, `priority ISSUE High`,
-`block ISSUE OWNER/REPO#N`. See
-[Starting work](docs/CONTRIBUTING.md#starting-work).
+`next`, `check ISSUE`, `status ISSUE "STATUS"`, `priority ISSUE High`,
+`block ISSUE OWNER/REPO#N`. Before implementation, complete
+[Start or resume](AGENT_RULES.md#start-or-resume); a check alone does not claim work.
 
 ## Developing the kit
 
 ```sh
 node scripts/init-project.mjs --existing
 node scripts/setup-skills.mjs
-git status --short    # commit everything listed
+git status --short    # review intended outputs; preserve unrelated work
 node --test scripts/tests
 ```
 
