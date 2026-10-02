@@ -1,9 +1,8 @@
 # Agent rules
 
-Read this once per task together with the project's AGENTS.md. Project rules and
-user instructions add local contracts; they cannot relax the hard rules. Links
-resolve inside the pinned kit: open a linked section only when you reach that
-step, and never load guides or skill trees you don't need.
+Read once per task with the project's AGENTS.md. Follow the harness's instruction
+hierarchy and the project's contracts. Links resolve inside this pinned kit; read
+details only for the current step.
 
 ## Hard rules
 
@@ -12,31 +11,51 @@ step, and never load guides or skill trees you don't need.
 - Never force-push, rewrite shared history, reset, stash or discard work you don't
   own, or bypass branch protection, required checks or spending limits.
 - Never expose secrets or commit personal configuration.
-- Start or resume implementation only on a STARTABLE issue that the start policy
-  authorizes you to take ([Starting work](docs/CONTRIBUTING.md#starting-work)).
-- Continue only your own work. Another session's issue, branch or PR needs an
-  explicit handover, even under a shared GitHub login.
+
+## Start or resume
+
+First installation without the kit or Project binding uses the bounded
+[bootstrap procedure](SETUP.md#2-repository), then returns here. Existing-project
+API, authentication or dependency failures do not qualify.
+
+The driver completes these steps before implementation, including review fixes:
+
+1. Read the issue, comments and [start policy](docs/CONTRIBUTING.md#starting-work).
+   Confirm authorization, external prerequisites and ownership. Another session's
+   issue, branch or PR needs explicit handover, even under a shared GitHub login.
+2. Run `node .vendor/workflow-kit/scripts/board.mjs check ISSUE` now. BLOCKED or
+   UNKNOWN stops dependent edits except for a specifically authorized, documented
+   [exception](docs/CONTRIBUTING.md#execution-check).
+3. Create the [issue-linked branch](docs/CONTRIBUTING.md#delivery), or reuse your
+   existing branch and PR for this issue. Switch to it in your worktree and verify
+   `git branch --show-current` before editing; preserve unrelated work.
+4. Assign yourself: `gh issue edit ISSUE --add-assignee "@me"`.
+5. Record the verdict, your session and branch in the issue. Assignment is not a lock.
+6. On STARTABLE, run `node .vendor/workflow-kit/scripts/board.mjs status ISSUE "In progress"`.
+   Read back the assignee, claim comment and Project status; start edits only when
+   all match. The command rechecks native readiness and your assignment, not session
+   ownership, external prerequisites or authorization.
+
+A documented blocker exception keeps the current status and failed verdict; skip
+the guarded transition, verify the other claim fields and edit only its permitted scope.
+
+On resume, verify the existing claim belongs to this session and update changed
+details. Subagents implement bounded assignments; only the driver claims and
+changes status. If prerequisites change, stop affected edits and repeat the check;
+check again before Human review.
 
 ## Workflow
 
 | Status | What you do |
 | --- | --- |
 | Backlog | Nothing without a human request; propose, don't implement. |
-| Ready | Start after `board.mjs check` says STARTABLE. |
+| Ready | Complete [Start or resume](#start-or-resume). |
 | In progress | Implement on the issue-linked branch; the PR stays Draft. |
 | Automated review | PR ready; wait for CI and every review bot; fix or link each finding. |
 | Human review | Hand off. A human accepts and merges. |
 | Done | Merged and accepted. |
 
-Board commands, run in the project (`gh` must be logged in):
-
-```sh
-node .vendor/workflow-kit/scripts/board.mjs next                      # startable Ready issues
-node .vendor/workflow-kit/scripts/board.mjs check 123                 # STARTABLE, BLOCKED or UNKNOWN
-node .vendor/workflow-kit/scripts/board.mjs status 123 "In progress"
-node .vendor/workflow-kit/scripts/board.mjs priority 123 High
-node .vendor/workflow-kit/scripts/board.mjs block 124 123              # 124 is blocked by 123 (or OWNER/REPO#N)
-```
+Run [board commands](README.md#board-commands) in the project with authenticated `gh`.
 
 ## Engineering
 
@@ -46,11 +65,9 @@ node .vendor/workflow-kit/scripts/board.mjs block 124 123              # 124 is 
   neighboring paths in the same push. If the same class of finding returns after
   two correction pushes, stop patching and re-examine the whole area's states, data
   flow and assumptions.
-- Take the first option that works: skip speculative needs, reuse repository code,
-  use the standard library or platform, use an installed dependency, and only then
-  write minimal new code. Check the pinned version's docs before reimplementing.
-- Add no speculative abstraction, option, wrapper, dependency or scaffolding.
-  Prefer deleting obsolete code to adding a replacement.
+- Use the first sufficient option: skip speculative work, reuse repository code,
+  standard library/platform, installed dependency, then minimal new code. Check
+  pinned-version docs before reimplementing; delete obsolete code and abstractions.
 - Preserve validation, authorization, privacy, data integrity, error handling,
   attribution and accessibility.
 - Scale proof with risk: focused regression, then cross-component contracts, then
@@ -77,7 +94,7 @@ node .vendor/workflow-kit/scripts/board.mjs block 124 123              # 124 is 
 
 | Step | Read |
 | --- | --- |
-| Pick, start or resume work | [Starting work](docs/CONTRIBUTING.md#starting-work) |
+| Pick work, resolve start authorization or blockers | [Starting work](docs/CONTRIBUTING.md#starting-work) |
 | Write or change an issue | [Issues](docs/CONTRIBUTING.md#issues) |
 | Branch, PR and review loop | [Delivery](docs/CONTRIBUTING.md#delivery) |
 | Blocked, failed or out-of-scope work | [Blockers and scope](docs/CONTRIBUTING.md#blockers-and-scope) |

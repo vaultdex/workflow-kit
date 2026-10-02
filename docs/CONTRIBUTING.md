@@ -1,15 +1,14 @@
 # Contribution workflow
 
-Details for the steps listed in [AGENT_RULES.md](../AGENT_RULES.md). The GitHub
-Project named in `.github/workflow-project.json` owns status and priority; issues
-own scope, acceptance, blockers and evidence; PRs own review. Keep no second task
-list, ledger or tracking issue.
+Reference for [AGENT_RULES.md](../AGENT_RULES.md). `.github/workflow-project.json`
+identifies the Project: it owns status/priority, issues own scope/acceptance/blockers/
+evidence, PRs own review. Keep no second task list, ledger or tracking issue.
 
 ## Starting work
 
-Statuses: Backlog → Ready → In progress → Automated review → Human review → Done.
-New issues, follow-ups included, start in Backlog. Only a human moves an issue from
-Backlog to Ready, and Ready may still hold issues with unresolved blockers.
+For the complete ordered procedure, follow [Start or resume](../AGENT_RULES.md#start-or-resume).
+New issues and follow-ups start in Backlog. Only human authorization permits moving
+Backlog to Ready; Ready can still contain blocked work.
 
 **Start policy.** By default every start needs an explicit human request that
 covers the issue. A project may set `"start": "ready"` in
@@ -18,16 +17,17 @@ request. A human request to implement a Backlog issue covers moving it through
 Ready. Authorization for an issue covers its review fixes; a different issue needs
 its own. Automations and bots never authorize a start.
 
-**Finding work.** `board.mjs next` lists open Ready issues whose native
-predecessors all closed as completed, highest Priority first. If nothing is startable, report the blockers and
-propose the next issue from Backlog with a short reason; don't implement it or
-change its status.
+**Finding work.** `board.mjs next` lists open Ready issues with every native
+predecessor completed, highest Priority first. It does not check ownership or
+external prerequisites. Check remaining candidates before reporting no available
+work. Then report blockers and propose a Backlog issue with a reason; do not start
+it or change its status without authorization.
 
 ### Execution check
 
-Run `board.mjs check ISSUE` right before you claim an issue, resume after an
-interruption or handoff, or return to In progress for review fixes. Earlier
-results, memory, an existing branch or the Ready status are not evidence.
+The [start procedure](../AGENT_RULES.md#start-or-resume) requires a fresh check on
+claim, resume, handoff and review fixes. Memory, an existing branch or Ready status
+does not replace it.
 
 | Verdict | Meaning |
 | --- | --- |
@@ -35,21 +35,22 @@ results, memory, an existing branch or the Ready status are not evidence.
 | BLOCKED | An open predecessor, a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, or status Backlog or Done. |
 | UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, an unset or unknown status, or the issue is missing from the Project. Retry the read; never read it as "no blockers". |
 
-The check covers native blockers only. Also read the issue's **Abhängigkeiten und
-Wiederaufnahme** section for external prerequisites such as access, releases or
-decisions.
+STARTABLE covers native prerequisites, not permission or ownership. Also inspect
+**Abhängigkeiten und Wiederaufnahme** for external access, releases and decisions.
+`status ISSUE "In progress"` repeats this check and requires assignment to the
+authenticated GitHub user before writing; it cannot distinguish sessions sharing
+a login. Failed reads prevent the transition. Other status commands remain
+metadata operations, not approval checks.
 
-BLOCKED or UNKNOWN means: don't claim, don't move to In progress, don't edit
-dependent code. Don't remove dependencies, narrow acceptance or call a blocker
-"merge-only" to make an issue startable. Only a specific human instruction that
-names the blocker allows bounded work despite it; record its source, the permitted
-work and the remaining gates in the issue first. "Continue", a review request or
-Ready placement is not such an instruction.
+BLOCKED or UNKNOWN stops claims, In progress and dependent edits. Preserve
+dependencies and acceptance; calling a blocker "merge-only" does not clear it.
+Only a specific human instruction naming that blocker authorizes bounded work:
+record its source, allowed work and remaining gates first. "Continue", a review
+request or Ready placement does not qualify. The guarded command still rejects a
+failed check: keep the current status and verdict, verify ownership and claim
+fields, then work only within the documented exception. It is never STARTABLE.
 
-**Claiming.** After STARTABLE, assign yourself, set In progress and note the
-verdict, your session and branch in the issue. Assignment is not a lock. If
-prerequisites change while you work, stop the affected edits and check again;
-check once more before Human review.
+**Claiming.** Complete and verify every step in [Start or resume](../AGENT_RULES.md#start-or-resume).
 
 **Delegation.** The driver owns integration, decisions, proof and delivery.
 Subagents get bounded, non-overlapping paths with acceptance and non-goals; they
@@ -139,10 +140,9 @@ and empty sections.
    as Sonar issues and hotspots. A green quality gate does not mean zero findings,
    and a missing or stale analysis is not clean. Don't re-request a review that is
    running or finished for the current commit without a concrete reason.
-4. To change code: run the execution check, set the PR to Draft and the issue to In
-   progress, batch the fixes, rerun the affected checks, mark the PR Ready for
-   Review, set Automated review and wait again. Merge main only for conflicts or a
-   real need.
+4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
+   set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review,
+   set Automated review and wait again. Merge main only for conflicts or a real need.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
    are unchanged.

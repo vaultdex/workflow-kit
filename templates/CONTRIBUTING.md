@@ -1,5 +1,5 @@
 # Contributing
 
-The shared workflow is in the [Workflow Kit](.vendor/workflow-kit/docs/CONTRIBUTING.md).
-Document here only what is specific to this project: setup, test commands, the
-required final proof and exceptions to the shared rules.
+Follow the [shared workflow](.vendor/workflow-kit/docs/CONTRIBUTING.md).
+Keep only project-specific setup, test commands, required final proof and
+exceptions here; link each from the relevant step in AGENTS.md.

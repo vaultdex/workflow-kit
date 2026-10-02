@@ -25,8 +25,7 @@ const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
-function check() {
-  const issue = readIssue();
+function check(issue = readIssue()) {
   const status = projectItem(issue)?.status?.name;
   const blocked = [], unknown = [];
   if (issue.state !== 'OPEN') blocked.push('issue is closed');
@@ -53,6 +52,7 @@ function check() {
   console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${assignees}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
   process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2 }[verdict];
+  return verdict;
 }
 
 function next() {
@@ -101,6 +101,13 @@ function set(fieldName) {
   const { field, linked, choices } = selectField(fieldName);
   const option = choices.find(choice => choice.name.toLowerCase() === String(value).toLowerCase());
   assert.ok(option, `Use one of: ${choices.map(choice => choice.name).join(', ')}`);
+  if (fieldName === 'Status' && option.name === 'In progress') {
+    if (check(issue) !== 'STARTABLE') return;
+    const { viewer } = graphql('query{viewer{login}}');
+    assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
+    assert.ok(issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase()),
+      `Assign yourself first: gh issue edit ${number} --repo ${project.repository} --add-assignee "@me". Verify session ownership before assigning.`);
+  }
   if (linked) {
     graphql(`mutation($issue:ID!,$field:ID!,$option:ID!){setIssueFieldValue(input:{issueId:$issue,
       issueFields:[{fieldId:$field,singleSelectOptionId:$option}]}){clientMutationId}}`,
