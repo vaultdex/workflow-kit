@@ -35,7 +35,7 @@ const files = git('-C', source, 'ls-tree', '-r', '-z', revision, '--', 'skills',
     assert.ok(match, 'Pinned Matt Pocock source must contain ordinary files');
     const [, mode, path] = match;
     assert.ok(path.split('/').every(part => /^[a-z0-9][a-z0-9._-]*$/i.test(part)
-      && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(part)
+      && !/^(?:con|prn|aux|nul|com\d|lpt\d)(?:\.|$)/i.test(part)
       && !part.endsWith('.')), `Unsafe upstream path: ${path}`);
     checkDirectory(source, dirname(join(source, path)));
     assert.ok(lstatSync(join(source, path)).isFile(), `Unexpected upstream link: ${path}`);
@@ -62,7 +62,7 @@ for (const provider of providers) {
     && previous.skills && typeof previous.skills === 'object' && !Array.isArray(previous.skills),
   `Invalid previous Matt Pocock manifest: ${manifest}`);
   for (const [name, path] of Object.entries(previous.skills)) {
-    assert.ok(/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/.test(name)
+    assert.ok(/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) && !/^(?:con|prn|aux|nul|com\d|lpt\d)$/.test(name)
       && typeof path === 'string' && /^skills\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(path)
       && path.endsWith(`/${name}`), `Invalid previous Matt Pocock skill: ${name}`);
     if (!names.includes(name)) retired.push(join(directory, name));

@@ -29,9 +29,11 @@ test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local so
   git(fixture, 'add', '.gitmodules');
   git(fixture, 'update-index', '--add', '--cacheinfo', `160000,${revision},.vendor/matt-pocock-skills`);
   mkdirSync(join(fixture, 'scripts'));
-  for (const name of ['setup-matt-pocock.mjs', 'checkout-root.mjs', 'provider-links.mjs'])
+  for (const name of ['setup-skills.mjs', 'setup-matt-pocock.mjs', 'checkout-root.mjs', 'provider-links.mjs'])
     copyFileSync(join(kit, 'scripts', name), join(fixture, 'scripts', name));
-  const run = () => spawnSync(process.execPath, [join(fixture, 'scripts/setup-matt-pocock.mjs')], { cwd: consumer, encoding: 'utf8' });
+  for (const name of ['setup-ponytail.mjs', 'setup-impeccable.mjs'])
+    write(join(fixture, 'scripts', name), 'import {writeFileSync} from "node:fs"; writeFileSync("other-generator-ran", "");\n');
+  const run = (script = 'setup-matt-pocock.mjs') => spawnSync(process.execPath, [join(fixture, 'scripts', script)], { cwd: consumer, encoding: 'utf8' });
   const tracked = git(source, 'ls-tree', '-r', '--name-only', revision, '--', 'skills').trim().split('\n');
   const skillTrees = tracked.filter(path => path.endsWith('/SKILL.md')).map(path => path.slice(0, -'/SKILL.md'.length));
   assert.equal(skillTrees.length, 37, 'Update this inventory only after reviewing a new upstream pin');
@@ -49,9 +51,10 @@ test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local so
   // A malformed manifest in the last provider must prevent every earlier provider from changing.
   const invalid = join(consumer, '.pi/skills/MATT-POCOCK-SOURCES.json');
   write(invalid, JSON.stringify({ ...previousManifest, skills: { '../outside': 'skills/engineering/retired-skill' } }));
-  const invalidRun = run();
+  const invalidRun = run('setup-skills.mjs');
   assert.notEqual(invalidRun.status, 0);
   assert.match(invalidRun.stderr, /Invalid previous Matt Pocock skill/);
+  assert.equal(existsSync(join(consumer, 'other-generator-ran')), false, 'Invalid Matt manifest stops the aggregate updater before other generators');
   assert.equal(readFileSync(join(consumer, '.agents/skills/ask-matt/LOCAL.md'), 'utf8'), 'Keep my local work\n');
   assert.equal(existsSync(join(consumer, '.agents/skills/retired-skill/SKILL.md')), true);
   rmSync(invalid);
