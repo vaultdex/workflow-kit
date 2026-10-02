@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,7 @@ import test from 'node:test';
 
 const skills = ['ponytail', 'ponytail-audit', 'ponytail-debt', 'ponytail-gain', 'ponytail-help', 'ponytail-review'];
 const hooks = ['activate', 'config', 'instructions', 'mode-tracker', 'runtime', 'subagent'];
-const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
+const providers = ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'];
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 const write = (path, content) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); };
 
@@ -43,13 +43,13 @@ function fixture(t) {
 }
 const succeeds = result => assert.equal(result.status, 0, result.stderr);
 
-test('setup writes byte-correct files, links every provider and reruns without changes', t => {
+test('setup writes byte-correct ordinary files for every provider and reruns without changes', t => {
   const f = fixture(t); succeeds(f.run());
   for (const [path, original] of f.expected) {
     const output = path === 'LICENSE' ? '.agents/hooks/LICENSE.md' : `.agents/${path}`;
     assert.equal(readFileSync(join(f.root, output), 'utf8'), original.replaceAll('\r\n', '\n').replace('\nbase\n', '\npatched\n'), path);
   }
-  for (const provider of providers) assert.ok(lstatSync(join(f.root, provider, 'skills/ponytail')).isSymbolicLink(), provider);
+  for (const provider of providers) assert.ok(lstatSync(join(f.root, provider, 'skills/ponytail')).isDirectory(), provider);
   const copilot = join(f.root, '.github/skills/ponytail/SKILL.md');
   const before = readFileSync(copilot);
   succeeds(f.run());
@@ -72,19 +72,21 @@ test('a dirty source is refused; generated Copilot skills are regenerated, stale
   assert.deepEqual(readdirSync(join(f.root, '.github/skills')).sort(), ['custom', ...skills].sort());
 });
 
-// #38: harness worktrees copy ignored provider links as folders; setup relinks and keeps the copies aside.
-test('copies, files and foreign links at provider paths move aside once; links point to this bundle', t => {
+test('copies, files and old provider junctions become ordinary files; originals move aside once', t => {
   const f = fixture(t); succeeds(f.run());
-  const copy = join(f.root, '.claude/skills/ponytail'), file = join(f.root, '.agents/hooks');
-  unlinkSync(copy); write(join(copy, 'SKILL.md'), 'Copied from another worktree\n');
-  unlinkSync(file); write(file, 'User file\n');
+  const copy = join(f.root, '.claude/skills/ponytail'), file = join(f.root, '.agents/hooks'), link = join(f.root, '.pi/skills/ponytail');
+  write(join(copy, 'SKILL.md'), 'Copied from another worktree\n');
+  rmSync(file, { recursive: true }); write(file, 'User file\n');
+  rmSync(link, { recursive: true }); symlinkSync(join(f.source, 'skills/ponytail'), link, 'junction');
   succeeds(f.run());
-  for (const path of [copy, file])
-    assert.ok(realpathSync(path).startsWith(realpathSync(join(f.root, '.workflow-kit/ponytail'))), path);
+  for (const path of [copy, file, link]) assert.ok(lstatSync(path).isDirectory(), path);
+  assert.equal(readFileSync(join(f.source, 'skills/ponytail/SKILL.md'), 'utf8').replaceAll('\r\n', '\n'),
+    '# ponytail\nbase\nGrüße 🎴\n', 'Old link target was not changed');
   const [moved] = readdirSync(join(f.root, '.workflow-kit/replaced'));
   const replaced = join(f.root, '.workflow-kit/replaced', moved);
   assert.equal(readFileSync(join(replaced, '.claude/skills/ponytail/SKILL.md'), 'utf8'), 'Copied from another worktree\n');
   assert.equal(readFileSync(join(replaced, '.agents/hooks'), 'utf8'), 'User file\n');
+  assert.ok(lstatSync(join(replaced, '.pi/skills/ponytail')).isSymbolicLink());
   succeeds(f.run());
-  assert.deepEqual(readdirSync(join(f.root, '.workflow-kit/replaced')), [moved], 'Current links are kept');
+  assert.deepEqual(readdirSync(join(f.root, '.workflow-kit/replaced')), [moved], 'Equal generated files are kept');
 });

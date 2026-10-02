@@ -1,8 +1,6 @@
-// Zweck: Lokale Provider-Pfade (.claude/skills/ponytail usw.) auf das generierte Bundle verlinken.
-// Nutzen: Kopien aus Harness-Worktrees, fremde Links oder Dateien an Kit-Pfaden blockieren das Setup
-// nicht mehr und gehen nie verloren: Sie werden nach .workflow-kit/replaced/<Zeitpunkt>/ verschoben.
+// Provider discovery files are ordinary, committable files. Replaced local content stays recoverable.
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, realpathSync, renameSync, symlinkSync } from 'node:fs';
+import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 const present = path => lstatSync(path, { throwIfNoEntry: false });
@@ -50,11 +48,24 @@ export function moveAside(root, path) {
   console.log(`Moved ${relative(root, path)} to ${relative(root, destination)}`);
 }
 
-/** Make `path` a link to `target`. A matching link stays; anything else moves to .workflow-kit/replaced/. */
-export function link(root, path, target) {
-  if (present(path)?.isSymbolicLink() && existsSync(path) && realpathSync(path) === realpathSync(target)) return;
+/** Compare ordinary files/directories without following a previous provider link. */
+function same(path, source) {
+  const current = present(path), expected = lstatSync(source);
+  if (!current || current.isSymbolicLink()) return false;
+  if (expected.isFile()) return current.isFile()
+    && (process.platform === 'win32' || (current.mode & 0o111) === (expected.mode & 0o111))
+    && readFileSync(path).equals(readFileSync(source));
+  assert.ok(expected.isDirectory(), `Unexpected generated link or special file: ${source}`);
+  if (!current.isDirectory()) return false;
+  const names = readdirSync(source).sort();
+  return JSON.stringify(readdirSync(path).sort()) === JSON.stringify(names)
+    && names.every(name => same(join(path, name), join(source, name)));
+}
+
+/** Publish generated files; keep equal output and preserve changed files or old junctions aside. */
+export function materialize(root, path, source) {
   localDirectory(root, dirname(path));
+  if (same(path, source)) return;
   moveAside(root, path);
-  const windows = process.platform === 'win32';
-  symlinkSync(windows ? target : relative(dirname(path), target), path, windows ? 'junction' : 'dir');
+  cpSync(source, path, { recursive: true });
 }

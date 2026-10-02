@@ -1,9 +1,9 @@
 # Workflow Kit
 
 Contribution workflow, GitHub Project setup and agent skills (Ponytail,
-Impeccable) for agent-driven development, maintained by Vaultdex under MIT.
-Ponytail and Impeccable are pinned upstream submodules with reviewed patches;
-their licenses and notices ship with the generated skills.
+Impeccable and Matt Pocock's complete collection) for agent-driven development,
+maintained by Vaultdex under MIT. Sources are pinned upstream submodules;
+their licenses, notices and reviewed adaptations ship with generated skills.
 
 - Agents start at [AGENT_RULES.md](AGENT_RULES.md), linked from the project's AGENTS.md.
 - To set up a repository, give your agent [SETUP.md](SETUP.md).
@@ -27,22 +27,26 @@ the project and are never overwritten.
 What the kit owns and rewrites: hook handlers that mention its snapshot directories
 `~/.ponytail/vaultdex/` or `~/.impeccable/vaultdex/` (don't point your own hooks
 there), and the skills, agents and commands the pinned upstreams ship, by name.
-Generated `.github` files are committed, so Git keeps any earlier content. Anything
-else at a kit path moves to `.workflow-kit/replaced/`; foreign hooks and settings
-stay, and nothing else is deleted.
-Commit `.gitmodules`, the kit gitlink, the hook files and the generated `.github`
-files; local skill links and bundles stay ignored. In CI, run both commands and then
+Generated discovery files are ordinary committed files in `.agent`, `.agents`,
+`.claude`, `.github`, `.opencode` and `.pi`, plus Codex agents in `.codex/agents`.
+Changed content or old links at a kit path move to `.workflow-kit/replaced/`;
+foreign hooks and settings stay. Equal generated files remain untouched.
+Commit `.gitmodules`, the kit gitlink, hook definitions, `.agents/hooks` sources
+and all generated discovery files. Personal state, download caches and replaced
+files stay ignored. In CI, run both commands and then
 `git add --intent-to-add --all && git diff --exit-code HEAD`: any diff, including a new
 file, means committed outputs were stale.
 
 A kit update is a PR that bumps the gitlink, reruns `init-project` and
-`setup-skills`, and commits the result. Each developer then updates the submodule
-and reruns `setup-skills`; a changed hook snapshot also needs the installers below.
+`setup-skills`, and commits the result. A fresh clone or worktree already contains
+skills and companions in each agent's discovery paths: no generation, links or
+dependency installation is needed to discover them. Run generators only when
+installing or updating the kit. A changed hook snapshot needs the installers below.
 
 ## Hooks
 
 The committed hook files call only personal snapshots that you install
-explicitly:
+explicitly, once per machine and snapshot version. All checkouts reuse them:
 
 ```sh
 node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs    # Ponytail mode at session start
@@ -53,7 +57,9 @@ Then review and trust the project hooks in each agent and start a new session:
 `/hooks` in Codex CLI or Claude Code, the hooks view in the Codex app settings,
 Settings → Hooks in Cursor, `.github/hooks` for Copilot. While a snapshot is
 missing, the SessionStart hook prints an install hint. Hook files and manual runs
-don't prove that an agent loaded or trusted them. See [Ponytail](docs/ponytail.md)
+don't prove that an agent loaded or trusted them. New definitions still require
+personal review and trust; a worktree does not need another snapshot installation.
+See [Ponytail](docs/ponytail.md)
 and [Impeccable](docs/impeccable.md).
 
 ## Board commands

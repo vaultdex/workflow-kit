@@ -6,3 +6,6 @@
 	path = .vendor/impeccable
 	url = https://github.com/pbakaus/impeccable.git
 	branch = skill-v4.3.1
+[submodule ".vendor/matt-pocock-skills"]
+	path = .vendor/matt-pocock-skills
+	url = https://github.com/mattpocock/skills.git

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { materialize } from '../provider-links.mjs';
 
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const temporary = (t, name) => {
@@ -13,7 +14,7 @@ const temporary = (t, name) => {
   return path;
 };
 
-test('setup-skills links every provider in a fresh checkout and reruns cleanly', t => {
+test('generated skills and hook sources survive a plain clone without setup', t => {
   const fixture = temporary(t, 'workflow-kit setup ');
   execFileSync('git', ['init', '--quiet', fixture]);
   copyFileSync(join(kit, '.gitattributes'), join(fixture, '.gitattributes'));
@@ -22,8 +23,23 @@ test('setup-skills links every provider in a fresh checkout and reruns cleanly',
     const result = setup('setup-skills.mjs');
     assert.equal(result.status, 0, result.stderr);
   }
-  for (const provider of ['.agent', '.agents', '.claude', '.opencode', '.pi'])
-    for (const skill of ['ponytail', 'impeccable']) assert.ok(lstatSync(join(fixture, provider, 'skills', skill)).isSymbolicLink());
+  // Only discovery files enter the commit; no ignored staging bundles or upstream submodules.
+  execFileSync('git', ['-C', fixture, 'add', '.gitattributes', '.agent', '.agents', '.claude', '.github', '.codex', '.opencode', '.pi']);
+  execFileSync('git', ['-C', fixture, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'Generated discovery']);
+  const clone = temporary(t, 'workflow-kit clone ');
+  execFileSync('git', ['clone', '--quiet', '--no-local', fixture, clone]);
+  const skills = readdirSync(join(fixture, '.agents/skills')).filter(name => lstatSync(join(fixture, '.agents/skills', name)).isDirectory());
+  assert.ok(skills.includes('ponytail') && skills.includes('impeccable') && skills.includes('tdd'));
+  for (const provider of ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'])
+    for (const skill of skills) {
+      const path = join(provider, 'skills', skill);
+      assert.ok(lstatSync(join(clone, path)).isDirectory(), path);
+      assert.deepEqual(readFileSync(join(clone, path, 'SKILL.md')), readFileSync(join(fixture, path, 'SKILL.md')), path);
+    }
+  assert.ok(lstatSync(join(clone, '.agents/hooks/ponytail-activate.js')).isFile());
+  assert.ok(lstatSync(join(clone, '.codex/agents/impeccable_finish_reviewer.toml')).isFile());
+  assert.equal(existsSync(join(clone, '.workflow-kit')), false);
+  assert.equal(existsSync(join(clone, '.impeccable/vendor')), false);
 });
 
 test('setup never runs a Git from the checkout or the working directory', t => {
@@ -37,4 +53,12 @@ test('setup never runs a Git from the checkout or the working directory', t => {
     { cwd: root, encoding: 'utf8', env: { ...process.env, PATH: [tools, '.'].join(delimiter) } });
   assert.notEqual(result.status, 0);
   assert.equal(existsSync(join(root, '.workflow-kit')), false, 'Refused before any write');
+});
+
+test('materialization applies executable mode changes even when content matches', { skip: process.platform === 'win32' }, t => {
+  const root = temporary(t, 'workflow-kit mode '), source = join(root, 'source'), output = join(root, 'output');
+  for (const file of [source, output]) writeFileSync(file, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+  chmodSync(source, 0o755);
+  materialize(root, output, source);
+  assert.equal(lstatSync(output).mode & 0o777, 0o755);
 });

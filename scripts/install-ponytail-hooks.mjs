@@ -37,7 +37,7 @@ const files = [
   '.agents/skills/ponytail/NOTICE.md',
 ];
 const missing = files.find(file => !existsSync(path.join(root, file)));
-if (missing) throw new Error(`Ponytail sources missing in ${root} (${missing}); run the kit's setup-skills.mjs in this project first.`);
+if (missing) throw new Error(`Committed Ponytail sources missing in ${root} (${missing}); restore the project's skill/hook files or complete its reviewed kit update.`);
 const matches = directory => files.every(file => existsSync(path.join(directory, file))
   && readFileSync(path.join(directory, file)).equals(readFileSync(path.join(root, file))));
 
