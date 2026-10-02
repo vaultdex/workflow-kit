@@ -71,14 +71,15 @@ for (const name of new Set([...hookTemplates.keys(), '.claude/settings.json', '.
   if (isHooks(name) && (hookTemplates.has(name) || existsSync(safe(name)))) mergeHooks(name, hookTemplates.get(name));
 
 const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
-const legacy = new Set(['/.agents/hooks/', ...providers.map(p => `/${p}/skills/ponytail*/`)]);
-const patterns = ['/.workflow-kit/', '/.impeccable/vendor/', '/.impeccable/setup-*/', '/.agents/hooks',
+// Remove only exact obsolete patterns emitted by earlier kit versions; project ignores stay.
+const legacy = new Set(['/.agents/hooks/', ...providers.map(p => `/${p}/skills/ponytail*/`), '/.agents/hooks',
   ...providers.flatMap(p => [`/${p}/skills/ponytail*`, `/${p}/skills/impeccable`]),
-  '/.claude/agents/impeccable-*.md', '/.codex/agents/impeccable_*.toml', '/.opencode/commands/impeccable.md',
+  '/.claude/agents/impeccable-*.md', '/.codex/agents/impeccable_*.toml', '/.opencode/commands/impeccable.md']);
+const patterns = ['/.workflow-kit/', '/.impeccable/vendor/', '/.impeccable/setup-*/',
   '.claude/settings.local.json', '**/.impeccable/config.local.json', '**/skills/impeccable/scripts/bin/'];
 const ignore = existsSync(safe('.gitignore')) ? text(safe('.gitignore')).split('\n').filter(line => !legacy.has(line)).join('\n') : '';
 const additions = patterns.filter(p => !ignore.split('\n').includes(p));
 write('.gitignore', ignore.trimEnd() + (additions.length ? '\n' + additions.join('\n') : '') + '\n');
 // Earlier kit versions tracked ownership in a receipt; handlers are now recognized by their commands.
 if (existsSync(safe('.github/workflow-kit.json'))) unlinkSync(safe('.github/workflow-kit.json'));
-console.log('Project files configured. Run setup-skills next; install and trust the hooks explicitly.');
+console.log('Project files configured. Generate and commit skills for this kit update; install and trust hooks explicitly.');

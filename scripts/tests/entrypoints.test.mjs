@@ -66,6 +66,21 @@ test('templates start new projects and are never overwritten', t => {
   assert.equal(readFileSync(rules, 'utf8'), 'project rules\n');
 });
 
+test('discovery files become trackable while custom ignores and private state stay', t => {
+  const f = fixture(t), ignore = join(f.root, '.gitignore');
+  write(ignore, '/.agents/hooks\n/.claude/skills/ponytail*\n/.pi/skills/impeccable\n'
+    + '/.codex/agents/impeccable_*.toml\n/custom-cache/\n/.claude/skills/private/\n');
+  succeeds(f.run('--existing'));
+  const lines = readFileSync(ignore, 'utf8').split('\n');
+  for (const removed of ['/.agents/hooks', '/.claude/skills/ponytail*', '/.pi/skills/impeccable', '/.codex/agents/impeccable_*.toml'])
+    assert.ok(!lines.includes(removed), removed);
+  for (const kept of ['/custom-cache/', '/.claude/skills/private/', '/.workflow-kit/', '.claude/settings.local.json', '**/skills/impeccable/scripts/bin/'])
+    assert.ok(lines.includes(kept), kept);
+  const once = readFileSync(ignore);
+  succeeds(f.run('--existing'));
+  assert.deepEqual(readFileSync(ignore), once);
+});
+
 test('writes stay inside the owning checkout', t => {
   const f = fixture(t), outside = join(f.base, 'outside');
   mkdirSync(outside);

@@ -1,12 +1,14 @@
 # Ponytail
 
 Source: `.vendor/ponytail`, pinned to an upstream release (MIT). `setup-skills`
-builds one bundle in `.workflow-kit/ponytail` from the pinned blobs plus
+generates ordinary files from the pinned blobs plus
 `scripts/ponytail/adaptations.patch`. The patch changes the test rule, the help
 and debt texts and the hooks' host and state handling
-([provenance](../scripts/ponytail/NOTICE.md)). The bundle is linked into `.agent`,
-`.agents`, `.claude`, `.opencode` and `.pi`; Copilot gets committed copies in
-`.github/skills`.
+([provenance](../scripts/ponytail/NOTICE.md)). Skills are committed in `.agent`,
+`.agents`, `.claude`, `.github`, `.opencode` and `.pi`; hook sources are committed
+in `.agents/hooks`. A checkout needs no generation or provider links. Regenerate
+only during a reviewed kit update; replaced local content stays in
+`.workflow-kit/replaced`.
 
 Skills: `ponytail`, `ponytail-review`, `ponytail-audit`, `ponytail-debt`,
 `ponytail-gain`, `ponytail-help`. The gain figures are upstream benchmarks, not
@@ -17,6 +19,7 @@ choose one source in the agent's settings.
 
 `install-ponytail-hooks.mjs` copies the generated hooks into
 `~/.ponytail/vaultdex/<version>/`; it refuses a location inside any Git checkout.
+Install once per machine and version; all projects and worktrees reuse that snapshot.
 It then writes `launch.sh` and `launch.cmd`, which start the absolute Node binary
 that ran the installer. As a result:
 

@@ -25,14 +25,6 @@ gha-creds-*.json
 # Impeccable downloads and per-developer state; shared configs stay tracked.
 /.impeccable/vendor/
 /.impeccable/setup-*/
-/.agent/skills/impeccable
-/.agents/skills/impeccable
-/.claude/skills/impeccable
-/.opencode/skills/impeccable
-/.pi/skills/impeccable
-/.claude/agents/impeccable-*.md
-/.codex/agents/impeccable_*.toml
-/.opencode/commands/impeccable.md
 **/skills/impeccable/scripts/bin/
 **/.impeccable/config.local.json
 **/.impeccable/hook.cache.json
@@ -42,9 +34,3 @@ gha-creds-*.json
 
 # Generated source bundles and local skill discovery
 /.workflow-kit/
-/.agents/hooks
-/.agent/skills/ponytail*
-/.agents/skills/ponytail*
-/.claude/skills/ponytail*
-/.opencode/skills/ponytail*
-/.pi/skills/ponytail*

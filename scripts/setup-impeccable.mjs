@@ -2,37 +2,29 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
   readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { externalTool, projectRoot } from "./checkout-root.mjs";
-import { checkDirectory, link, localDirectory, moveAside, rename } from "./provider-links.mjs";
+import { checkDirectory, localDirectory, materialize, moveAside } from "./provider-links.mjs";
 
 // Explicit setup from a reviewed checkout, never an install/agent/Git hook.
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = projectRoot();
 const source = join(kit, ".vendor/impeccable");
 const state = join(root, ".impeccable");
-const bundle = join(state, "vendor");
 const security = join(kit, "scripts/impeccable");
 const providers = [".agent", ".agents", ".claude", ".github", ".opencode", ".pi"];
 const skills = providers.map((provider) => `${provider}/skills/impeccable`);
-const linkedSkills = skills.filter((skill) => !skill.startsWith(".github/"));
 const text = (path) => readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 // Resolve installed Git once; neither it nor child commands may come from checkout/PATH-relative entries.
 const gitTool = externalTool("git", root, kit, process.cwd());
 const git = (...args) => execFileSync(gitTool.file, args, { cwd: root, env: gitTool.env, encoding: "utf8" });
-const present = (path) => lstatSync(path, { throwIfNoEntry: false });
 
 function companionFiles(base) {
-  const copilot = ".github/skills/impeccable";
-  const copilotFiles = existsSync(join(base, copilot))
-    ? readdirSync(join(base, copilot), { recursive: true })
-      .filter((name) => lstatSync(join(base, copilot, name)).isFile())
-      .map((name) => `${copilot}/${name.split(sep).join("/")}`) : [];
-  return copilotFiles.concat([".claude/agents", ".github/agents", ".codex/agents", ".opencode/commands"]
+  return [".claude/agents", ".github/agents", ".codex/agents", ".opencode/commands"]
     .flatMap((directory) => existsSync(join(base, directory))
       ? readdirSync(join(base, directory)).filter((name) => /^impeccable[-_.][\w.-]+$/.test(name))
-        .map((name) => `${directory}/${name}`) : []));
+        .map((name) => `${directory}/${name}`) : []);
 }
 
 function copyTracked(from, to) {
@@ -44,12 +36,12 @@ function copyTracked(from, to) {
     const target = join(to, file.slice(from.length + 1));
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(join(source, file), target);
-    // Copilot's committed text follows this repository's LF policy.
-    if (file.startsWith(".github/") && /(?:\.(?:md|json|js|toml|cmd)|\/(?:LICENSE|VERSION|impeccable))$/.test(file)) {
+    // Match checkout line endings, including Windows command files, for stable regeneration.
+    if (/(?:\.(?:md|json|js|toml|cmd|ya?ml)|\/(?:LICENSE|VERSION|impeccable))$/.test(file)) {
       let content = text(target);
       if (/\/reference\/(?:extract|harden|optimize)\.md$/.test(file))
         content = content.split("\n").map((line) => line.trimEnd()).join("\n").trimEnd() + "\n";
-      writeFileSync(target, content);
+      writeFileSync(target, file.endsWith('.cmd') ? content.replaceAll('\n', '\r\n') : content);
     }
   }
 }
@@ -67,7 +59,6 @@ function generateSkill(skill, to) {
 }
 
 localDirectory(root, state);
-assert.ok(!present(bundle)?.isSymbolicLink(), "Generated bundle must not be a link");
 git("-C", kit, "submodule", "update", "--init", "--", ".vendor/impeccable");
 assert.equal(git("-C", source, "status", "--porcelain", "--untracked-files=all").trim(), "",
   "Impeccable submodule has local changes; preserve/review them before setup");
@@ -79,9 +70,7 @@ assert.equal(git("-C", source, "rev-parse", "HEAD").trim(), git("-C", kit, "rev-
 const version = text(join(security, "VERSION")).trim();
 const stage = mkdtempSync(join(state, "setup-"));
 const next = join(stage, "next");
-const previous = join(stage, "previous");
-let published = false;
-// ponytail: one explicit setup per checkout; add a lock if setup becomes automated.
+// ponytail: reviewed updates run serially; add a lock if updates become concurrent.
 try {
   for (const skill of skills) {
     assert.equal(text(join(source, skill, "scripts/VERSION")).trim(), version,
@@ -92,37 +81,19 @@ try {
     copyTracked(directory, join(next, directory));
   copyTracked(".agents/skills/impeccable/agents", join(next, ".codex/agents"));
   const revision = git("-C", source, "rev-parse", "HEAD").trim();
-  // Copilot skill and the impeccable* agents/commands are generated and replaced; files upstream no longer
-  // ships (or the project's own) move to .workflow-kit/replaced/.
-  // A link or file at the Copilot skill directory moves aside first; enumerating through it would reach its target.
-  const copilot = join(root, ".github/skills/impeccable");
-  if (present(copilot) && !present(copilot).isDirectory()) moveAside(root, copilot);
-  // Check every output directory before the swap, so a linked one stops setup with nothing replaced.
+  // Reject redirected ancestors before replacing output or inspecting existing companion files.
+  for (const directory of [".claude/agents", ".github/agents", ".codex/agents", ".opencode/commands"])
+    checkDirectory(root, join(root, directory));
   const fresh = companionFiles(next), stale = companionFiles(root).filter((file) => !fresh.includes(file));
-  for (const file of [...linkedSkills, ...stale, ...fresh]) localDirectory(root, dirname(join(root, file)));
+  for (const file of [...skills, ...stale, ...fresh]) localDirectory(root, dirname(join(root, file)));
   checkDirectory(root, join(root, ".workflow-kit/replaced"));
-  // A directory where a companion file belongs can't be replaced by a file copy; keep it aside.
-  for (const file of fresh) if (present(join(root, file))?.isDirectory()) moveAside(root, join(root, file));
-  if (existsSync(bundle)) rename(bundle, previous);
-  try { rename(next, bundle); }
-  catch (error) {
-    if (existsSync(previous)) rename(previous, bundle);
-    throw error;
-  }
-  for (const skill of linkedSkills) link(root, join(root, skill), join(bundle, skill));
+  for (const file of [...skills, ...fresh]) materialize(root, join(root, file), join(next, file));
   for (const file of stale) moveAside(root, join(root, file));
-  for (const file of fresh) {
-    // Drop whatever is left at the destination first: copying onto a link would write through it.
-    rmSync(join(root, file), { force: true });
-    copyFileSync(join(bundle, file), join(root, file));
-  }
-  published = true;
-  console.log(`Impeccable ${revision.slice(0, 7)}: five providers linked; tracked Copilot assets and companions refreshed.\n`
+  console.log(`Impeccable ${revision.slice(0, 7)}: committed skills for six providers and companions refreshed.\n`
     + "Hook engine and trust unchanged; install the engine with install-impeccable-hooks.mjs.");
 } finally {
-  // Only this invocation's generated staging/previous bundle, confined to state.
+  // Only this invocation's generated staging, confined to state.
   assert.equal(dirname(stage), state);
   assert.ok(!lstatSync(stage).isSymbolicLink());
-  if (published || !existsSync(previous)) rmSync(stage, { recursive: true, force: true });
-  else console.error(`Setup incomplete; previous generated installation preserved at ${previous}`);
+  rmSync(stage, { recursive: true, force: true });
 }

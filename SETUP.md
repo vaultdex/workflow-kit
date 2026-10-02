@@ -65,8 +65,8 @@ workflows:
   Create the milestone `Hotfixes · laufend` if the project takes hotfixes.
 - **Reviewers:** authorize the CodeRabbit App and enable Codex automatic reviews for
   this repository, then verify both on the setup PR. Committed configuration
-  doesn't install an App. If Sonar or another analyzer runs, exclude the generated
-  third-party code in `.github/skills/**` and `.github/agents/**`.
+  doesn't install an App. If Sonar or another analyzer runs, exclude generated
+  third-party skills and companions in every provider's discovery paths.
 - **Rules:** require PRs, human approval and always-reported checks, never a
   path-filtered check that can be absent. If rulesets are unavailable (HTTP 403 on
   the plan), report it; don't change the plan or the visibility.
@@ -81,8 +81,11 @@ enabled, untrusted or unavailable.
 
 ## 5. Deliver
 
-Commit only intended configuration and the generated `.github` discovery files;
-local bundles, personal settings and credentials stay out. Open the PR, wait for
+Follow [Commit generated files](README.md#commit-generated-files), including the
+explicit Git executable modes. Commit intended configuration, discovery files for every provider and
+`.agents/hooks` sources. Personal settings, staging bundles, backups and credentials
+stay out. Verify a plain clone has ordinary skill files and companions without
+running setup; verify hook snapshots and trust separately. Open the PR, wait for
 the automatic reviews, and fix or link their findings. Finish with:
 
 - links to the repository, board and PR,
