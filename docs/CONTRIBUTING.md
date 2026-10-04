@@ -135,11 +135,19 @@ and empty sections.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
    Then mark it Ready for Review and set Automated review. Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
-3. Wait for CI and every configured automatic review on the current head, using the
-   harness's waiting, not polling. Pending, cancelled or missing expected checks are
-   not success. Read all findings, including every page of analyzer results such
-   as Sonar issues and hotspots. A green quality gate does not mean zero findings,
-   and a missing or stale analysis is not clean. Don't re-request a review that is
+3. Wait for CI and every review with a trace on the current head, using the
+   harness's waiting, not polling. Review bots run unreliably, so find out per head
+   who reviews instead of assuming it. A trace is a check, status or review on the
+   head commit, or, created after the head was pushed, a review comment, an
+   announced review or a bot's reaction to the PR or a review request. Once CI is
+   green, a reviewer without such a trace is not coming. A traced review finishes
+   when it posts its result: a review, a completed summary or a final status. If no
+   result arrives within the time the reviewer's last completed review on this PR
+   took (otherwise its usual duration), it is stalled. Pending, cancelled or missing
+   expected CI checks are not success. Read all findings and every review, comment
+   and thread from bots and humans, including every page of analyzer results such as
+   Sonar issues and hotspots. A green quality gate does not mean zero findings, and
+   a missing or stale analysis is not clean. Don't re-request a review that is
    running or finished for the current commit without a concrete reason.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review,
@@ -147,11 +155,12 @@ and empty sections.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
    are unchanged.
-6. Set Human review only when CI passes, every automatic review of the current head
-   has finished, each finding is fixed or linked to a follow-up, the final proof has
-   passed and no prerequisite is open. If a reviewer is confirmed unavailable
-   (quota, outage), record the reviewer, cause and evidence in the PR and hand off
-   with that limitation stated. Pending or unknown does not count as unavailable.
+6. Set Human review only when CI passes, every review with a trace on the current
+   head has finished or stalled, each finding is fixed or linked to a follow-up, the
+   final proof has passed and no prerequisite is open. If a reviewer is confirmed
+   unavailable (quota, outage) or stalled, record the reviewer, cause and evidence
+   in the PR and hand off with that limitation stated. Otherwise pending or unknown
+   does not count as unavailable.
 7. After the human merges, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
 

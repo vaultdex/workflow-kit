@@ -51,7 +51,7 @@ check again before Human review.
 | Backlog | Nothing without a human request; propose, don't implement. |
 | Ready | Complete [Start or resume](#start-or-resume). |
 | In progress | Implement on the issue-linked branch; the PR stays Draft. |
-| Automated review | PR ready; wait for CI and every review bot; fix or link each finding. |
+| Automated review | PR ready; wait for CI and every reviewer with a trace on the head ([review loop](docs/CONTRIBUTING.md#review-loop)); fix or link each finding. |
 | Human review | Hand off. A human accepts and merges. |
 | Done | Merged and accepted. |
 
