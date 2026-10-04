@@ -20,7 +20,6 @@
       "postUpgradeTasks": {
         "commands": ["node scripts/update-impeccable.mjs"],
         "executionMode": "branch",
-        "installTools": { "node": {} },
         "fileFilters": [
           "scripts/impeccable/**",
           "docs/impeccable.md",
