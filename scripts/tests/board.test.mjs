@@ -18,16 +18,25 @@ function fixture(t) {
   chmodSync(gh, 0o755);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1' }));
   writeFileSync(join(checkout, 'api'), `const fs = require('node:fs');
+if (process.argv.some(arg => arg.includes('/reactions'))) {
+  process.stdout.write(fs.existsSync('reactions.json') ? fs.readFileSync('reactions.json', 'utf8') : '[]');
+  process.exit(0);
+}
 const query = process.argv.find(arg => arg.startsWith('query=')).slice(6);
 if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.includes('viewer'))) process.exit(1);
 let data;
 if (query.startsWith('mutation')) {
   fs.appendFileSync('mutations', query + '\\n');
+  fs.writeFileSync('stored', process.argv.find(arg => arg.startsWith('option=')).slice(7));
   data = {};
 } else if (query.includes('viewer')) data = { viewer: { login: 'worker' } };
+else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
+  projectItems: { nodes: [{ project: { id: 'P1' }, value: { name: fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8') } }] } } } };
+else if (query.includes('pullRequest(number')) data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
 else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
   id: 'F1', name: 'Status', options: ['Ready', 'In progress'].map(name => ({ id: name, name }))
-}, { id: 'F2', name: 'Priority', options: ['High', 'Low'].map(name => ({ id: name, name })) }] } } };
+}, { id: 'F2', name: 'Priority', options: ['High', 'Low'].map(name => ({ id: name, name })) },
+{ id: 'F3', name: 'Size', options: ['XS', 'S'].map(name => ({ id: name, name })) }] } } };
 else if (query.includes('search(')) {
   // Like GitHub: is:blocked means an open native predecessor; 'truncate' simulates the 1,000-result cap.
   const blocked = / is:blocked$/.test(process.argv.find(arg => arg.startsWith('q=')));
@@ -123,4 +132,53 @@ test('next lists blocked and unreadable Ready issues apart from startable ones',
   assert.equal(held.match(/^ {2}- /gm).length, 3, 'Each held issue names its reason');
   writeFileSync(join(checkout, 'truncate'), '');
   assert.notEqual(run('next').status, 0, 'A capped search is never reported as the complete Ready set');
+});
+
+test('field sets any single-select value and fails when the read-back differs', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue());
+  const result = run('field', '1', 'Size', 'xs');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'XS');
+  writeFileSync(join(checkout, 'lost'), 'S');
+  assert.notEqual(run('field', '1', 'Size', 'XS').status, 0, 'A write the read-back does not show is a failure');
+});
+
+test('reviews waits only for traces on the current head and never reads failures as done', t => {
+  const { checkout, run } = fixture(t);
+  const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
+  const bot = login => ({ __typename: 'Bot', login });
+  const check = (status, extra = {}) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion: status === 'COMPLETED' ? 'SUCCESS' : null, ...extra });
+  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, comments = [], reviews = [] } = {}) => ({
+    number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
+    commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
+      checkSuites: { nodes: [{ createdAt: minutesAgo(pushed) }] }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
+    reviews: { nodes: reviews }, comments: { nodes: comments }, reviewThreads: { totalCount: 0, nodes: [] },
+  });
+  const codex = (row, minutes) => ({ author: bot('chatgpt-codex-connector'), url: 'u', createdAt: minutesAgo(minutes), updatedAt: minutesAgo(minutes),
+    body: `| Review | Status | Commit |\n| Code Review | ${row} <relative-time datetime="${minutesAgo(minutes)}"></relative-time> | \`abcdef1\` |` });
+  const reaction = (content, minutes) => ({ content, created_at: minutesAgo(minutes), user: { login: 'chatgpt-codex-connector[bot]', type: 'Bot' } });
+  const reviews = (data, reactions = [], ...options) => {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(data));
+    writeFileSync(join(checkout, 'reactions.json'), JSON.stringify(reactions));
+    return run('reviews', '7', ...options).status;
+  };
+
+  assert.equal(reviews(pr()), 0, 'Green CI without other traces is done');
+  assert.equal(reviews(pr({ contexts: [check('IN_PROGRESS')] })), 3);
+  assert.equal(reviews(pr({ pushed: 60, contexts: [check('IN_PROGRESS')] })), 3, 'Running CI never stalls');
+  assert.equal(reviews(pr({ contexts: [] })), 3, 'A fresh push without checks yet waits');
+  assert.equal(reviews(pr({ pushed: 60, contexts: [] })), 0, 'Checks that never start stall');
+  assert.equal(reviews(pr({ comments: [codex('Running', 1)] })), 3, 'A running summary for the head waits');
+  assert.equal(reviews(pr({ comments: [codex('Completed', 0)] })), 0);
+  assert.equal(reviews(pr({ comments: [codex('Running', 60)] })), 0, 'A review running past the usual duration stalls');
+  assert.equal(reviews(pr(), [reaction('eyes', 0)]), 3, 'An announced review waits');
+  assert.equal(reviews(pr(), [reaction('eyes', 0.5), reaction('+1', 0)]), 0, 'A later reaction by the same bot is its result');
+  assert.equal(reviews(pr({ pushed: 1 }), [reaction('eyes', 30)], '--stall', '120'), 0, 'Traces from before the push do not count');
+  assert.equal(reviews(pr({ total: 2 })), 2, 'Unreadable checks are never done');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr()));
+  assert.equal(run('wait', '7').status, 0, 'wait returns once the head is done');
+  writeFileSync(join(checkout, 'fail'), '');
+  assert.equal(run('reviews', '7').status, 2);
+  assert.equal(run('wait', '7').status, 2, 'wait reports a read failure instead of waiting silently');
 });

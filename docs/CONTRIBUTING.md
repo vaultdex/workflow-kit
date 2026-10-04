@@ -84,7 +84,8 @@ naming their source. See the [examples](task-writing-examples.md).
 **Metadata.** Every issue, including Backlog items and follow-ups, gets one
 repository milestone, a Project Priority and area/type labels when it is created,
 and keeps them after closing. Set the real fields (`gh issue create --milestone …
---label …`, then `board.mjs priority`), not text in the body. Priority reflects
+--label …`, then `board.mjs priority` and `board.mjs field` for other
+single-select fields), not text in the body. Priority reflects
 impact and urgency (Urgent, High, Medium, Low). If unsure, give a provisional one
 and state its basis. Don't reprioritize others' active work. Confirmed production,
 security or data-loss fixes use the milestone `Hotfixes · laufend`. Labels describe
@@ -135,20 +136,21 @@ and empty sections.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
    Then mark it Ready for Review and set Automated review. Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
-3. Wait for CI and every review with a trace on the current head, using the
-   harness's waiting, not polling. Review bots run unreliably, so find out per head
-   who reviews instead of assuming it. A trace is a check, status or review on the
-   head commit, or, created after the head was pushed, a review comment, an
-   announced review or a bot's reaction to the PR or a review request. Once CI is
-   green, a reviewer without such a trace is not coming. A traced review finishes
-   when it posts its result: a review, a completed summary or a final status. If no
-   result arrives within the time the reviewer's last completed review on this PR
-   took (otherwise its usual duration), it is stalled. Pending, cancelled or missing
-   expected CI checks are not success. Read all findings and every review, comment
-   and thread from bots and humans, including every page of analyzer results such as
-   Sonar issues and hotspots. A green quality gate does not mean zero findings, and
-   a missing or stale analysis is not clean. Don't re-request a review that is
-   running or finished for the current commit without a concrete reason.
+3. Wait for CI and every review with a trace on the current head with `board.mjs
+   wait PR` in the background, not hand-written polling. Review bots run unreliably,
+   so find out per head who reviews instead of assuming it. A trace is a check,
+   status or review on the head commit, or, created after the head was pushed, a
+   review comment, an announced review or a bot's reaction to the PR or a review
+   request. Once CI is green, a reviewer without such a trace is not coming. A
+   traced review finishes when it posts its result: a review, a completed summary or
+   a final status. If no result arrives within the time the reviewer's last
+   completed review on this PR took (otherwise its usual duration), it is stalled.
+   Pending, cancelled or missing expected CI checks are not success. Read all
+   findings and every review, comment and thread from bots and humans, including
+   every page of analyzer results such as Sonar issues and hotspots. A green quality
+   gate does not mean zero findings, and a missing or stale analysis is not clean.
+   Don't re-request a review that is running or finished for the current commit
+   without a concrete reason.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review,
    set Automated review and wait again. Merge main only for conflicts or a real need.
