@@ -83,7 +83,9 @@ trust; new definitions need personal review and trust. See
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
   `--stall MINUTES` (default 20). `wait PR --merged` waits for the human merge
-  and ends `FAILED` if the PR is closed unmerged.
+  and ends `FAILED` if the PR is closed unmerged. Analyzers that create their
+  check only when finished are awaited when listed in `"awaitApps"`
+  ([setup](SETUP.md#3-board-and-labels)).
 
 Before implementation, complete [Start or resume](AGENT_RULES.md#start-or-resume);
 a check alone does not claim work.
