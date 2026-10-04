@@ -239,6 +239,8 @@ function reviews(stallMinutes = 20, now = Date.now()) {
       lines.push(`check suite ${suite.app.slug}: ${suite.conclusion}`);
     }
   }
+  // A known CI failure is the verdict; later review reads must not turn it into ERROR.
+  if (failed) return { done: true, failed, lines };
   const comments = restAll(`repos/${project.repository}/issues/${number}/comments`);
   const reviewList = restAll(`repos/${project.repository}/pulls/${number}/reviews`);
   // Bots acknowledge "@bot review" comments with a reaction on that comment, not on the PR.
@@ -247,11 +249,19 @@ function reviews(stallMinutes = 20, now = Date.now()) {
       .flatMap(comment => restAll(`repos/${project.repository}/issues/comments/${comment.id}/reactions`))];
   // Inline review comments and thread replies carry findings too.
   const inline = restAll(`repos/${project.repository}/pulls/${number}/comments`);
+  // Results a bot can post: a review of this head, an issue comment, or a final (non-👀) reaction.
+  const results = [...comments.map(comment => [login(comment.user), comment.updated_at, comment.id]),
+    ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at, null]),
+    ...reactions.filter(reaction => reaction.content !== 'eyes').map(reaction => [login(reaction.user), reaction.created_at, null])];
+  // The summary's own later edits are no result, so its comment id is skipped.
+  const answeredAfter = (author, since, own) => results.some(([who, time, id]) => who === author && (id === null || id !== own) && Date.parse(time) > since);
   const short = pr.headRefOid.slice(0, 7);
   for (const comment of comments.filter(comment => isBot(comment.user) && after(comment.updated_at))) {
-    // Summary comments (Codex) name the head in a table row that says Running until the review completes.
+    // Summary comments (Codex) name the head in a table row that says Running until the review completes;
+    // a result the same bot posts elsewhere ends it too.
     for (const row of comment.body.split('\n').filter(row => row.includes('Running') && row.includes(short))) {
       const since = row.match(/datetime="([^"]+)"/)?.[1] ?? comment.updated_at;
+      if (answeredAfter(login(comment.user), Date.parse(since), comment.id)) continue;
       waiting.push({ text: `${login(comment.user)} running since ${since}`, since: Date.parse(since) });
     }
   }

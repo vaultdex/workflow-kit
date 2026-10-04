@@ -20,7 +20,7 @@ function fixture(t) {
   writeFileSync(join(checkout, 'api'), `const fs = require('node:fs');
 const path = process.argv[2] ?? '';
 if (!path.startsWith('graphql')) {
-  if (fs.existsSync('fail')) process.exit(1);
+  if (fs.existsSync('fail') || fs.existsSync('fail-rest')) process.exit(1);
   // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
   const parts = path.split('?')[0].split('/');
   const file = parts.at(-3) + '-' + parts.at(-1) + '.json';
@@ -175,7 +175,8 @@ test('reviews waits only for traces on the current head and never reads failures
       nodes: requestedAgo === undefined ? [] : requests.map(login => ({ createdAt: minutesAgo(requestedAgo), requestedReviewer: { login } })) },
     threadPages,
   });
-  const codex = (row, minutes) => ({ user: codexUser, html_url: 'u', created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes),
+  let commentId = 0;
+  const codex = (row, minutes) => ({ id: ++commentId, user: codexUser, html_url: 'u', created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes),
     body: `| Review | Status | Commit |\n| Code Review | ${row} <relative-time datetime="${minutesAgo(minutes)}"></relative-time> | \`abcdef1\` |` });
   const reaction = (content, minutes) => ({ content, created_at: minutesAgo(minutes), user: codexUser });
   const look = (data, { comments = [], reactions = [], inline = [], commentReactions = [], reviewList = [] } = {}, ...options) => {
@@ -203,7 +204,8 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 30)] }, '--stall', '120'), 0, 'Traces from before the push do not count');
   assert.equal(reviews(pr({ requests: ['maintainer'] })), 3, 'An outstanding review request waits');
   assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'] })), 0, 'An unanswered request stalls');
-  const many = Array.from({ length: 100 }, (_, index) => ({ ...codex('Completed', 0), html_url: `old-${index}` }));
+  // Older than the Running row, so they fill the first page without answering it.
+  const many = Array.from({ length: 100 }, (_, index) => ({ ...codex('Completed', 5), html_url: `old-${index}` }));
   assert.equal(reviews(pr(), { comments: [...many, codex('Running', 1)] }), 3, 'Comments beyond the first page are read');
   assert.equal(reviews(pr({ total: 2 })), 2, 'Unreadable checks are never done');
   const request = { id: 1, user: { login: 'maintainer', type: 'User' }, body: '@codex review', html_url: 'c', created_at: minutesAgo(0.5), updated_at: minutesAgo(0.5) };
@@ -215,6 +217,12 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr({ suiteTotal: 101 })), 2, 'Unreadable check suites are never done');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), suite('COMPLETED', 0, 1, 'STARTUP_FAILURE')] })), 1, 'A workflow that fails to start is FAILED');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE'), check('IN_PROGRESS')] })), 1, 'A known failure ends the wait while other checks run');
+  writeFileSync(join(checkout, 'fail-rest'), '');
+  assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'A later read failure keeps the known CI verdict');
+  rmSync(join(checkout, 'fail-rest'));
+  const headReview = { user: codexUser, commit_id: 'abcdef1234', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
+  assert.equal(reviews(pr(), { comments: [codex('Running', 1)], reviewList: [headReview] }), 0, 'A head review ends a Running summary');
+  assert.equal(reviews(pr(), { comments: [{ ...codex('Running', 3), updated_at: minutesAgo(0) }] }), 3, 'A later edit of the summary itself is no result');
   const appSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'sonarqubecloud' } };
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 0, 'Idle suites of other apps are no trace');
   const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8');
