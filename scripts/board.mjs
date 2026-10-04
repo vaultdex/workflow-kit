@@ -362,14 +362,15 @@ function handoffPr(issueId, expectedHead) {
   const reasons = [];
   const result = reviews(stallOption(), Date.now(), Number(value));
   console.log(result.lines.join('\n'));
-  if (!result.done || result.failed) {
-    process.exitCode = result.failed ? 1 : 3;
-    console.log(result.failed ? 'FAILED' : 'WAITING');
+  assert.equal(typeof result.pr.isDraft, 'boolean', 'PR draft state is unreadable');
+  if (result.pr.state !== 'OPEN' || result.pr.isDraft) reasons.push('handoff needs an open non-draft PR');
+  if (reasons.length || !result.done || result.failed) {
+    const failed = reasons.length > 0 || result.failed;
+    process.exitCode = failed ? 1 : 3;
+    console.log([failed ? 'FAILED' : 'WAITING', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     return;
   }
   if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, 'PR head changed during handoff');
-  assert.equal(typeof result.pr.isDraft, 'boolean', 'PR draft state is unreadable');
-  if (result.pr.state !== 'OPEN' || result.pr.isDraft) reasons.push('handoff needs an open non-draft PR');
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push('resolve review blockers and threads before handoff');
   }
