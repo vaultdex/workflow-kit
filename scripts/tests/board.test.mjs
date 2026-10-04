@@ -27,7 +27,8 @@ if (query.startsWith('mutation')) {
 } else if (query.includes('viewer')) data = { viewer: { login: 'worker' } };
 else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
   id: 'F1', name: 'Status', options: ['Ready', 'In progress'].map(name => ({ id: name, name }))
-}] } } };
+}, { id: 'F2', name: 'Priority', options: ['High', 'Low'].map(name => ({ id: name, name })) }] } } };
+else if (query.includes('search(')) data = { search: { pageInfo: { hasNextPage: false }, nodes: JSON.parse(fs.readFileSync('search.json')) } };
 else data = { repository: { issue: JSON.parse(fs.readFileSync('issue.json')) } };
 process.stdout.write(JSON.stringify({ data }));`);
   return {
@@ -95,4 +96,22 @@ test('In progress requires a startable issue assigned to the authenticated user 
   assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 4);
   writeIssue(issue());
   assert.equal(run('status', '1', 'Ready').status, 0, 'Returning blocked work to Ready does not require assignment');
+});
+
+test('next lists blocked and unreadable Ready issues apart from startable ones', t => {
+  const { checkout, run } = fixture(t);
+  const ready = (number, nodes, totalCount) => ({ ...issue('Ready', nodes, totalCount), number, issueFieldValues: { nodes: [] } });
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([
+    ready(1, [predecessor('CLOSED', 'COMPLETED')]),
+    ready(2, [predecessor('OPEN', null)]),
+    ready(3, [predecessor('CLOSED', 'NOT_PLANNED')]),
+    ready(4, [], 1),
+    { ...ready(5, []), projectItems: issue('Backlog').projectItems },
+  ]));
+  const result = run('next');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const [startable, held] = result.stdout.split('\n\n');
+  assert.deepEqual(startable.match(/^#\d+/gm), ['#1']);
+  assert.deepEqual(held.match(/^#\d+/gm), ['#2', '#3', '#4'], 'Every Ready issue appears; Backlog does not');
+  assert.equal(held.match(/^ {2}- /gm).length, 3, 'Each held issue names its reason');
 });
