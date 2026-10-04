@@ -160,7 +160,7 @@ function setField() {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state headRefOid mergeStateStatus reviewDecision
+  number state isDraft headRefOid mergeStateStatus reviewDecision
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
@@ -171,13 +171,13 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
 // ponytail: checks, check suites, review requests and opinionated reviews stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
 
 /** Links of unresolved review threads across every page, including findings on earlier heads. */
-function unresolvedThreads() {
+function unresolvedThreads(prNumber = number) {
   const links = [];
   for (let after; ;) {
     const { reviewThreads } = graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
       pullRequest(number:$number){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
         nodes{isResolved comments(first:1){nodes{url}}}}}}}`,
-    { owner, name, number, ...(after && { after }) }).repository.pullRequest;
+    { owner, name, number: prNumber, ...(after && { after }) }).repository.pullRequest;
     links.push(...reviewThreads.nodes.filter(thread => !thread.isResolved).map(thread => thread.comments.nodes[0]?.url ?? 'unreadable thread'));
     if (!reviewThreads.pageInfo.hasNextPage) return links;
     assert.ok(reviewThreads.pageInfo.endCursor && reviewThreads.pageInfo.endCursor !== after, 'Thread pagination did not advance');
@@ -199,11 +199,11 @@ const isBot = user => user?.type === 'Bot';
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
-function reviews(stallMinutes = 20, now = Date.now()) {
-  const pr = graphql(prQuery, { owner, name, number }).repository.pullRequest;
+function reviews(stallMinutes = 20, now = Date.now(), prNumber = number) {
+  const pr = graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
-  if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', lines };
+  if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', lines, pr };
   const { commit } = pr.commits.nodes[0];
   assert.equal(commit.oid, pr.headRefOid, 'Head commit not readable');
   // CI starts on push, so the first check suite dates the push. Before that the commit date is a
@@ -242,15 +242,15 @@ function reviews(stallMinutes = 20, now = Date.now()) {
     }
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.
-  if (failed) return { done: true, failed, lines };
-  const comments = restAll(`repos/${project.repository}/issues/${number}/comments`);
-  const reviewList = restAll(`repos/${project.repository}/pulls/${number}/reviews`);
+  if (failed) return { done: true, failed, lines, pr };
+  const comments = restAll(`repos/${project.repository}/issues/${pr.number}/comments`);
+  const reviewList = restAll(`repos/${project.repository}/pulls/${pr.number}/reviews`);
   // Bots acknowledge "@bot review" comments with a reaction on that comment, not on the PR.
-  const reactions = [...restAll(`repos/${project.repository}/issues/${number}/reactions`),
+  const reactions = [...restAll(`repos/${project.repository}/issues/${pr.number}/reactions`),
     ...comments.filter(comment => after(comment.created_at) && /@[\w-]+(\[bot\])?\s+review\b/i.test(comment.body))
       .flatMap(comment => restAll(`repos/${project.repository}/issues/comments/${comment.id}/reactions`))];
   // Inline review comments and thread replies carry findings too.
-  const inline = restAll(`repos/${project.repository}/pulls/${number}/comments`);
+  const inline = restAll(`repos/${project.repository}/pulls/${pr.number}/comments`);
   // Results a bot can post: a review of this head, an issue comment, or a final (non-👀) reaction.
   const results = [...comments.map(comment => [login(comment.user), comment.updated_at, comment.id]),
     ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at, null]),
@@ -291,7 +291,7 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
   for (const comment of inline.filter(comment => after(comment.updated_at))) lines.push(`inline ${login(comment.user)} ${comment.html_url}`);
-  const threads = unresolvedThreads();
+  const threads = unresolvedThreads(pr.number);
   lines.push(`unresolved threads: ${threads.length}`, ...threads.map(link => `thread ${link}`));
   // Mergeable is not merge-ready: a standing change request, a ruleset or conflicts still block the human.
   lines.push(`merge: ${pr.mergeStateStatus}, review decision: ${pr.reviewDecision ?? 'none'}`);
@@ -305,7 +305,73 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, lines };
+  return { done: failed || !pending.length, failed, lines, pr };
+}
+
+/** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
+function connectedIssues(pr) {
+  const ids = new Set();
+  for (let after; ;) {
+    const current = graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
+      pullRequest(number:$number){state isDraft headRefOid closingIssuesReferences(first:100,after:$after){totalCount
+        pageInfo{hasNextPage endCursor} nodes{id}}}}}`, { owner, name, number: pr.number, ...(after && { after }) })
+      .repository.pullRequest;
+    assert.ok(current?.state === 'OPEN' && current.isDraft === false && current.headRefOid === pr.headRefOid,
+      'PR changed after the review check; read the current head again');
+    const links = current.closingIssuesReferences;
+    assert.ok(links?.nodes && links.pageInfo, 'Native issue links are unreadable');
+    for (const issue of links.nodes) {
+      assert.ok(issue?.id && !ids.has(issue.id), 'Native issue links are incomplete or repeated');
+      ids.add(issue.id);
+    }
+    if (!links.pageInfo.hasNextPage) {
+      assert.equal(ids.size, links.totalCount, 'Not every native issue link is readable');
+      return ids;
+    }
+    assert.ok(links.pageInfo.endCursor && links.pageInfo.endCursor !== after, 'Issue-link pagination did not advance');
+    after = links.pageInfo.endCursor;
+  }
+}
+
+/** One fully delivered issue: reuse review proof, then guard the actual Human review write. */
+function handoff() {
+  const issue = readIssue();
+  if (check(issue) !== 'STARTABLE') return;
+  assert.ok(issue.id, 'Issue identity is unreadable');
+  const { viewer } = graphql('query{viewer{login}}');
+  assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
+  const status = projectItem(issue)?.status?.name;
+  const reasons = [];
+  if (!['Automated review', 'Human review'].includes(status)) reasons.push('finish implementation and Automated review first');
+  if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
+    reasons.push('the issue is not assigned to the authenticated driver');
+  }
+  if (reasons.length) {
+    console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    process.exitCode = 1;
+    return;
+  }
+  const result = reviews(stallOption(), Date.now(), Number(value));
+  console.log(result.lines.join('\n'));
+  if (!result.done || result.failed) {
+    process.exitCode = result.failed ? 1 : 3;
+    console.log(result.failed ? 'FAILED' : 'WAITING');
+    return;
+  }
+  assert.equal(typeof result.pr.isDraft, 'boolean', 'PR draft state is unreadable');
+  if (result.pr.state !== 'OPEN' || result.pr.isDraft) reasons.push('handoff needs an open non-draft PR');
+  if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
+    reasons.push('resolve review blockers and threads before handoff');
+  }
+  if (!reasons.length && !connectedIssues(result.pr).has(issue.id)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
+  if (reasons.length) {
+    console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    process.exitCode = 1;
+    return;
+  }
+  set('Status', 'Human review');
+  assert.equal(projectItem(readIssue())?.status?.name, 'Human review', 'Human review status read-back differs');
+  console.log(`HANDOFF #${number} PR #${value} head ${result.pr.headRefOid}`);
 }
 
 const stallOption = () => process.argv.includes('--stall') ? Number(process.argv[process.argv.indexOf('--stall') + 1]) : 20;
@@ -361,15 +427,16 @@ function block() {
 }
 
 const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait };
+  reviews: reviewsOnce, wait, handoff };
 const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
-  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged]';
+  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
-  || (['reviews', 'wait'].includes(command) && !(stallOption() > 0))
+  || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
+  || (command === 'handoff' && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
@@ -378,7 +445,7 @@ try {
   await commands[command]();
 } catch (error) {
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff'].includes(command)) throw error;
   console.log(`${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${String(error.stderr || error.message).trim()}`);
   process.exitCode = 2;
 }
