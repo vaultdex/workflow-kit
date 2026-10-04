@@ -163,21 +163,24 @@ test('reviews waits only for traces on the current head and never reads failures
   const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
   const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
   const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
-  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], threadPages } = {}) => ({
+  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, threadPages } = {}) => ({
     number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
       checkSuites: { nodes: [{ createdAt: minutesAgo(pushed) }] }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
     reviewRequests: { totalCount: requests.length, nodes: requests.map(login => ({ requestedReviewer: { login } })) },
+    requestEvents: { nodes: requestedAgo === undefined ? [] : requests.map(login => ({ createdAt: minutesAgo(requestedAgo), requestedReviewer: { login } })) },
     threadPages,
   });
   const codex = (row, minutes) => ({ user: codexUser, html_url: 'u', created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes),
     body: `| Review | Status | Commit |\n| Code Review | ${row} <relative-time datetime="${minutesAgo(minutes)}"></relative-time> | \`abcdef1\` |` });
   const reaction = (content, minutes) => ({ content, created_at: minutesAgo(minutes), user: codexUser });
-  const look = (data, { comments = [], reactions = [], inline = [] } = {}, ...options) => {
+  const look = (data, { comments = [], reactions = [], inline = [], commentReactions = [], reviewList = [] } = {}, ...options) => {
     writeFileSync(join(checkout, 'pr.json'), JSON.stringify(data));
     writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
     writeFileSync(join(checkout, 'issues-reactions.json'), JSON.stringify(reactions));
     writeFileSync(join(checkout, 'pulls-comments.json'), JSON.stringify(inline));
+    writeFileSync(join(checkout, 'comments-reactions.json'), JSON.stringify(commentReactions));
+    writeFileSync(join(checkout, 'pulls-reviews.json'), JSON.stringify(reviewList));
     return run('reviews', '7', ...options);
   };
   const reviews = (...args) => look(...args).status;
@@ -199,6 +202,12 @@ test('reviews waits only for traces on the current head and never reads failures
   const many = Array.from({ length: 100 }, (_, index) => ({ ...codex('Completed', 0), html_url: `old-${index}` }));
   assert.equal(reviews(pr(), { comments: [...many, codex('Running', 1)] }), 3, 'Comments beyond the first page are read');
   assert.equal(reviews(pr({ total: 2 })), 2, 'Unreadable checks are never done');
+  const request = { id: 1, user: { login: 'maintainer', type: 'User' }, body: '@codex review', html_url: 'c', created_at: minutesAgo(0.5), updated_at: minutesAgo(0.5) };
+  assert.equal(reviews(pr(), { comments: [request], commentReactions: [reaction('eyes', 0)] }), 3, 'A 👀 on the review request comment waits');
+  const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
+  assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
+  assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'], requestedAgo: 1 })), 3, 'A late review request starts its own clock');
+  assert.equal(reviews({ ...pr(), state: 'CLOSED' }), 1, 'A PR closed without merge is FAILED');
   const inlineReply = { user: codexUser, html_url: 'i', created_at: minutesAgo(0), updated_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], inline: [inlineReply] }), 0, 'An inline review comment is the result');
   assert.match(look(pr(), { inline: [inlineReply] }).stdout, /^inline chatgpt-codex-connector i$/m, 'Inline findings are listed');

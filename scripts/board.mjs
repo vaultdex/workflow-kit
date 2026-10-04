@@ -163,7 +163,9 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){nodes{createdAt}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
-  reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}`;
+  reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
+  requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){nodes{...on ReviewRequestedEvent{createdAt
+    requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}}`;
 // ponytail: checks and review requests stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
 
 /** Unresolved review threads across every page; big reviews must still get a verdict. */
@@ -197,7 +199,8 @@ const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 function reviews(stallMinutes = 20, now = Date.now()) {
   const pr = graphql(prQuery, { owner, name, number }).repository.pullRequest;
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
-  if (pr.state !== 'OPEN') return { done: true, failed: false, lines };
+  // Closed without merge ends the wait but is never a delivery.
+  if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', lines };
   const { commit } = pr.commits.nodes[0];
   assert.equal(commit.oid, pr.headRefOid, 'Head commit not readable');
   // CI starts on push, so the first check suite dates the push. Before that the commit date is a
@@ -223,7 +226,10 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   if (!contexts.nodes.length) waiting.push({ text: 'first CI check', since: Infinity });
   const comments = restAll(`repos/${project.repository}/issues/${number}/comments`);
   const reviewList = restAll(`repos/${project.repository}/pulls/${number}/reviews`);
-  const reactions = restAll(`repos/${project.repository}/issues/${number}/reactions`);
+  // Bots acknowledge "@bot review" comments with a reaction on that comment, not on the PR.
+  const reactions = [...restAll(`repos/${project.repository}/issues/${number}/reactions`),
+    ...comments.filter(comment => after(comment.created_at))
+      .flatMap(comment => restAll(`repos/${project.repository}/issues/comments/${comment.id}/reactions`))];
   // Inline review comments and thread replies carry findings too.
   const inline = restAll(`repos/${project.repository}/pulls/${number}/comments`);
   const short = pr.headRefOid.slice(0, 7);
@@ -235,7 +241,8 @@ function reviews(stallMinutes = 20, now = Date.now()) {
     }
   }
   const activity = [...[...comments, ...inline].map(comment => [login(comment.user), comment.updated_at]),
-    ...reviewList.map(review => [login(review.user), review.submitted_at]),
+    // A finishing review of the previous head never answers a trace on this one.
+    ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at]),
     ...reactions.map(reaction => [login(reaction.user), reaction.created_at])];
   for (const reaction of reactions.filter(reaction => isBot(reaction.user) && after(reaction.created_at))) {
     // 👀 announces a review; any later comment, review or reaction by the same bot is its result.
@@ -244,8 +251,12 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   }
   // GitHub drops a request once the review arrives, so every remaining request is an outstanding review.
   assert.equal(pr.reviewRequests.nodes.length, pr.reviewRequests.totalCount, 'Not every review request is readable');
+  const reviewerName = reviewer => reviewer?.login ?? reviewer?.name;
   for (const { requestedReviewer: reviewer } of pr.reviewRequests.nodes) {
-    waiting.push({ text: `review requested from ${reviewer?.login ?? reviewer?.name ?? 'an unreadable reviewer'}`, since: pushed });
+    // A request added later starts its own clock.
+    const requested = pr.requestEvents.nodes.filter(event => reviewerName(event.requestedReviewer) === reviewerName(reviewer))
+      .map(event => Date.parse(event.createdAt));
+    waiting.push({ text: `review requested from ${reviewerName(reviewer) ?? 'an unreadable reviewer'}`, since: Math.max(pushed, ...requested) });
   }
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
