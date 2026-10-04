@@ -142,9 +142,10 @@ and empty sections.
    after the head was pushed. Once CI is green, a reviewer without such a trace is
    not coming. Pending, cancelled or missing expected CI checks are not success.
    Read all findings and every review, comment and thread from bots and humans,
-   including every page of analyzer results such as Sonar issues and hotspots. A green quality gate does not mean zero findings,
-   and a missing or stale analysis is not clean. Don't re-request a review that is
-   running or finished for the current commit without a concrete reason.
+   including every page of analyzer results such as Sonar issues and hotspots. A
+   green quality gate does not mean zero findings, and a missing or stale analysis
+   is not clean. Don't re-request a review that is running or finished for the
+   current commit without a concrete reason.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review,
    set Automated review and wait again. Merge main only for conflicts or a real need.
