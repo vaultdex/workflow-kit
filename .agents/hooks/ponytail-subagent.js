@@ -12,6 +12,7 @@
 
 const { getPonytailInstructions } = require('./ponytail-instructions');
 const { readMode, writeHookOutput } = require('./ponytail-runtime');
+const vm = require('vm');
 
 const mode = readMode();
 
@@ -65,19 +66,30 @@ function finish() {
   } catch (e) {
     // Unparseable payload — fall through and inject to be safe.
   }
-  if (agentType && !matcherRe.test(agentType)) {
-    process.exit(0);
+  // .test() is synchronous, so a backtracking-heavy matcher like (a+)+$ would
+  // block the event loop and the fallback timer below could never fire (#658).
+  // Run it under a vm timeout; a timeout fails open like every other doubt.
+  let matches = true;
+  try {
+    if (agentType) {
+      matches = vm.runInNewContext('re.test(s)', { re: matcherRe, s: agentType }, { timeout: 100 });
+    }
+  } catch (e) {
+    matches = true;
   }
+  if (!matches) return;
   inject();
 }
 
 process.stdin.on('data', chunk => { input += chunk; });
-process.stdin.on('end', finish);
+process.stdin.on('end', finishInput);
 // Never block the session (#443): recover on stdin error or a short fallback.
 function finishInput() {
+  clearTimeout(fallback);
   finish();
   process.exitCode = 0;
   process.stdin.destroy(); // Release an unclosed pipe while stdout drains.
 }
 process.stdin.on('error', finishInput);
-setTimeout(finishInput, 1000).unref();
+// Keep fallback alive for stuck stdin; normal EOF cancels it.
+const fallback = setTimeout(finishInput, 1000);
