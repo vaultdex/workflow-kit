@@ -120,6 +120,50 @@ const handoffPr = changes => ({
   linkPages: [['I1']], ...changes,
 });
 
+test('handoff diagnoses draft and unreadable draft state before waiting for CI', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  const commit = handoffPr().commits.nodes[0].commit;
+  for (const checks of [[], [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS' }]]) {
+    for (const isDraft of [true, null, undefined, false]) {
+      const pr = handoffPr({ isDraft, commits: { nodes: [{ commit: {
+        ...commit, statusCheckRollup: { contexts: { totalCount: checks.length, nodes: checks } },
+      } }] } });
+      writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr));
+      const result = run('handoff', '1', '7');
+      const expected = isDraft === true ? 1 : isDraft === false ? 3 : 2;
+      assert.equal(result.status, expected, result.stdout + result.stderr);
+      if (isDraft === true) {
+        assert.match(result.stdout, /FAILED\nblocker: handoff needs an open non-draft PR/);
+        assert.doesNotMatch(result.stdout, /WAITING/);
+      } else if (isDraft === false) {
+        assert.match(result.stdout, /WAITING/);
+      } else {
+        assert.match(result.stdout, /ERROR[\s\S]*PR draft state is unreadable/);
+      }
+      assert.equal(existsSync(join(checkout, 'mutations')), false, 'Draft or incomplete CI never writes status');
+    }
+  }
+});
+
+test('handoff rejects drafts before unavailable review details', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'fail-rest'), '');
+  const commit = handoffPr().commits.nodes[0].commit;
+  for (const checks of [[], [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS' }]]) {
+    for (const isDraft of [true, null, undefined, false]) {
+      writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ isDraft, commits: { nodes: [{ commit: {
+        ...commit, statusCheckRollup: { contexts: { totalCount: checks.length, nodes: checks } },
+      } }] } })));
+      const result = run('handoff', '1', '7');
+      assert.equal(result.status, isDraft === true ? 1 : 2, result.stdout + result.stderr);
+      assert.match(result.stdout, isDraft === true ? /FAILED\nblocker: handoff needs an open non-draft PR/ : /ERROR/);
+      assert.equal(existsSync(join(checkout, 'mutations')), false, 'No rejected handoff writes status');
+    }
+  }
+});
+
 test('handoff blocks unlinked, unsafe and unreadable delivery before writing Human review', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const mutations = join(checkout, 'mutations');
