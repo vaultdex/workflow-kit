@@ -117,6 +117,7 @@ function selectField(fieldName) {
   return { field, linked, choices: linked ? linked.options : field.options };
 }
 
+/** Write an option only after the status-specific prerequisites have been verified. */
 function set(fieldName, optionName = value) {
   const issue = readIssue();
   const { field, linked, choices } = selectField(fieldName);

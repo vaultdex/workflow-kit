@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+/** Isolated checkout with paginated GitHub responses and a record of every mutation. */
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'workflow-board-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
