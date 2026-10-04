@@ -228,13 +228,15 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   }
   if (!contexts.nodes.length) waiting.push({ text: 'first CI check', since: Infinity });
   // An Actions suite without runs is a triggered workflow about to report. Other apps (Sonar, CodeRabbit,
-  // Renovate …) open a suite on every push and often never run it, so only Actions counts, and it may stall.
-  for (const suite of commit.checkSuites.nodes.filter(suite => suite.app?.slug === 'github-actions' && !suite.checkRuns.totalCount)) {
-    if (suite.status !== 'COMPLETED') waiting.push({ text: 'check suite github-actions without runs', since: Date.parse(suite.createdAt) });
+  // Renovate …) open a suite on every push and often never run it, so they count only when the project
+  // lists them in "awaitApps" (analyzers such as SonarCloud create their run only when finished). Both may stall.
+  const awaited = new Set(['github-actions', ...project.awaitApps ?? []]);
+  for (const suite of commit.checkSuites.nodes.filter(suite => awaited.has(suite.app?.slug) && !suite.checkRuns.totalCount)) {
+    if (suite.status !== 'COMPLETED') waiting.push({ text: `check suite ${suite.app.slug} without runs`, since: Date.parse(suite.createdAt) });
     // A workflow that fails to start (STARTUP_FAILURE) completes its suite without any run to show it.
     else if (!passed.has(suite.conclusion)) {
       failed = true;
-      lines.push(`check suite github-actions: ${suite.conclusion}`);
+      lines.push(`check suite ${suite.app.slug}: ${suite.conclusion}`);
     }
   }
   const comments = restAll(`repos/${project.repository}/issues/${number}/comments`);

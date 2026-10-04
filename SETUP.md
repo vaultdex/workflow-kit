@@ -66,6 +66,11 @@ copied board is already recorded, so do not create a replacement. Write and veri
 the agreed policy: `"start": "ready"`, or omit `start` for explicit requests.
 The script preserves an existing policy rather than choosing one.
 
+If an analyzer reports through a GitHub App that creates its check only when it
+finishes (SonarCloud), list the app slug in `"awaitApps"`, for example
+`"awaitApps": ["sonarqubecloud"]`, so `board.mjs wait` waits for it. The script
+keeps this setting too.
+
 For first installation, add the setup issue to this Project, complete its
 [metadata](docs/CONTRIBUTING.md#issues), and set Ready under the explicit setup
 request. Now complete [Start or resume](AGENT_RULES.md#start-or-resume) before
