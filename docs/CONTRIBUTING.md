@@ -139,9 +139,9 @@ and empty sections.
    harness's waiting, not polling. Review bots run unreliably, so find out per head
    who reviews instead of assuming it. A trace is a check, status or review on the
    head commit, or, created after the head was pushed, a review comment, an
-   announced review or a bot's reaction to the PR or a review request. Once CI is green, a reviewer without such a trace is
-   not coming. A traced review finishes when it posts its result: a review, a
-   completed summary or a final status. If no result arrives within the time the
+   announced review or a bot's reaction to the PR or a review request. Once CI is
+   green, a reviewer without such a trace is not coming. A traced review finishes
+   when it posts its result: a review, a completed summary or a final status. If no result arrives within the time the
    reviewer's last completed review on this PR took (otherwise its usual duration),
    it is stalled. Pending, cancelled or missing expected CI checks are not success.
    Read all findings and every review, comment and thread from bots and humans,
