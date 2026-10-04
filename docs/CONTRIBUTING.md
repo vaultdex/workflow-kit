@@ -18,7 +18,8 @@ Ready. Authorization for an issue covers its review fixes; a different issue nee
 its own. Automations and bots never authorize a start.
 
 **Finding work.** `board.mjs next` lists open Ready issues with every native
-predecessor completed, highest Priority first. It does not check ownership or
+predecessor completed, highest Priority first, then the remaining Ready issues with
+their native blockers; both show assignees. It does not check session ownership or
 external prerequisites. Check remaining candidates before reporting no available
 work. Then report blockers and propose a Backlog issue with a reason; do not start
 it or change its status without authorization.

@@ -25,6 +25,24 @@ const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
+/** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
+function predecessorReasons({ totalCount, nodes }) {
+  const blocked = [], unknown = [];
+  const readable = nodes.filter(Boolean);
+  if (readable.length < totalCount) unknown.push(`only ${readable.length} of ${totalCount} predecessors are readable`);
+  for (const predecessor of readable) {
+    const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
+    if (predecessor.state === 'OPEN') blocked.push(`blocked by ${label} (open)`);
+    else if (!predecessor.stateReason) unknown.push(`${label} is closed without a readable reason`);
+    // Only a completed predecessor delivered; not planned or duplicate needs a recorded decision.
+    else if (predecessor.stateReason !== 'COMPLETED') {
+      const reason = predecessor.stateReason.toLowerCase().replace('_', ' ');
+      blocked.push(`blocked by ${label} (closed as ${reason}; record a decision)`);
+    }
+  }
+  return { blocked, unknown };
+}
+
 function check(issue = readIssue()) {
   const status = projectItem(issue)?.status?.name;
   const blocked = [], unknown = [];
@@ -33,18 +51,9 @@ function check(issue = readIssue()) {
   else if (!status) unknown.push('the Project status is unset');
   else if (['Backlog', 'Done'].includes(status)) blocked.push(`status is ${status}`);
   else if (!['Ready', 'In progress', 'Automated review', 'Human review'].includes(status)) unknown.push(`unknown status ${status}`);
-  const { totalCount, nodes } = issue.blockedBy;
-  const readable = nodes.filter(Boolean);
-  if (readable.length < totalCount) unknown.push(`only ${readable.length} of ${totalCount} predecessors are readable`);
-  for (const predecessor of readable) {
-    const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
-    if (predecessor.state === 'OPEN') blocked.push(`blocked by ${label} (open)`);
-    // Only a completed predecessor delivered; not planned or duplicate needs a recorded decision.
-    else if (predecessor.stateReason !== 'COMPLETED') {
-      const reason = (predecessor.stateReason ?? 'unknown reason').toLowerCase().replace('_', ' ');
-      blocked.push(`blocked by ${label} (closed as ${reason}; record a decision)`);
-    }
-  }
+  const predecessors = predecessorReasons(issue.blockedBy);
+  blocked.push(...predecessors.blocked);
+  unknown.push(...predecessors.unknown);
   let verdict = 'STARTABLE';
   if (unknown.length) verdict = 'UNKNOWN';
   if (blocked.length) verdict = 'BLOCKED';
@@ -56,17 +65,23 @@ function check(issue = readIssue()) {
 }
 
 function next() {
-  // Advanced issue search understands -is:blocked (open native predecessors). Read every page before sorting.
+  // Advanced issue search understands -is:blocked (open native predecessors). Separate searches keep blocked issues
+  // from crowding unblocked ones out of the 1,000-result search cap; read every page of both before sorting.
   const nodes = [];
-  for (let after; ;) {
+  for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
-      pageInfo{hasNextPage endCursor} nodes{...on Issue{number title blockedBy(first:100){totalCount nodes{stateReason}}
+      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title assignees(first:10){nodes{login}}
+      blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
-    { q: `repo:${project.repository} is:issue is:open -is:blocked`, ...(after && { after }) });
+    { q: `repo:${project.repository} is:issue is:open ${blocking}`, ...(after && { after }) });
     nodes.push(...search.nodes);
-    if (!search.pageInfo.hasNextPage) break;
+    read += search.nodes.length;
+    if (!search.pageInfo.hasNextPage) {
+      assert.ok(read >= search.issueCount, `Search returned ${read} of ${search.issueCount} ${blocking} issues; the list would be incomplete`);
+      break;
+    }
     assert.ok(search.pageInfo.endCursor && search.pageInfo.endCursor !== after, 'Search pagination did not advance');
     after = search.pageInfo.endCursor;
   }
@@ -75,14 +90,20 @@ function next() {
   const order = priority => rank.includes(priority) ? rank.indexOf(priority) : rank.length;
   const ready = nodes.map(issue => ({ ...issue, item: projectItem(issue) }))
     .filter(issue => issue.item?.status?.name === 'Ready')
-    // As in check: only predecessors closed as completed count as delivered.
-    .filter(({ blockedBy }) => blockedBy.nodes.length === blockedBy.totalCount
-      && blockedBy.nodes.every(predecessor => predecessor?.stateReason === 'COMPLETED'))
-    .map(issue => ({ ...issue, priority: issue.item.priority?.name
-      ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name }))
+    .map(issue => {
+      const { blocked, unknown } = predecessorReasons(issue.blockedBy);
+      return { ...issue, reasons: [...blocked, ...unknown], priority: issue.item.priority?.name
+        ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name };
+    })
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);
-  for (const issue of ready) console.log(`#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`);
-  console.log(ready.length ? 'Run board.mjs check ISSUE before claiming one.' : 'No Ready issue whose blockers are all completed.');
+  const line = issue => `#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`
+    + ` (assignees: ${issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none'})`;
+  const held = ready.filter(issue => issue.reasons.length);
+  const startable = ready.filter(issue => !issue.reasons.length);
+  for (const issue of startable) console.log(line(issue));
+  console.log(startable.length ? 'Run board.mjs check ISSUE before claiming one.' : 'No Ready issue whose blockers are all completed.');
+  if (held.length) console.log('\nReady but not startable:');
+  for (const issue of held) console.log([line(issue), ...issue.reasons.map(reason => `  - ${reason}`)].join('\n'));
 }
 
 /** A single-select Project field with its options in configured order. */
