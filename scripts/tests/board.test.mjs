@@ -46,9 +46,23 @@ else if (query.includes('reviewThreads(first:100,after')) {
   data = { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
     nodes: pages[index].map(isResolved => ({ isResolved, comments: { nodes: [{ url: 'thread-' + index }] } })) } } } };
 }
+else if (query.includes('closingIssuesReferences')) {
+  if (fs.existsSync('fail-links')) process.exit(1);
+  const pr = JSON.parse(fs.readFileSync('pr.json'));
+  const pages = pr.linkPages ?? [[]];
+  const cursor = process.argv.find(arg => arg.startsWith('after='));
+  const index = cursor ? Number(cursor.slice(6)) : 0;
+  if (fs.existsSync('changed-issue.json')) fs.copyFileSync('changed-issue.json', 'issue.json');
+  if (pr.prAfterLinks) fs.writeFileSync('pr.json', JSON.stringify(pr.prAfterLinks));
+  data = { repository: { pullRequest: { state: pr.state, isDraft: pr.isDraft,
+    headRefOid: pr.changedHead ?? pr.headRefOid,
+    closingIssuesReferences: { totalCount: pr.linkTotal ?? pages.flat().length,
+      pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
+      nodes: pages[index].map(id => id === null ? null : { id }) } } } };
+}
 else if (query.includes('pullRequest(number')) data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
 else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
-  id: 'F1', name: 'Status', options: ['Ready', 'In progress'].map(name => ({ id: name, name }))
+  id: 'F1', name: 'Status', options: ['Ready', 'In progress', 'Human review'].map(name => ({ id: name, name }))
 }, { id: 'F2', name: 'Priority', options: ['High', 'Low'].map(name => ({ id: name, name })) },
 { id: 'F3', name: 'Size', options: ['XS', 'S'].map(name => ({ id: name, name })) }] } } };
 else if (query.includes('search(')) {
@@ -58,7 +72,13 @@ else if (query.includes('search(')) {
     .filter(issue => issue.blockedBy.nodes.some(predecessor => predecessor?.state === 'OPEN') === blocked);
   data = { search: { issueCount: nodes.length + Number(fs.existsSync('truncate')), pageInfo: { hasNextPage: false }, nodes } };
 }
-else data = { repository: { issue: JSON.parse(fs.readFileSync('issue.json')) } };
+else {
+  const issue = JSON.parse(fs.readFileSync('issue.json'));
+  if (fs.existsSync('handoff-fixture') && fs.existsSync('stored')) {
+    issue.projectItems.nodes[0].status.name = fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8');
+  }
+  data = { repository: { issue } };
+}
 process.stdout.write(JSON.stringify({ data }));`);
   return {
     checkout,
@@ -74,6 +94,143 @@ const issue = (status = 'Ready', nodes = [], totalCount = nodes.length) => ({
   blockedBy: { totalCount, nodes },
 });
 const predecessor = (state, stateReason) => ({ number: 9, state, stateReason, repository: { nameWithOwner: 'test/other' } });
+
+const handoffPr = changes => ({
+  number: 7, state: 'OPEN', isDraft: false, baseRefName: 'release/0.1.1', headRefOid: 'abcdef1234',
+  mergeStateStatus: 'CLEAN', reviewDecision: null,
+  latestOpinionatedReviews: { totalCount: 0, nodes: [] },
+  commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: new Date().toISOString(),
+    checkSuites: { totalCount: 0, nodes: [] }, statusCheckRollup: { contexts: { totalCount: 1, nodes: [
+      { __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    ] } } } }] },
+  reviewRequests: { totalCount: 0, nodes: [] }, requestEvents: { totalCount: 0, nodes: [] },
+  linkPages: [['I1']], ...changes,
+});
+
+test('handoff blocks unlinked, unsafe and unreadable delivery before writing Human review', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const mutations = join(checkout, 'mutations');
+  const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
+  const pending = { ...handoffPr().commits.nodes[0].commit,
+    statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS' }] } } };
+  const failed = { ...pending, statusCheckRollup: { contexts: { totalCount: 1, nodes: [
+    { __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' },
+  ] } } };
+  const cases = [
+    [handoffPr({ linkPages: [[]] }), ready, 1], // Text/branch refs and partial delivery do not provide the required native link.
+    [handoffPr({ linkPages: [['unrelated']] }), ready, 1],
+    [handoffPr({ linkPages: [['I1']], linkTotal: 2 }), ready, 2],
+    [handoffPr({ linkPages: [[null]], linkTotal: 1 }), ready, 2],
+    [handoffPr({ linkPages: [['I1', 'I1']] }), ready, 2],
+    [handoffPr({ changedHead: 'new-head' }), ready, 2],
+    [handoffPr({ isDraft: true }), ready, 1],
+    [handoffPr({ isDraft: null }), ready, 2],
+    [handoffPr({ state: 'MERGED' }), ready, 1],
+    [handoffPr({ state: 'CLOSED' }), ready, 1],
+    [handoffPr({ mergeStateStatus: 'DIRTY' }), ready, 1],
+    [handoffPr({ mergeStateStatus: 'UNKNOWN' }), ready, 3],
+    [handoffPr({ mergeStateStatus: null }), ready, 3],
+    [handoffPr({ threadPages: [[false]] }), ready, 1],
+    [handoffPr({ latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'reviewer' } }] } }), ready, 1],
+    [handoffPr({ commits: { nodes: [{ commit: pending }] } }), ready, 3],
+    [handoffPr({ commits: { nodes: [{ commit: failed }] } }), ready, 1],
+    [handoffPr(), { ...ready, assignees: { nodes: [] } }, 1],
+    [handoffPr(), { ...ready, assignees: { nodes: [{ login: 'someone-else' }] } }, 1],
+    [handoffPr(), { ...ready, state: 'CLOSED' }, 1],
+    [handoffPr(), { ...ready, projectItems: issue('In progress').projectItems }, 1],
+    [handoffPr(), { ...ready, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } }, 1],
+  ];
+  for (const [pr, task, status] of cases) {
+    writeIssue(task);
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr));
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, status, result.stdout + result.stderr);
+    assert.equal(existsSync(mutations), false, 'Rejected handoff never mutates status');
+  }
+  writeIssue(ready);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  for (const failure of ['fail', 'fail-viewer', 'fail-links']) {
+    writeFileSync(join(checkout, failure), '');
+    assert.equal(run('handoff', '1', '7').status, 2, 'An API read failure is unknown, never a handoff');
+    assert.equal(existsSync(mutations), false);
+    rmSync(join(checkout, failure));
+  }
+  assert.equal(run('handoff', '1', '--oops').status, 2, 'Option-like PR arguments are rejected');
+  for (const baseRefName of ['main', 'release/0.1.1']) {
+    writeFileSync(join(checkout, 'handoff-fixture'), '');
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName,
+      linkPages: [Array.from({ length: 100 }, (_, index) => 'other-' + index), ['I1']] })));
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /HANDOFF #1 PR #7 head abcdef1234/);
+    assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
+  }
+});
+
+test('handoff rechecks issue prerequisites after review and link reads, before mutation', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  const changes = [
+    { ...ready, state: 'CLOSED' },
+    { ...ready, assignees: { nodes: [] } },
+    { ...ready, assignees: { nodes: [{ login: 'someone-else' }] } },
+    { ...ready, projectItems: issue('In progress').projectItems },
+    { ...ready, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } },
+    { ...ready, blockedBy: { totalCount: 1, nodes: [] } },
+  ];
+  for (const changed of changes) {
+    writeIssue(ready);
+    writeFileSync(join(checkout, 'changed-issue.json'), JSON.stringify(changed));
+    const result = run('handoff', '1', '7');
+    assert.ok([1, 2].includes(result.status), result.stdout + result.stderr);
+    assert.equal(existsSync(join(checkout, 'mutations')), false, 'A newer issue state must not be overwritten');
+    assert.doesNotMatch(result.stdout, /HANDOFF #1/);
+  }
+});
+
+test('handoff rechecks PR gates before mutation and rejects changed review proof', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  const commit = handoffPr().commits.nodes[0].commit;
+  const changedHead = 'new-head';
+  const changes = [
+    handoffPr({ headRefOid: changedHead, commits: { nodes: [{ commit: { ...commit, oid: changedHead } }] } }),
+    handoffPr({ state: 'CLOSED' }),
+    handoffPr({ state: 'MERGED' }),
+    handoffPr({ isDraft: true }),
+    handoffPr({ mergeStateStatus: 'UNKNOWN' }),
+    handoffPr({ mergeStateStatus: 'DIRTY' }),
+    handoffPr({ latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'reviewer' } }] } }),
+    handoffPr({ threadPages: [[false]] }),
+    handoffPr({ linkPages: [[]] }),
+    ...['IN_PROGRESS', 'COMPLETED'].map(status => handoffPr({ commits: { nodes: [{ commit: {
+      ...commit, statusCheckRollup: { contexts: { totalCount: 1, nodes: [
+        { __typename: 'CheckRun', name: 'CI', status, conclusion: 'FAILURE' },
+      ] } },
+    } }] } })),
+  ];
+  for (const prAfterLinks of changes) {
+    writeIssue(ready);
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ prAfterLinks })));
+    const result = run('handoff', '1', '7');
+    assert.ok([1, 2, 3].includes(result.status), result.stdout + result.stderr);
+    assert.equal(existsSync(join(checkout, 'mutations')), false, 'Changed PR proof must never write Human review');
+    assert.doesNotMatch(result.stdout, /HANDOFF #1/);
+  }
+});
+
+test('handoff reports a failed status read-back instead of claiming delivery', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  writeFileSync(join(checkout, 'lost'), 'Ready');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  const result = run('handoff', '1', '7');
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.doesNotMatch(result.stdout, /HANDOFF #1/);
+});
 
 test('board check exits 0 only for startable issues: 1 blocked, 2 unknown', t => {
   const { checkout, run, writeIssue } = fixture(t);
