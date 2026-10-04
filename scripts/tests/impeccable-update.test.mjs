@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,12 +25,20 @@ const checksum = async url => {
 };
 const metadata = ['scripts/impeccable/VERSION', 'scripts/impeccable/SHA256SUMS', 'docs/impeccable.md',
   'templates/.codex/hooks.json', 'templates/.claude/settings.json', 'templates/.github/hooks/impeccable.json'];
+const providers = ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'];
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'impeccable update '));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   execFileSync('git', ['clone', '--quiet', '--shared', kit, root]);
   for (const vendor of ['impeccable', 'matt-pocock-skills', 'ponytail'])
     execFileSync('git', ['-c', 'advice.detachedHead=false', 'clone', '--quiet', '--shared', join(kit, '.vendor', vendor), join(root, '.vendor', vendor)]);
+  // The offline fixture models an available official tag, even when CI cloned
+  // only the accepted commit. Historical tags are not prerequisites for tests.
+  const source = join(root, '.vendor/impeccable');
+  const tag = execFileSync('git', ['config', '-f', '.gitmodules', '--get', 'submodule..vendor/impeccable.branch'], { cwd: root, encoding: 'utf8' }).trim();
+  if (!execFileSync('git', ['-C', source, 'tag', '--list', tag], { encoding: 'utf8' }).trim())
+    execFileSync('git', ['-C', source, 'tag', tag]);
+  const expected = new Map(metadata.map(file => [file, readFileSync(join(root, file), 'utf8').replaceAll('\r\n', '\n')]));
   for (const file of metadata) {
     const path = join(root, file);
     let text = readFileSync(path, 'utf8').replaceAll(`engine-${version}`, 'engine-0.1.5')
@@ -39,16 +47,24 @@ function fixture(t) {
     if (file.endsWith('/SHA256SUMS')) text = 'not-a-reviewed-checksum\n';
     writeFileSync(path, text);
   }
-  return root;
+  for (const provider of providers)
+    writeFileSync(join(root, provider, 'skills/impeccable/scripts/VERSION'), '0.1.5\n');
+  for (const directory of ['.codex/agents', '.claude/agents', '.github/agents', '.opencode/commands']) {
+    const file = readdirSync(join(root, directory)).find(name => name.startsWith('impeccable'));
+    assert.ok(file, `Existing companion in ${directory}`);
+    writeFileSync(join(root, directory, file), 'outdated generated companion\n');
+  }
+  return { root, expected };
 }
 function unstagedProposal(root) {
   // Match Renovate's real manager: proposed HEAD/tag, old index gitlink until commit.
-  const previous = execFileSync('git', ['-C', join(root, '.vendor/impeccable'), 'rev-parse', 'skill-v4.3.1^{commit}'], { encoding: 'utf8' }).trim();
+  // A gitlink is a commit ID; shallow CI need not contain its historical object.
+  const previous = 'cd12f8660e2dde57b9615c8a6b8ea674101f9cfc'; // skill-v4.3.1
   execFileSync('git', ['update-index', '--cacheinfo', `160000,${previous},.vendor/impeccable`], { cwd: root });
 }
 
 test('a stale Renovate engine pin is completed for every hook and provider, then reruns without drift', async t => {
-  const root = fixture(t);
+  const { root, expected } = fixture(t);
   const before = spawnSync(process.execPath, [join(root, 'scripts/setup-impeccable.mjs')], { cwd: root, encoding: 'utf8' });
   assert.notEqual(before.status, 0, 'Reproduce the incomplete skill/engine update before fixing it');
   unstagedProposal(root);
@@ -58,8 +74,8 @@ test('a stale Renovate engine pin is completed for every hook and provider, then
   assert.notEqual(tree(), originalIndex, 'The validated proposed gitlink replaces the old index pin');
   for (const file of metadata)
     assert.equal(readFileSync(join(root, file), 'utf8').replaceAll('\r\n', '\n'),
-      readFileSync(join(kit, file), 'utf8').replaceAll('\r\n', '\n'), file);
-  for (const provider of ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'])
+      expected.get(file), file);
+  for (const provider of providers)
     assert.equal(readFileSync(join(root, provider, 'skills/impeccable/scripts/VERSION'), 'utf8').trim(), version);
   const status = () => execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: root, encoding: 'utf8' });
   assert.equal(status(), '', 'Metadata and generated outputs match the accepted kit');
@@ -68,7 +84,7 @@ test('a stale Renovate engine pin is completed for every hook and provider, then
 });
 
 test('incomplete releases, wrong digests and failed checksum reads never partly update metadata', async t => {
-  const root = fixture(t);
+  const { root } = fixture(t);
   unstagedProposal(root);
   const snapshot = () => metadata.map(file => readFileSync(join(root, file), 'utf8'));
   const before = snapshot();

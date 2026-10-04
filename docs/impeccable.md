@@ -48,7 +48,8 @@ text, for the org admin to submit:
 > `^node scripts/update-impeccable\.mjs$` for this repository. This command
 > completes only official Impeccable skill updates: it reads upstream files as
 > data, validates five public engine artifacts and checksums, and runs our
-> existing generators. It makes six public HTTPS reads per update, executes no
+> existing generators. It makes six public HTTPS metadata reads per update,
+> plus the pinned Git checkout/tag fetch when needed, and executes no
 > vendored program, needs no additional secret, and installs no personal engine.
 > Renovate collects only the explicit output paths in our package rule. Local
 > execution takes about 10 seconds; no additional Actions job is requested.

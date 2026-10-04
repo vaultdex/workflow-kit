@@ -73,6 +73,10 @@ export async function updateImpeccable(kit, { release, checksum } = {}) {
     assert.equal(read(`.vendor/impeccable/${provider}/skills/impeccable/scripts/VERSION`).trim(), version, 'Provider engine versions disagree');
   const tag = git('config', '-f', '.gitmodules', '--get', 'submodule..vendor/impeccable.branch');
   assert.match(tag, /^skill-v\d+\.\d+\.\d+$/);
+  // A shallow checkout can contain the proposed commit without its tag ref.
+  if (git('-C', source, 'tag', '--list', tag) !== tag)
+    git('-C', source, 'fetch', '--no-tags', 'https://github.com/pbakaus/impeccable.git',
+      `refs/tags/${tag}:refs/tags/${tag}`);
   assert.equal(git('-C', source, 'rev-parse', `${tag}^{commit}`), revision, 'Skill tag does not match the proposed pin');
   release ??= JSON.parse(await download(`https://api.github.com/repos/pbakaus/impeccable/releases/tags/engine-v${version}`));
   const pins = await releasePins(release, version, checksum);
