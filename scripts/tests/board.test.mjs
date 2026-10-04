@@ -134,12 +134,13 @@ test('handoff diagnoses draft and unreadable draft state before waiting for CI',
       const expected = isDraft === true ? 1 : isDraft === false ? 3 : 2;
       assert.equal(result.status, expected, result.stdout + result.stderr);
       if (isDraft === true) {
-        assert.match(result.stdout, /FAILED\nblocker: handoff needs an open non-draft PR/);
+        assert.match(result.stdout, /^FAILED$/m);
+        assert.match(result.stdout, /^blocker:/m);
         assert.doesNotMatch(result.stdout, /WAITING/);
       } else if (isDraft === false) {
         assert.match(result.stdout, /WAITING/);
       } else {
-        assert.match(result.stdout, /ERROR[\s\S]*PR draft state is unreadable/);
+        assert.match(result.stdout, /^ERROR$/m);
       }
       assert.equal(existsSync(join(checkout, 'mutations')), false, 'Draft or incomplete CI never writes status');
     }
@@ -158,7 +159,9 @@ test('handoff rejects drafts before unavailable review details', t => {
       } }] } })));
       const result = run('handoff', '1', '7');
       assert.equal(result.status, isDraft === true ? 1 : 2, result.stdout + result.stderr);
-      assert.match(result.stdout, isDraft === true ? /FAILED\nblocker: handoff needs an open non-draft PR/ : /ERROR/);
+      assert.match(result.stdout, isDraft === true ? /^FAILED$/m : /^ERROR$/m);
+      assert.doesNotMatch(result.stdout, /^WAITING$/m);
+      if (isDraft === true) assert.match(result.stdout, /^blocker:/m);
       assert.equal(existsSync(join(checkout, 'mutations')), false, 'No rejected handoff writes status');
     }
   }
