@@ -51,7 +51,7 @@ check again before Human review.
 | Backlog | Nothing without a human request; propose, don't implement. |
 | Ready | Complete [Start or resume](#start-or-resume). |
 | In progress | Implement on the issue-linked branch; the PR stays Draft. |
-| Automated review | PR ready; wait for CI and every reviewer with a trace on the head ([review loop](docs/CONTRIBUTING.md#review-loop)); fix or link each finding. |
+| Automated review | PR ready; wait for CI and every reviewer with a trace on the head ([review loop](docs/CONTRIBUTING.md#review-loop)); fix or link each finding; run the retro before handoff. |
 | Human review | Hand off. A human accepts and merges. |
 | Done | Merged and accepted. |
 
@@ -65,6 +65,8 @@ Run [board commands](README.md#board-commands) in the project with authenticated
   neighboring paths in the same push. If the same class of finding returns after
   two correction pushes, stop patching and re-examine the whole area's states, data
   flow and assumptions.
+- Before the first push of a rule, policy or state machine, list its cases (missing,
+  stale, partial and unrelated input) and settle open ones with the human.
 - Use the first sufficient option: skip speculative work, reuse repository code,
   standard library/platform, installed dependency, then minimal new code. Check
   pinned-version docs before reimplementing; delete obsolete code and abstractions.
@@ -85,8 +87,9 @@ Run [board commands](README.md#board-commands) in the project with authenticated
 ## Economy
 
 - Tokens and Actions minutes are budgets. Read only what the step needs, reuse
-  evidence whose inputs are unchanged, and wait for CI and reviews with the
-  harness's wait mechanism instead of polling.
+  evidence whose inputs are unchanged, and wait for CI and reviews with
+  `board.mjs wait PR` in the background instead of hand-written polling loops.
+- Every push restarts CI and reviews: finish fixes and formatting before pushing.
 - No routine setup reruns, broad audits, or new CI jobs and triggers without an
   estimate of the added usage; get approval when the budget is unknown.
 
