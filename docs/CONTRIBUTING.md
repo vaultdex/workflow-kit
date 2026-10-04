@@ -135,9 +135,14 @@ and empty sections.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
    Then mark it Ready for Review and set Automated review. Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
-3. Wait for CI and every configured automatic review on the current head, using the
-   harness's waiting, not polling. Pending, cancelled or missing expected checks are
-   not success. Read all findings, including every page of analyzer results such
+3. Wait for CI and every automatic review active on the current head, using the
+   harness's waiting, not polling. Review bots run unreliably, so read each one's
+   traces on the PR per head (check or status, review, summary comment, reaction)
+   instead of assuming who reviews. Once CI has finished, request a silent bot once
+   (for example `@coderabbitai review`, `@codex review`); with no trace 30 minutes
+   later it is unavailable (step 6). Pending, cancelled or missing expected checks are
+   not success. Read all findings and every review, comment and thread from bots
+   and humans, including every page of analyzer results such
    as Sonar issues and hotspots. A green quality gate does not mean zero findings,
    and a missing or stale analysis is not clean. Don't re-request a review that is
    running or finished for the current commit without a concrete reason.
@@ -150,7 +155,7 @@ and empty sections.
 6. Set Human review only when CI passes, every automatic review of the current head
    has finished, each finding is fixed or linked to a follow-up, the final proof has
    passed and no prerequisite is open. If a reviewer is confirmed unavailable
-   (quota, outage), record the reviewer, cause and evidence in the PR and hand off
+   (quota, outage, no trace after a request), record the reviewer, cause and evidence in the PR and hand off
    with that limitation stated. Pending or unknown does not count as unavailable.
 7. After the human merges, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
