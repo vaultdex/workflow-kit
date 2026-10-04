@@ -40,8 +40,9 @@ STARTABLE covers native prerequisites, not permission or ownership. Also inspect
 **Abhängigkeiten und Wiederaufnahme** for external access, releases and decisions.
 `status ISSUE "In progress"` repeats this check and requires assignment to the
 authenticated GitHub user before writing; it cannot distinguish sessions sharing
-a login. Failed reads prevent the transition. Other status commands remain
-metadata operations, not approval checks.
+a login. Failed reads prevent the transition. Automated review also checks
+[PR backlinks](#pr-backlinks); remaining status commands are metadata operations,
+not approval checks.
 
 BLOCKED or UNKNOWN stops claims, In progress and dependent edits. Preserve
 dependencies and acceptance; calling a blocker "merge-only" does not clear it.
@@ -134,12 +135,38 @@ reason and the benefit, with before/after where useful, plus the issue links. Ad
 evidence in the issue instead of pasting logs or CI status. Delete template hints
 and empty sections.
 
+### PR backlinks
+
+Immediately after creating a PR, post its full URL in a comment on every issue
+being delivered and read back the comments (`gh api --paginate
+repos/OWNER/REPO/issues/ISSUE/comments`). PR creation is complete only after every
+backlink is confirmed, including for Draft PRs. Reuse an existing comment pointing
+to the same open PR on resume; after a partial write or an API error, read first
+before retrying. A link in the chat or PR body does not replace the issue comment.
+
+Before Automated review, run `board.mjs status ISSUE "Automated review" PR
+[OTHER_ISSUE...]` with the PR number and all other issues it delivers in this
+repository (numbers), or another repository (`OWNER/REPO#N`). The command checks
+the open PR's explicit issue references and every issue's complete comment list
+before changing status. Missing/wrong/old backlinks,
+unreadable or incomplete API data fail without changing status. The `field ISSUE
+Status "Automated review" PR [OTHER_ISSUE...]` route performs the same check.
+
+This check accepts `Refs` on release branches as well as `Closes` on the default
+branch. It proves the comment backlinks, not native closing links, session
+ownership, full delivery or review completion. Keep those separate checks and the
+project's release policy. List only delivered issues; related references do not
+expand the declared scope. Repository PRs without a delivered issue still use
+`reviews PR` and `wait PR` without an artificial issue requirement. Creating a
+backlink never closes an issue.
+
 ### Review loop
 
 1. Before the first push, focused checks pass, the diff is reviewed and current
    main is merged if the branch is behind. Push once, then update the same PR.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
-   Then mark it Ready for Review and set Automated review. Don't wait for optional
+   Then mark it Ready for Review and set Automated review with the PR number and
+   all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
 3. Wait for CI and every review with a trace on the current head with `board.mjs
    wait PR` in the background, not hand-written polling. Review bots run unreliably,

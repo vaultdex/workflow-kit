@@ -130,6 +130,7 @@ function set(fieldName, optionName = value, beforeWrite) {
     assert.ok(issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase()),
       `Assign yourself first: gh issue edit ${number} --repo ${project.repository} --add-assignee "@me". Verify session ownership before assigning.`);
   }
+  if (fieldName === 'Status' && option.name === 'Automated review') verifyBacklinks();
   // A guarded handoff rechecks current ownership/readiness after the potentially lengthy review reads.
   if (beforeWrite) {
     issue = beforeWrite();
@@ -192,12 +193,52 @@ function unresolvedThreads(prNumber = number) {
 }
 const rest = path => JSON.parse(execFileSync(gh.file, ['api', path], { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
 /** Every page, so an early bot summary on a long PR is never cut off. */
-function restAll(path) {
+function restAll(path, expected) {
   const items = [];
   for (let page = 1; ; page++) {
     const batch = rest(`${path}?per_page=100&page=${page}`);
+    assert.ok(Array.isArray(batch) && batch.length <= 100, 'Unreadable REST page');
     items.push(...batch);
+    assert.ok(expected === undefined || items.length <= expected, 'More comments than declared; retry the read');
     if (batch.length < 100) return items;
+  }
+}
+
+/** Explicit scope works with Refs on release branches; native closing links remain a separate proof. */
+function verifyBacklinks() {
+  const [prRef, ...extraIssues] = process.argv.slice(command === 'field' ? 6 : 5);
+  const positive = ref => /^\d+$/.test(ref ?? '') && Number.isSafeInteger(Number(ref)) && Number(ref) > 0;
+  assert.ok(positive(prRef) && extraIssues.every(ref => validBlocker(ref) && positive(ref.slice(ref.lastIndexOf('#') + 1))),
+    'Automated review requires PR [OTHER_ISSUE...]; post and read back every issue backlink first.');
+  const prNumber = Number(prRef);
+  const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    pullRequest(number:$number){number url state body}}}`, { owner, name, number: prNumber }).repository;
+  assert.ok(pr?.number === prNumber && pr.state === 'OPEN' && typeof pr.body === 'string', 'The declared PR is not open/readable');
+  const url = new URL(pr.url);
+  assert.equal(url.pathname, `/${project.repository}/pull/${prNumber}`, 'PR belongs to another repository');
+  const scope = new Set([`${project.repository}#${number}`, ...extraIssues.map(ref =>
+    `${blockerRepository(ref)}#${Number(ref.slice(ref.lastIndexOf('#') + 1))}`)]);
+  for (const issueRef of scope) {
+    const repository = blockerRepository(issueRef), issueNumber = Number(issueRef.slice(issueRef.lastIndexOf('#') + 1));
+    const qualifier = `(?:${RegExp.escape(repository)})${repository === project.repository ? '?' : ''}`;
+    const reference = new RegExp(`(?<![\\w/])${qualifier}#${issueNumber}(?!\\w)`, 'i');
+    assert.ok(reference.test(pr.body), `PR #${prNumber} does not reference ${issueRef}`);
+    const issue = rest(`repos/${repository}/issues/${issueNumber}`);
+    assert.ok(issue?.number === issueNumber && issue.state === 'open' && !issue.pull_request,
+      `#${issueNumber} is not an open issue`);
+    assert.ok(Number.isSafeInteger(issue.comments) && issue.comments >= 0, 'Issue comment count is unreadable');
+    const comments = restAll(`repos/${repository}/issues/${issueNumber}/comments`, issue.comments);
+    assert.equal(comments.length, issue.comments, `Not every comment on #${issueNumber} is readable; retry the read`);
+    assert.ok(comments.every(comment => Number.isSafeInteger(comment?.id) && typeof comment.body === 'string'), 'Unreadable issue comment');
+    assert.equal(new Set(comments.map(comment => comment.id)).size, comments.length, 'Duplicate comment page');
+    const backlink = comments.find(comment => (comment.body.match(/https?:\/\/[^\s<>()[\]`"']+/g) ?? []).some(link => {
+      try {
+        const target = new URL(link.replace(/[.,;:!?]+$/, ''));
+        return target.origin === url.origin && target.pathname.replace(/\/$/, '') === url.pathname;
+      } catch { return false; } // An unrelated malformed URL is not a backlink.
+    }));
+    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; post the full URL and retry`);
+    console.log(`backlink ${issueRef}: ${backlink.html_url}`);
   }
 }
 const login = user => user?.login?.replace(/\[bot\]$/, '');
@@ -461,6 +502,7 @@ function block() {
 const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
   reviews: reviewsOnce, wait, handoff };
 const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
+  + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
