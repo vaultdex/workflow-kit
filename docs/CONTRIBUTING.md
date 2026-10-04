@@ -140,7 +140,10 @@ and empty sections.
    who reviews instead of assuming it. A trace is a check, status or review on the
    head commit, or a comment or reaction (including an announced review) created
    after the head was pushed. Once CI is green, a reviewer without such a trace is
-   not coming. Pending, cancelled or missing expected CI checks are not success.
+   not coming. A traced review finishes when it posts its result: a review, a
+   completed summary or a final status. If no result arrives within the time the
+   reviewer's last completed review on this PR took (otherwise its usual duration),
+   it is stalled. Pending, cancelled or missing expected CI checks are not success.
    Read all findings and every review, comment and thread from bots and humans,
    including every page of analyzer results such as Sonar issues and hotspots. A
    green quality gate does not mean zero findings, and a missing or stale analysis
@@ -153,10 +156,11 @@ and empty sections.
    it defines one, and record the tested commit. Reuse proof only while its inputs
    are unchanged.
 6. Set Human review only when CI passes, every review with a trace on the current
-   head has finished, each finding is fixed or linked to a follow-up, the final proof
-   has passed and no prerequisite is open. If a reviewer is confirmed unavailable
-   (quota, outage), record the reviewer, cause and evidence in the PR and hand off
-   with that limitation stated. Pending or unknown does not count as unavailable.
+   head has finished or stalled, each finding is fixed or linked to a follow-up, the
+   final proof has passed and no prerequisite is open. If a reviewer is confirmed
+   unavailable (quota, outage) or stalled, record the reviewer, cause and evidence
+   in the PR and hand off with that limitation stated. Otherwise pending or unknown
+   does not count as unavailable.
 7. After the human merges, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
 
