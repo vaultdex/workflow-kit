@@ -80,6 +80,8 @@ trust; new definitions need personal review and trust. See
   `block ISSUE OWNER/REPO#N`.
 - `field ISSUE NAME VALUE`: any single-select field, read back after writing.
 - `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
+  It also prints the merge state and `blocker:` lines (standing change requests,
+  conflicts), because mergeable is not merge-ready.
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
   `--stall MINUTES` (default 20). `wait PR --merged` waits for the human merge

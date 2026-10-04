@@ -154,6 +154,9 @@ and empty sections.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review,
    set Automated review and wait again. Merge main only for conflicts or a real need.
+   After two correction pushes, collect new findings that neither block (P1,
+   security, data loss) nor regress against main in one follow-up issue instead of
+   another push; every push restarts CI and reviews.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
    are unchanged. Then run a retro once per PR: apply the retro skill
@@ -168,7 +171,10 @@ and empty sections.
    final proof has passed, the retro is recorded and no prerequisite is open. If a
    reviewer is confirmed unavailable (quota, outage) or stalled, record the
    reviewer, cause and evidence in the PR and hand off with that limitation stated.
-   Otherwise pending or unknown does not count as unavailable.
+   Otherwise pending or unknown does not count as unavailable. Mergeable is not
+   merge-ready: resolve every `blocker:` that `board.mjs reviews` lists (a standing
+   change request, conflicts) or name it for the human when only a human may clear
+   it, such as dismissing a review or resolving a thread you declined to fix.
 7. After the human merges, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
 
