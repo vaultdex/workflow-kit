@@ -33,9 +33,10 @@ function predecessorReasons({ totalCount, nodes }) {
   for (const predecessor of readable) {
     const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
     if (predecessor.state === 'OPEN') blocked.push(`blocked by ${label} (open)`);
+    else if (!predecessor.stateReason) unknown.push(`${label} is closed without a readable reason`);
     // Only a completed predecessor delivered; not planned or duplicate needs a recorded decision.
     else if (predecessor.stateReason !== 'COMPLETED') {
-      const reason = (predecessor.stateReason ?? 'unknown reason').toLowerCase().replace('_', ' ');
+      const reason = predecessor.stateReason.toLowerCase().replace('_', ' ');
       blocked.push(`blocked by ${label} (closed as ${reason}; record a decision)`);
     }
   }
@@ -64,18 +65,23 @@ function check(issue = readIssue()) {
 }
 
 function next() {
-  // Read every page of open issues before sorting; blocked Ready issues are listed too, so "no work" needs no second query.
+  // Advanced issue search understands -is:blocked (open native predecessors). Separate searches keep blocked issues
+  // from crowding unblocked ones out of the 1,000-result search cap; read every page of both before sorting.
   const nodes = [];
-  for (let after; ;) {
+  for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
-      pageInfo{hasNextPage endCursor} nodes{...on Issue{number title assignees(first:10){nodes{login}}
+      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title assignees(first:10){nodes{login}}
       blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
-    { q: `repo:${project.repository} is:issue is:open`, ...(after && { after }) });
+    { q: `repo:${project.repository} is:issue is:open ${blocking}`, ...(after && { after }) });
     nodes.push(...search.nodes);
-    if (!search.pageInfo.hasNextPage) break;
+    read += search.nodes.length;
+    if (!search.pageInfo.hasNextPage) {
+      assert.ok(read >= search.issueCount, `Search returned ${read} of ${search.issueCount} ${blocking} issues; the list would be incomplete`);
+      break;
+    }
     assert.ok(search.pageInfo.endCursor && search.pageInfo.endCursor !== after, 'Search pagination did not advance');
     after = search.pageInfo.endCursor;
   }
