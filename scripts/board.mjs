@@ -160,7 +160,7 @@ function setField() {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){nodes{createdAt}}
+  number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){nodes{createdAt status app{slug} checkRuns{totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
@@ -224,11 +224,17 @@ function reviews(stallMinutes = 20, now = Date.now()) {
     lines.push(`check ${label}: ${result}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);
   }
   if (!contexts.nodes.length) waiting.push({ text: 'first CI check', since: Infinity });
+  // An Actions suite without runs is a triggered workflow about to report. Other apps (Sonar, CodeRabbit,
+  // Renovate …) open a suite on every push and often never run it, so only Actions counts, and it may stall.
+  for (const suite of commit.checkSuites.nodes.filter(suite => suite.app?.slug === 'github-actions'
+    && suite.status !== 'COMPLETED' && !suite.checkRuns.totalCount)) {
+    waiting.push({ text: `check suite ${suite.app?.slug ?? 'unknown'} without runs`, since: Date.parse(suite.createdAt) });
+  }
   const comments = restAll(`repos/${project.repository}/issues/${number}/comments`);
   const reviewList = restAll(`repos/${project.repository}/pulls/${number}/reviews`);
   // Bots acknowledge "@bot review" comments with a reaction on that comment, not on the PR.
   const reactions = [...restAll(`repos/${project.repository}/issues/${number}/reactions`),
-    ...comments.filter(comment => after(comment.created_at))
+    ...comments.filter(comment => after(comment.created_at) && /@[\w-]+(\[bot\])?\s+review\b/i.test(comment.body))
       .flatMap(comment => restAll(`repos/${project.repository}/issues/comments/${comment.id}/reactions`))];
   // Inline review comments and thread replies carry findings too.
   const inline = restAll(`repos/${project.repository}/pulls/${number}/comments`);

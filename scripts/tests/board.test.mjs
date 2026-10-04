@@ -163,10 +163,12 @@ test('reviews waits only for traces on the current head and never reads failures
   const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
   const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
   const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
-  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, threadPages } = {}) => ({
+  const suite = (status = 'COMPLETED', runs = 1, minutes = 1) => ({ createdAt: minutesAgo(minutes), status, app: { slug: 'github-actions' }, checkRuns: { totalCount: runs } });
+  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, threadPages,
+    suites = [suite('COMPLETED', 1, pushed)] } = {}) => ({
     number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
-      checkSuites: { nodes: [{ createdAt: minutesAgo(pushed) }] }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
+      checkSuites: { nodes: suites }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
     reviewRequests: { totalCount: requests.length, nodes: requests.map(login => ({ requestedReviewer: { login } })) },
     requestEvents: { nodes: requestedAgo === undefined ? [] : requests.map(login => ({ createdAt: minutesAgo(requestedAgo), requestedReviewer: { login } })) },
     threadPages,
@@ -204,6 +206,12 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr({ total: 2 })), 2, 'Unreadable checks are never done');
   const request = { id: 1, user: { login: 'maintainer', type: 'User' }, body: '@codex review', html_url: 'c', created_at: minutesAgo(0.5), updated_at: minutesAgo(0.5) };
   assert.equal(reviews(pr(), { comments: [request], commentReactions: [reaction('eyes', 0)] }), 3, 'A 👀 on the review request comment waits');
+  const note = { ...request, body: 'Deploy preview is ready' };
+  assert.equal(reviews(pr(), { comments: [note], commentReactions: [reaction('eyes', 0)] }), 0, 'A 👀 on an unrelated comment is no trace');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), suite('QUEUED', 0, 1)] })), 3, 'A workflow that has not reported yet waits');
+  assert.equal(reviews(pr({ pushed: 60, suites: [suite('COMPLETED', 1, 60), suite('QUEUED', 0, 60)] })), 0, 'A suite that never runs stalls');
+  const appSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'sonarqubecloud' } };
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 0, 'Idle suites of other apps are no trace');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
   assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'], requestedAgo: 1 })), 3, 'A late review request starts its own clock');
