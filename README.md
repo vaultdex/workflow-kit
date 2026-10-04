@@ -79,6 +79,10 @@ trust; new definitions need personal review and trust. See
 - `next`, `check ISSUE`, `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`.
 - `field ISSUE NAME VALUE`: any single-select field, read back after writing.
+- `status ISSUE "Automated review" PR [OTHER_ISSUE...]` (or `field ISSUE Status
+  "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
+  and comment backlink on every delivered issue before writing status. Post and
+  read back backlinks immediately after PR creation; see [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
 - `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
   It also prints the merge state and `blocker:` lines (standing change requests,
   conflicts), because mergeable is not merge-ready.
