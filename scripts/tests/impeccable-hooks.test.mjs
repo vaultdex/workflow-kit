@@ -10,6 +10,7 @@ import test from 'node:test';
 
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const windows = process.platform === 'win32';
+const version = readFileSync(join(kit, 'scripts/impeccable/VERSION'), 'utf8').trim();
 const manifests = ['.codex/hooks.json', '.claude/settings.json', '.github/hooks/impeccable.json'];
 const commands = (name, start) => Object.entries(JSON.parse(readFileSync(join(kit, 'templates', name), 'utf8')).hooks)
   .filter(([event]) => (event.toLowerCase() === 'sessionstart') === start)
@@ -45,7 +46,7 @@ for (const name of manifests) test(`${name}: a missing engine speaks once at Ses
 });
 
 test('an installed engine receives stdin and its failure is not suppressed', { skip: windows }, t => {
-  const f = fixture(t), engine = join(f.root, '.impeccable/vaultdex/engine-0.1.11/impeccable');
+  const f = fixture(t), engine = join(f.root, `.impeccable/vaultdex/engine-${version}/impeccable`);
   mkdirSync(join(engine, '..'), { recursive: true });
   writeFileSync(engine, '#!/bin/sh\n[ "$1" = hook ] || exit 9\nIFS= read -r event\nprintf "%s\\n" "$event"\nexit 7\n', { mode: 0o755 });
   for (const name of manifests) for (const hook of commands(name, false)) {
