@@ -132,8 +132,8 @@ function set(fieldName, optionName = value, beforeWrite) {
   }
   // A guarded handoff rechecks current ownership/readiness after the potentially lengthy review reads.
   if (beforeWrite) {
-    issue = readIssue();
-    if (!beforeWrite(issue)) return;
+    issue = beforeWrite();
+    if (!issue) return;
   }
   if (linked) {
     graphql(`mutation($issue:ID!,$field:ID!,$option:ID!){setIssueFieldValue(input:{issueId:$issue,
@@ -357,12 +357,8 @@ function handoffIssue(issue, viewer) {
   return true;
 }
 
-/** One fully delivered issue: reuse review proof, then guard the actual Human review write. */
-function handoff() {
-  const issue = readIssue();
-  const { viewer } = graphql('query{viewer{login}}');
-  assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
-  if (!handoffIssue(issue, viewer)) return;
+/** Read all PR gates and native links, optionally requiring the previously checked head. */
+function handoffPr(issueId, expectedHead) {
   const reasons = [];
   const result = reviews(stallOption(), Date.now(), Number(value));
   console.log(result.lines.join('\n'));
@@ -371,6 +367,7 @@ function handoff() {
     console.log(result.failed ? 'FAILED' : 'WAITING');
     return;
   }
+  if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, 'PR head changed during handoff');
   assert.equal(typeof result.pr.isDraft, 'boolean', 'PR draft state is unreadable');
   if (result.pr.state !== 'OPEN' || result.pr.isDraft) reasons.push('handoff needs an open non-draft PR');
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
@@ -381,18 +378,31 @@ function handoff() {
     process.exitCode = 3;
     return;
   }
-  if (!reasons.length && !connectedIssues(result.pr).has(issue.id)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
+  if (!reasons.length && !connectedIssues(result.pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
   if (reasons.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     process.exitCode = 1;
     return;
   }
-  if (!set('Status', 'Human review', current => {
+  return result.pr;
+}
+
+/** Guard the Human review write with current PR proof followed by current issue prerequisites. */
+function handoff() {
+  const issue = readIssue();
+  const { viewer } = graphql('query{viewer{login}}');
+  assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
+  if (!handoffIssue(issue, viewer)) return;
+  const pr = handoffPr(issue.id);
+  if (!pr) return;
+  if (!set('Status', 'Human review', () => {
+    if (!handoffPr(issue.id, pr.headRefOid)) return;
+    const current = readIssue();
     assert.equal(current?.id, issue.id, 'Issue identity changed during handoff');
-    return handoffIssue(current, viewer);
+    return handoffIssue(current, viewer) ? current : undefined;
   })) return;
   assert.equal(projectItem(readIssue())?.status?.name, 'Human review', 'Human review status read-back differs');
-  console.log(`HANDOFF #${number} PR #${value} head ${result.pr.headRefOid}`);
+  console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
 }
 
 const stallOption = () => process.argv.includes('--stall') ? Number(process.argv[process.argv.indexOf('--stall') + 1]) : 20;

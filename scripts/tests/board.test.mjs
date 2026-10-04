@@ -53,6 +53,7 @@ else if (query.includes('closingIssuesReferences')) {
   const cursor = process.argv.find(arg => arg.startsWith('after='));
   const index = cursor ? Number(cursor.slice(6)) : 0;
   if (fs.existsSync('changed-issue.json')) fs.copyFileSync('changed-issue.json', 'issue.json');
+  if (pr.prAfterLinks) fs.writeFileSync('pr.json', JSON.stringify(pr.prAfterLinks));
   data = { repository: { pullRequest: { state: pr.state, isDraft: pr.isDraft,
     headRefOid: pr.changedHead ?? pr.headRefOid,
     closingIssuesReferences: { totalCount: pr.linkTotal ?? pages.flat().length,
@@ -184,6 +185,38 @@ test('handoff rechecks issue prerequisites after review and link reads, before m
     const result = run('handoff', '1', '7');
     assert.ok([1, 2].includes(result.status), result.stdout + result.stderr);
     assert.equal(existsSync(join(checkout, 'mutations')), false, 'A newer issue state must not be overwritten');
+    assert.doesNotMatch(result.stdout, /HANDOFF #1/);
+  }
+});
+
+test('handoff rechecks PR gates before mutation and rejects changed review proof', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  const commit = handoffPr().commits.nodes[0].commit;
+  const changedHead = 'new-head';
+  const changes = [
+    handoffPr({ headRefOid: changedHead, commits: { nodes: [{ commit: { ...commit, oid: changedHead } }] } }),
+    handoffPr({ state: 'CLOSED' }),
+    handoffPr({ state: 'MERGED' }),
+    handoffPr({ isDraft: true }),
+    handoffPr({ mergeStateStatus: 'UNKNOWN' }),
+    handoffPr({ mergeStateStatus: 'DIRTY' }),
+    handoffPr({ latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'reviewer' } }] } }),
+    handoffPr({ threadPages: [[false]] }),
+    handoffPr({ linkPages: [[]] }),
+    ...['IN_PROGRESS', 'COMPLETED'].map(status => handoffPr({ commits: { nodes: [{ commit: {
+      ...commit, statusCheckRollup: { contexts: { totalCount: 1, nodes: [
+        { __typename: 'CheckRun', name: 'CI', status, conclusion: 'FAILURE' },
+      ] } },
+    } }] } })),
+  ];
+  for (const prAfterLinks of changes) {
+    writeIssue(ready);
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ prAfterLinks })));
+    const result = run('handoff', '1', '7');
+    assert.ok([1, 2, 3].includes(result.status), result.stdout + result.stderr);
+    assert.equal(existsSync(join(checkout, 'mutations')), false, 'Changed PR proof must never write Human review');
     assert.doesNotMatch(result.stdout, /HANDOFF #1/);
   }
 });
