@@ -44,7 +44,7 @@ else if (query.includes('reviewThreads(first:100,after')) {
   const cursor = process.argv.find(arg => arg.startsWith('after='));
   const index = cursor ? Number(cursor.slice(6)) : 0;
   data = { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
-    nodes: pages[index].map(isResolved => ({ isResolved })) } } } };
+    nodes: pages[index].map(isResolved => ({ isResolved, comments: { nodes: [{ url: 'thread-' + index }] } })) } } } };
 }
 else if (query.includes('pullRequest(number')) data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
 else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
@@ -164,13 +164,14 @@ test('reviews waits only for traces on the current head and never reads failures
   const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
   const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
   const suite = (status = 'COMPLETED', runs = 1, minutes = 1) => ({ createdAt: minutesAgo(minutes), status, app: { slug: 'github-actions' }, checkRuns: { totalCount: runs } });
-  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, threadPages,
+  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, requestEventTotal, threadPages,
     suites = [suite('COMPLETED', 1, pushed)], suiteTotal = suites.length } = {}) => ({
     number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
       checkSuites: { totalCount: suiteTotal, nodes: suites }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
     reviewRequests: { totalCount: requests.length, nodes: requests.map(login => ({ requestedReviewer: { login } })) },
-    requestEvents: { nodes: requestedAgo === undefined ? [] : requests.map(login => ({ createdAt: minutesAgo(requestedAgo), requestedReviewer: { login } })) },
+    requestEvents: { totalCount: requestEventTotal ?? (requestedAgo === undefined ? 0 : requests.length),
+      nodes: requestedAgo === undefined ? [] : requests.map(login => ({ createdAt: minutesAgo(requestedAgo), requestedReviewer: { login } })) },
     threadPages,
   });
   const codex = (row, minutes) => ({ user: codexUser, html_url: 'u', created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes),
@@ -216,6 +217,7 @@ test('reviews waits only for traces on the current head and never reads failures
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
   assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'], requestedAgo: 1 })), 3, 'A late review request starts its own clock');
+  assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'], requestEventTotal: 101 })), 2, 'A request whose time is cut off fails closed');
   assert.equal(reviews({ ...pr(), state: 'CLOSED' }), 1, 'A PR closed without merge is FAILED');
   const inlineReply = { user: codexUser, html_url: 'i', created_at: minutesAgo(0), updated_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], inline: [inlineReply] }), 0, 'An inline review comment is the result');
@@ -223,6 +225,7 @@ test('reviews waits only for traces on the current head and never reads failures
   const bigReview = look(pr({ threadPages: [Array(100).fill(true), [false]] }));
   assert.equal(bigReview.status, 0, 'More than 100 threads still get a verdict');
   assert.match(bigReview.stdout, /^unresolved threads: 1$/m, 'Threads on every page are counted');
+  assert.match(bigReview.stdout, /^thread thread-1$/m, 'Every unresolved thread is linked, whatever head it is on');
 
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr()));
   for (const file of ['issues-comments', 'issues-reactions', 'pulls-comments']) writeFileSync(join(checkout, `${file}.json`), '[]');

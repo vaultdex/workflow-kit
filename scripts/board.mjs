@@ -164,19 +164,20 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
-  requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){nodes{...on ReviewRequestedEvent{createdAt
+  requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
     requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}}`;
 // ponytail: checks, check suites and review requests stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
 
-/** Unresolved review threads across every page; big reviews must still get a verdict. */
+/** Links of unresolved review threads across every page, including findings on earlier heads. */
 function unresolvedThreads() {
-  let count = 0;
+  const links = [];
   for (let after; ;) {
     const { reviewThreads } = graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
-      pullRequest(number:$number){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}`,
+      pullRequest(number:$number){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
+        nodes{isResolved comments(first:1){nodes{url}}}}}}}`,
     { owner, name, number, ...(after && { after }) }).repository.pullRequest;
-    count += reviewThreads.nodes.filter(thread => !thread.isResolved).length;
-    if (!reviewThreads.pageInfo.hasNextPage) return count;
+    links.push(...reviewThreads.nodes.filter(thread => !thread.isResolved).map(thread => thread.comments.nodes[0]?.url ?? 'unreadable thread'));
+    if (!reviewThreads.pageInfo.hasNextPage) return links;
     assert.ok(reviewThreads.pageInfo.endCursor && reviewThreads.pageInfo.endCursor !== after, 'Thread pagination did not advance');
     after = reviewThreads.pageInfo.endCursor;
   }
@@ -265,12 +266,15 @@ function reviews(stallMinutes = 20, now = Date.now()) {
     // A request added later starts its own clock.
     const requested = pr.requestEvents.nodes.filter(event => reviewerName(event.requestedReviewer) === reviewerName(reviewer))
       .map(event => Date.parse(event.createdAt));
+    // Without its request time a new request would read as stalled; fail closed instead.
+    assert.ok(requested.length || pr.requestEvents.nodes.length === pr.requestEvents.totalCount, 'Review request history is incomplete');
     waiting.push({ text: `review requested from ${reviewerName(reviewer) ?? 'an unreadable reviewer'}`, since: Math.max(pushed, ...requested) });
   }
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
   for (const comment of inline.filter(comment => after(comment.updated_at))) lines.push(`inline ${login(comment.user)} ${comment.html_url}`);
-  lines.push(`unresolved threads: ${unresolvedThreads()}`);
+  const threads = unresolvedThreads();
+  lines.push(`unresolved threads: ${threads.length}`, ...threads.map(link => `thread ${link}`));
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
