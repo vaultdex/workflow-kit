@@ -120,8 +120,13 @@ remote branches and issue links before retrying.
 related work. Closing keywords work only in PRs into the default branch. Partial
 delivery never closes an issue; split the undeliverable part first
 ([undeliverable acceptance](#undeliverable-acceptance)). A branch created from the
-issue already counts as a closing link. After creating the PR or changing its body
-or base, verify with `gh pr view PR --json closingIssuesReferences`.
+issue is a branch connection, not proof of a direct PR connection. After creating
+the PR or changing its body or base, verify the delivered issue in
+`gh pr view PR --json closingIssuesReferences`. On a non-default base, manually
+connect the issue through GitHub's Development sidebar (or the GraphQL
+`addCloseIssueReferences` mutation), then read it back. This connection closes
+the issue only when merged into the default branch; keep the project's release
+rules for references and completion.
 
 Write the PR in German: **Was wurde geändert und warum?** covers the result, the
 reason and the benefit, with before/after where useful, plus the issue links. Add
@@ -166,8 +171,9 @@ and empty sections.
    about personal configuration (memory, shell profile, scheduled tasks) to the
    human instead of editing it. List every finding and its disposition, or none,
    in the handoff.
-6. Set Human review only when CI passes, every review with a trace on the current
-   head has finished or stalled, each finding is fixed or linked to a follow-up, the
+6. Run `board.mjs handoff ISSUE PR` for the fully delivered issue only when CI
+   passes, every review with a trace on the current head has finished or stalled,
+   each finding is fixed or linked to a follow-up, the
    final proof has passed, the retro is recorded and no prerequisite is open. If a
    reviewer is confirmed unavailable (quota, outage) or stalled, record the
    reviewer, cause and evidence in the PR and hand off with that limitation stated.
@@ -175,6 +181,13 @@ and empty sections.
    merge-ready: resolve every `blocker:` that `board.mjs reviews` lists (a standing
    change request, conflicts) or name it for the human when only a human may clear
    it, such as dismissing a review or resolving a thread you declined to fix.
+   Handoff reuses the review check, verifies the native PR link and assigned active
+   task, rejects Draft/closed PRs, changed heads, conflicts and open threads, waits
+   for a determined merge state, rechecks PR proof and issue prerequisites immediately before mutation, then
+   writes and reads back Human review. A failed or unreadable check leaves the
+   status untouched. An unsuccessful status read-back is an error, not a delivery;
+   inspect the actual status before retrying. Plain `status` writes maintain
+   metadata and do not prove these delivery gates.
 7. After the human merges, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
 

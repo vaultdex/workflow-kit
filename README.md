@@ -82,6 +82,13 @@ trust; new definitions need personal review and trust. See
 - `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
   It also prints the merge state and `blocker:` lines (standing change requests,
   conflicts), because mergeable is not merge-ready.
+- `handoff ISSUE PR`: verifies a fully delivered issue's native PR connection,
+  assigned/startable task, open non-draft PR, finished checks/reviews and resolved
+  threads/conflicts before writing and reading back Human review (exit 0 verified,
+  1 blocked, 2 unreadable or changed state, 3 waiting). Native links are read on
+  every page, including manual links on release branches; text and branch links
+  alone do not count. Session ownership, final proof and finding dispositions remain
+  driver responsibilities. Use this for delivery; `status` is metadata maintenance.
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
   `--stall MINUTES` (default 20). `wait PR --merged` waits for the human merge

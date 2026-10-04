@@ -1,5 +1,5 @@
 diff --git a/hooks/ponytail-activate.js b/hooks/ponytail-activate.js
-index 35d741e..2adf5e6 100644
+index 4a4f01b..4b04ba1 100644
 --- a/hooks/ponytail-activate.js
 +++ b/hooks/ponytail-activate.js
 @@ -3,13 +3,10 @@
@@ -18,10 +18,10 @@ index 35d741e..2adf5e6 100644
  const { getPonytailInstructions } = require('./ponytail-instructions');
  const {
    clearMode,
-@@ -18,21 +15,22 @@ const {
-   isCodex,
+@@ -19,21 +16,22 @@ const {
    isCopilot,
    isCursor,
+   isZcode,
 +  readMode,
    setMode,
    writeHookOutput,
@@ -38,14 +38,14 @@ index 35d741e..2adf5e6 100644
  // "off" mode — skip activation entirely, don't write flag or emit rules
  if (mode === 'off') {
    clearMode();
-   const hookOutput = (isCodex || isCopilot || isCursor) ? '' : 'OK';
+   const hookOutput = (isCodex || isCopilot || isCursor || isZcode) ? '' : 'OK';
    writeHookOutput('SessionStart', 'off', hookOutput);
 -  process.exit(0);
 +  return;
  }
  
  // Cursor with the always-on rule in the workspace: the rule already carries the
-@@ -46,7 +44,7 @@ if (isCursor) {
+@@ -47,7 +45,7 @@ if (isCursor) {
      } catch (e) {
        // Silent fail — stdout closed/EPIPE at hook exit must not surface as a hook failure
      }
@@ -54,7 +54,7 @@ index 35d741e..2adf5e6 100644
    }
  }
  
-@@ -58,55 +56,9 @@ try {
+@@ -59,57 +57,9 @@ try {
  }
  
  // 2. Emit the ponytail ruleset, filtered to the active intensity level.
@@ -62,7 +62,9 @@ index 35d741e..2adf5e6 100644
 +const output = getPonytailInstructions(mode);
  
 -// 3. Detect missing statusline config — nudge Claude to help set it up
--if (!isCodex && !isCopilot && !isCursor) try {
+-// Skipped on ZCode: its statusline configuration story is unverified, and a
+-// wrong pointer at Claude's settings.json would just mislead the agent.
+-if (!isCodex && !isCopilot && !isCursor && !isZcode) try {
 -  let hasStatusline = false;
 -  if (fs.existsSync(settingsPath)) {
 -    // Strip UTF-8 BOM some editors prepend on Windows (breaks JSON.parse)
@@ -113,7 +115,7 @@ index 35d741e..2adf5e6 100644
  try {
    writeHookOutput('SessionStart', mode, output);
 diff --git a/hooks/ponytail-mode-tracker.js b/hooks/ponytail-mode-tracker.js
-index 59877fe..62b3aa2 100644
+index 39a8373..3083cc8 100644
 --- a/hooks/ponytail-mode-tracker.js
 +++ b/hooks/ponytail-mode-tracker.js
 @@ -7,6 +7,7 @@ const {
@@ -124,12 +126,9 @@ index 59877fe..62b3aa2 100644
    isCursor,
    isQoder,
    readMode,
-@@ -70,18 +71,17 @@ function finish() {
-         else if (arg === 'off') mode = 'off';
-         else if (arg === '') {
-           isReportOnly = true;
--          mode = readMode() || getDefaultMode();
-+          mode = readMode() || 'off';
+@@ -80,16 +81,15 @@ function finish() {
+             mode = getDefaultMode() === 'off' ? 'full' : getDefaultMode();
+           }
          } else {
 -          mode = getDefaultMode();
 +          mode = readMode() || getDefaultMode();
@@ -149,7 +148,7 @@ index 59877fe..62b3aa2 100644
        } else if (mode && mode !== 'off') {
          setMode(mode);
          modeSwitched = true;
-@@ -89,14 +89,14 @@ function finish() {
+@@ -97,14 +97,14 @@ function finish() {
          // switch happens we fold the confirmation into the ruleset output
          // below (one JSON on stdout) instead of emitting two separate writes.
          if (!isQoder) {
@@ -166,21 +165,41 @@ index 59877fe..62b3aa2 100644
            );
          }
        } else if (mode === 'off') {
-@@ -151,5 +151,10 @@ process.stdin.on('end', finish);
- // mode if data came without EOF) and exit. unref() keeps the timer from adding
- // latency to the normal path, where 'end' fires first. Mirrors the best-effort,
- // never-block contract the other lifecycle hooks already follow.
+@@ -150,21 +150,19 @@ function finish() {
+ }
+ 
+ process.stdin.on('data', chunk => { input += chunk; });
+-// Exit on 'end', not just finish(): the fallback timer below must stay ref'd
+-// (see #790) so it can actually fire when stdin is stuck, and a ref'd timer
+-// would otherwise keep the process alive for its full 1000ms on this normal
+-// fast path.
+-process.stdin.on('end', () => { finish(); process.exit(0); });
++process.stdin.on('end', finishInput);
+ 
+ // Never hang the session. On Windows, Claude Code runs this hook through a
+ // PowerShell `if {}` wrapper that can swallow the piped prompt JSON, so stdin
+ // 'end' never fires and the hook blocks forever — freezing the session (#443).
+ // On error, or after a short fallback, process whatever arrived (recovering the
+-// mode if data came without EOF) and exit. The fallback timer MUST stay ref'd:
+-// on Windows a stuck ref'd stdin handle keeps the event loop alive, and an
+-// unref'd timer competing with it is never scheduled — so the fallback was
+-// dead code in exactly the #443/#790 case it exists for, and the hook hung
+-// until Claude Code's external 5s watchdog killed it (#790). Mirrors the
+-// best-effort, never-block contract the other lifecycle hooks already follow.
 -process.stdin.on('error', () => { finish(); process.exit(0); });
--setTimeout(() => { finish(); process.exit(0); }, 1000).unref();
+-setTimeout(() => { finish(); process.exit(0); }, 1000);
++// mode if data came without EOF) and exit after stdout drains.
 +function finishInput() {
++  clearTimeout(fallback);
 +  finish();
 +  process.exitCode = 0;
 +  process.stdin.destroy(); // Release an unclosed pipe while stdout drains.
 +}
 +process.stdin.on('error', finishInput);
-+setTimeout(finishInput, 1000).unref();
++// Keep fallback alive for stuck stdin; normal EOF cancels it.
++const fallback = setTimeout(finishInput, 1000);
 diff --git a/hooks/ponytail-runtime.js b/hooks/ponytail-runtime.js
-index 1e24c18..5ef47ee 100644
+index 0478a45..ad87381 100644
 --- a/hooks/ponytail-runtime.js
 +++ b/hooks/ponytail-runtime.js
 @@ -1,9 +1,14 @@
@@ -198,7 +217,7 @@ index 1e24c18..5ef47ee 100644
  
  // ponytail: VS Code Copilot never sets COPILOT_PLUGIN_DATA — it only injects
  // CLAUDE_PLUGIN_ROOT, pointed at an install path under .vscode/agent-plugins/
-@@ -16,25 +21,32 @@ function isVsCodeCopilotRoot(pluginRoot) {
+@@ -16,28 +21,35 @@ function isVsCodeCopilotRoot(pluginRoot) {
      pluginRoot.toLowerCase().includes('.vscode');
  }
  
@@ -217,6 +236,10 @@ index 1e24c18..5ef47ee 100644
  // way, so this check comes after the hosts with their own data dirs.
 -const isCursor = !isCopilot && !isCodex && !isQoder && Boolean(process.env.CURSOR_VERSION);
 +const isCursor = projectHost ? projectHost === 'cursor' : !isCopilot && !isCodex && !isQoder && Boolean(process.env.CURSOR_VERSION);
+ // ZCode injects ZCODE_APP_VERSION into every child process, hooks included.
+-const isZcode = !isCopilot && !isCodex && !isQoder && !isCursor &&
++const isZcode = !projectHost && !isCopilot && !isCodex && !isQoder && !isCursor &&
+   Boolean(process.env.ZCODE_APP_VERSION);
  
  let stateDir = getClaudeDir();
 -if (isCodex) stateDir = process.env.PLUGIN_DATA;
@@ -236,7 +259,16 @@ index 1e24c18..5ef47ee 100644
  
  const statePath = path.join(stateDir, STATE_FILE);
  
-@@ -79,9 +91,9 @@ function cursorRuleNotice(rule) {
+@@ -46,7 +58,7 @@ const statePath = path.join(stateDir, STATE_FILE);
+ // (#662, #809). Hosts without it keep the single shared flag.
+ // ponytail: sessions in the SAME repo still share one mode, and the statusline
+ // scripts read the shared flag (last write wins); key by session_id if either matters.
+-const projectDir = (process.env.CLAUDE_PROJECT_DIR || '').trim();
++const projectDir = !projectHost && (process.env.CLAUDE_PROJECT_DIR || '').trim();
+ const projectStatePath = projectDir
+   ? path.join(stateDir, 'ponytail-modes', projectDir.replace(/[^A-Za-z0-9._-]/g, '_'))
+   : null;
+@@ -98,9 +110,9 @@ function cursorRuleNotice(rule) {
  
  function writeHookOutput(event, mode, context = '') {
    if (isCopilot) {
@@ -249,10 +281,10 @@ index 1e24c18..5ef47ee 100644
    }
    if (isCodex) {
 diff --git a/hooks/ponytail-subagent.js b/hooks/ponytail-subagent.js
-index f2a7c77..5d33008 100644
+index f2d9fe2..f94d4ca 100644
 --- a/hooks/ponytail-subagent.js
 +++ b/hooks/ponytail-subagent.js
-@@ -44,7 +44,7 @@ try {
+@@ -45,7 +45,7 @@ try {
  // subagent spawn.
  if (!matcherRe) {
    inject();
@@ -261,7 +293,7 @@ index f2a7c77..5d33008 100644
  }
  
  // Matcher set → read agent_type from stdin and skip only on a definite
-@@ -60,7 +60,8 @@ function finish() {
+@@ -61,7 +61,8 @@ function finish() {
    let agentType = '';
    try {
      // Strip UTF-8 BOM some shells prepend when piping (breaks JSON.parse)
@@ -271,19 +303,37 @@ index f2a7c77..5d33008 100644
    } catch (e) {
      // Unparseable payload — fall through and inject to be safe.
    }
-@@ -73,5 +74,10 @@ function finish() {
+@@ -76,19 +77,19 @@ function finish() {
+   } catch (e) {
+     matches = true;
+   }
+-  if (!matches) {
+-    process.exit(0);
+-  }
++  if (!matches) return;
+   inject();
+ }
+ 
  process.stdin.on('data', chunk => { input += chunk; });
- process.stdin.on('end', finish);
+-// Exit on 'end' (not just finish()) so the ref'd fallback timer below can't
+-// add its full 1000ms to the normal fast path.
+-process.stdin.on('end', () => { finish(); process.exit(0); });
++process.stdin.on('end', finishInput);
  // Never block the session (#443): recover on stdin error or a short fallback.
+-// The fallback stays ref'd: on Windows a stuck ref'd stdin keeps the loop
+-// alive and an unref'd timer is never scheduled, so the hook hung to the
+-// external watchdog instead of exiting at 1s (#790).
 -process.stdin.on('error', () => { finish(); process.exit(0); });
--setTimeout(() => { finish(); process.exit(0); }, 1000).unref();
+-setTimeout(() => { finish(); process.exit(0); }, 1000);
 +function finishInput() {
++  clearTimeout(fallback);
 +  finish();
 +  process.exitCode = 0;
 +  process.stdin.destroy(); // Release an unclosed pipe while stdout drains.
 +}
 +process.stdin.on('error', finishInput);
-+setTimeout(finishInput, 1000).unref();
++// Keep fallback alive for stuck stdin; normal EOF cancels it.
++const fallback = setTimeout(finishInput, 1000);
 diff --git a/skills/ponytail-debt/SKILL.md b/skills/ponytail-debt/SKILL.md
 index ecbc0ca..48b7eed 100644
 --- a/skills/ponytail-debt/SKILL.md
@@ -299,7 +349,7 @@ index ecbc0ca..48b7eed 100644
 +the repository's CONTRIBUTING.md, not in a second ledger file. One-shot.
 +"stop ponytail-debt" or "normal mode" to revert.
 diff --git a/skills/ponytail-help/SKILL.md b/skills/ponytail-help/SKILL.md
-index ba145c0..2374e87 100644
+index ba145c0..c182e2a 100644
 --- a/skills/ponytail-help/SKILL.md
 +++ b/skills/ponytail-help/SKILL.md
 @@ -32,39 +32,31 @@ Level sticks until changed or session end.
@@ -318,7 +368,7 @@ index ba145c0..2374e87 100644
 -Say "stop ponytail" or "normal mode". Resume anytime with `/ponytail`.
 -`/ponytail off` also works.
 +Say "stop ponytail" or "normal mode". With hooks, `/ponytail off` also works;
-+resume with `/ponytail full` (bare `/ponytail` reports the current mode).
++resume with `/ponytail` (off enables the default level; an active mode reports its level).
  
 -## Configure Default Mode
 +## Checkout scope

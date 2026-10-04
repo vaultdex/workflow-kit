@@ -50,9 +50,10 @@ function finish() {
       let mode = null;
       let isReportOnly = false;
 
-      if (cmd === '/ponytail-review' || cmd === '/ponytail:ponytail-review') {
-        mode = 'review';
-      } else if (cmd === '/ponytail' || cmd === '/ponytail:ponytail') {
+      // /ponytail-review is a one-shot skill, not a session level (#736).
+      // Matching it here used to setMode('review'), which latched
+      // INDEPENDENT_MODES for the rest of the session.
+      if (cmd === '/ponytail' || cmd === '/ponytail:ponytail') {
         // `/ponytail default <mode>` persists the default to config (survives
         // restarts). Plain switches stay session-scoped ("sticks until session
         // end"), so this is the only path that writes config. review is not a
@@ -70,8 +71,15 @@ function finish() {
         else if (arg === 'ultra') mode = 'ultra';
         else if (arg === 'off') mode = 'off';
         else if (arg === '') {
-          isReportOnly = true;
-          mode = readMode() || 'off';
+          // Bare /ponytail switches ponytail on: off → the default level (full if
+          // the default is off too); already on → keep the level, report it (#639).
+          const live = readMode();
+          if (live && live !== 'off') {
+            isReportOnly = true;
+            mode = live;
+          } else {
+            mode = getDefaultMode() === 'off' ? 'full' : getDefaultMode();
+          }
         } else {
           mode = readMode() || getDefaultMode();
         }
@@ -142,19 +150,19 @@ function finish() {
 }
 
 process.stdin.on('data', chunk => { input += chunk; });
-process.stdin.on('end', finish);
+process.stdin.on('end', finishInput);
 
 // Never hang the session. On Windows, Claude Code runs this hook through a
 // PowerShell `if {}` wrapper that can swallow the piped prompt JSON, so stdin
 // 'end' never fires and the hook blocks forever — freezing the session (#443).
 // On error, or after a short fallback, process whatever arrived (recovering the
-// mode if data came without EOF) and exit. unref() keeps the timer from adding
-// latency to the normal path, where 'end' fires first. Mirrors the best-effort,
-// never-block contract the other lifecycle hooks already follow.
+// mode if data came without EOF) and exit after stdout drains.
 function finishInput() {
+  clearTimeout(fallback);
   finish();
   process.exitCode = 0;
   process.stdin.destroy(); // Release an unclosed pipe while stdout drains.
 }
 process.stdin.on('error', finishInput);
-setTimeout(finishInput, 1000).unref();
+// Keep fallback alive for stuck stdin; normal EOF cancels it.
+const fallback = setTimeout(finishInput, 1000);

@@ -40,6 +40,10 @@ and `launch.cmd` is a cmd/sh polyglot.
 
 Mode is stored per Git checkout and host in the Ponytail config directory.
 `/ponytail lite|full|ultra|off` switches it, and `/ponytail default <mode>` saves a
-personal default. `node --test scripts/tests/ponytail-hooks.test.mjs` runs the
+personal default. Bare `/ponytail` enables the default level when off (full if the
+default is off), or reports an active level. Resume/compact preserves the live
+mode. Version 4.10.3 uses snapshot `4.10.3-1`; install and trust the new hook
+commands explicitly. Previous snapshots stay intact.
+`node --test scripts/tests/ponytail-hooks.test.mjs` runs the
 real manifest commands with hostile PATH entries; agent loading/trust needs
 separate verification.
