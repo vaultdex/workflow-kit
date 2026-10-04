@@ -135,13 +135,12 @@ and empty sections.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
    Then mark it Ready for Review and set Automated review. Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
-3. Wait for CI and every automatic review active on the current head, using the
-   harness's waiting, not polling. Review bots run unreliably, so read each one's
-   traces on the PR per head (check or status, review, comment, reaction, an
-   announced review) instead of assuming who reviews. Wait for every reviewer with
-   a trace on the head; once CI is green, a reviewer without any trace is not
-   coming. Pending, cancelled or missing expected checks are
-   not success. Read all findings and every review, comment and thread from bots
+3. Wait for CI and every review with a trace on the current head, using the
+   harness's waiting, not polling. Review bots run unreliably, so find out per head
+   who reviews instead of assuming it. A trace is a check, status or review on the
+   head commit, or a comment or reaction (including an announced review) created
+   after the head was pushed. Once CI is green, a reviewer without such a trace is
+   not coming. Pending, cancelled or missing expected CI checks are not success. Read all findings and every review, comment and thread from bots
    and humans, including every page of analyzer results such
    as Sonar issues and hotspots. A green quality gate does not mean zero findings,
    and a missing or stale analysis is not clean. Don't re-request a review that is
