@@ -182,7 +182,8 @@ and empty sections.
    change request, conflicts) or name it for the human when only a human may clear
    it, such as dismissing a review or resolving a thread you declined to fix.
    Handoff reuses the review check, verifies the native PR link and assigned active
-   task, rejects Draft/closed PRs, changed heads, conflicts and open threads, then
+   task, rejects Draft/closed PRs, changed heads, conflicts and open threads, waits
+   for a determined merge state, rechecks issue prerequisites immediately before mutation, then
    writes and reads back Human review. A failed or unreadable check leaves the
    status untouched. An unsuccessful status read-back is an error, not a delivery;
    inspect the actual status before retrying. Plain `status` writes maintain

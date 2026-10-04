@@ -117,8 +117,9 @@ function selectField(fieldName) {
   return { field, linked, choices: linked ? linked.options : field.options };
 }
 
-function set(fieldName, optionName = value) {
-  const issue = readIssue();
+/** Write a selected field option; guarded delivery can reject the fresh issue before mutation. */
+function set(fieldName, optionName = value, beforeWrite) {
+  let issue = readIssue();
   const { field, linked, choices } = selectField(fieldName);
   const option = choices.find(choice => choice.name.toLowerCase() === String(optionName).toLowerCase());
   assert.ok(option, `Use one of: ${choices.map(choice => choice.name).join(', ')}`);
@@ -128,6 +129,11 @@ function set(fieldName, optionName = value) {
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     assert.ok(issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase()),
       `Assign yourself first: gh issue edit ${number} --repo ${project.repository} --add-assignee "@me". Verify session ownership before assigning.`);
+  }
+  // A guarded handoff rechecks current ownership/readiness after the potentially lengthy review reads.
+  if (beforeWrite) {
+    issue = readIssue();
+    if (!beforeWrite(issue)) return;
   }
   if (linked) {
     graphql(`mutation($issue:ID!,$field:ID!,$option:ID!){setIssueFieldValue(input:{issueId:$issue,
@@ -333,13 +339,10 @@ function connectedIssues(pr) {
   }
 }
 
-/** One fully delivered issue: reuse review proof, then guard the actual Human review write. */
-function handoff() {
-  const issue = readIssue();
-  if (check(issue) !== 'STARTABLE') return;
+/** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
+function handoffIssue(issue, viewer) {
+  if (check(issue) !== 'STARTABLE') return false;
   assert.ok(issue.id, 'Issue identity is unreadable');
-  const { viewer } = graphql('query{viewer{login}}');
-  assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
   const status = projectItem(issue)?.status?.name;
   const reasons = [];
   if (!['Automated review', 'Human review'].includes(status)) reasons.push('finish implementation and Automated review first');
@@ -349,8 +352,18 @@ function handoff() {
   if (reasons.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     process.exitCode = 1;
-    return;
+    return false;
   }
+  return true;
+}
+
+/** One fully delivered issue: reuse review proof, then guard the actual Human review write. */
+function handoff() {
+  const issue = readIssue();
+  const { viewer } = graphql('query{viewer{login}}');
+  assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
+  if (!handoffIssue(issue, viewer)) return;
+  const reasons = [];
   const result = reviews(stallOption(), Date.now(), Number(value));
   console.log(result.lines.join('\n'));
   if (!result.done || result.failed) {
@@ -363,13 +376,21 @@ function handoff() {
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push('resolve review blockers and threads before handoff');
   }
+  if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
+    console.log('WAITING\nwaiting: PR mergeability is not determined');
+    process.exitCode = 3;
+    return;
+  }
   if (!reasons.length && !connectedIssues(result.pr).has(issue.id)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
   if (reasons.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     process.exitCode = 1;
     return;
   }
-  set('Status', 'Human review');
+  if (!set('Status', 'Human review', current => {
+    assert.equal(current?.id, issue.id, 'Issue identity changed during handoff');
+    return handoffIssue(current, viewer);
+  })) return;
   assert.equal(projectItem(readIssue())?.status?.name, 'Human review', 'Human review status read-back differs');
   console.log(`HANDOFF #${number} PR #${value} head ${result.pr.headRefOid}`);
 }
@@ -378,6 +399,7 @@ const stallOption = () => process.argv.includes('--stall') ? Number(process.argv
 // Waiting is over either way; FAILED keeps a red head from reading as a finished review.
 const outcome = ({ failed }) => failed ? ['FAILED', 1] : ['DONE', 0];
 
+/** Print one review snapshot with the same verdict and exit status as the background wait. */
 function reviewsOnce() {
   const result = reviews(stallOption());
   const [word, code] = result.done ? outcome(result) : ['WAITING', 3];

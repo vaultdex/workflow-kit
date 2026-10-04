@@ -52,6 +52,7 @@ else if (query.includes('closingIssuesReferences')) {
   const pages = pr.linkPages ?? [[]];
   const cursor = process.argv.find(arg => arg.startsWith('after='));
   const index = cursor ? Number(cursor.slice(6)) : 0;
+  if (fs.existsSync('changed-issue.json')) fs.copyFileSync('changed-issue.json', 'issue.json');
   data = { repository: { pullRequest: { state: pr.state, isDraft: pr.isDraft,
     headRefOid: pr.changedHead ?? pr.headRefOid,
     closingIssuesReferences: { totalCount: pr.linkTotal ?? pages.flat().length,
@@ -126,6 +127,8 @@ test('handoff blocks unlinked, unsafe and unreadable delivery before writing Hum
     [handoffPr({ state: 'MERGED' }), ready, 1],
     [handoffPr({ state: 'CLOSED' }), ready, 1],
     [handoffPr({ mergeStateStatus: 'DIRTY' }), ready, 1],
+    [handoffPr({ mergeStateStatus: 'UNKNOWN' }), ready, 3],
+    [handoffPr({ mergeStateStatus: null }), ready, 3],
     [handoffPr({ threadPages: [[false]] }), ready, 1],
     [handoffPr({ latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'reviewer' } }] } }), ready, 1],
     [handoffPr({ commits: { nodes: [{ commit: pending }] } }), ready, 3],
@@ -160,6 +163,28 @@ test('handoff blocks unlinked, unsafe and unreadable delivery before writing Hum
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stdout, /HANDOFF #1 PR #7 head abcdef1234/);
     assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
+  }
+});
+
+test('handoff rechecks issue prerequisites after review and link reads, before mutation', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  const changes = [
+    { ...ready, state: 'CLOSED' },
+    { ...ready, assignees: { nodes: [] } },
+    { ...ready, assignees: { nodes: [{ login: 'someone-else' }] } },
+    { ...ready, projectItems: issue('In progress').projectItems },
+    { ...ready, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } },
+    { ...ready, blockedBy: { totalCount: 1, nodes: [] } },
+  ];
+  for (const changed of changes) {
+    writeIssue(ready);
+    writeFileSync(join(checkout, 'changed-issue.json'), JSON.stringify(changed));
+    const result = run('handoff', '1', '7');
+    assert.ok([1, 2].includes(result.status), result.stdout + result.stderr);
+    assert.equal(existsSync(join(checkout, 'mutations')), false, 'A newer issue state must not be overwritten');
+    assert.doesNotMatch(result.stdout, /HANDOFF #1/);
   }
 });
 
