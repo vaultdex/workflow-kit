@@ -22,7 +22,8 @@ const path = process.argv[2] ?? '';
 if (!path.startsWith('graphql')) {
   if (fs.existsSync('fail')) process.exit(1);
   // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
-  const file = path.split('?')[0].split('/').pop() + '.json';
+  const parts = path.split('?')[0].split('/');
+  const file = parts.at(-3) + '-' + parts.at(-1) + '.json';
   const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
   const items = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
   process.stdout.write(JSON.stringify(items.slice((page - 1) * 100, page * 100)));
@@ -38,6 +39,13 @@ if (query.startsWith('mutation')) {
 } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
 else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
   projectItems: { nodes: [{ project: { id: 'P1' }, value: { name: fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8') } }] } } } };
+else if (query.includes('reviewThreads(first:100,after')) {
+  const pages = JSON.parse(fs.readFileSync('pr.json')).threadPages ?? [[]];
+  const cursor = process.argv.find(arg => arg.startsWith('after='));
+  const index = cursor ? Number(cursor.slice(6)) : 0;
+  data = { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
+    nodes: pages[index].map(isResolved => ({ isResolved })) } } } };
+}
 else if (query.includes('pullRequest(number')) data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
 else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
   id: 'F1', name: 'Status', options: ['Ready', 'In progress'].map(name => ({ id: name, name }))
@@ -155,22 +163,24 @@ test('reviews waits only for traces on the current head and never reads failures
   const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
   const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
   const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
-  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [] } = {}) => ({
+  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], threadPages } = {}) => ({
     number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
       checkSuites: { nodes: [{ createdAt: minutesAgo(pushed) }] }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
     reviewRequests: { totalCount: requests.length, nodes: requests.map(login => ({ requestedReviewer: { login } })) },
-    reviewThreads: { totalCount: 0, nodes: [] },
+    threadPages,
   });
   const codex = (row, minutes) => ({ user: codexUser, html_url: 'u', created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes),
     body: `| Review | Status | Commit |\n| Code Review | ${row} <relative-time datetime="${minutesAgo(minutes)}"></relative-time> | \`abcdef1\` |` });
   const reaction = (content, minutes) => ({ content, created_at: minutesAgo(minutes), user: codexUser });
-  const reviews = (data, { comments = [], reactions = [] } = {}, ...options) => {
+  const look = (data, { comments = [], reactions = [], inline = [] } = {}, ...options) => {
     writeFileSync(join(checkout, 'pr.json'), JSON.stringify(data));
-    writeFileSync(join(checkout, 'comments.json'), JSON.stringify(comments));
-    writeFileSync(join(checkout, 'reactions.json'), JSON.stringify(reactions));
-    return run('reviews', '7', ...options).status;
+    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
+    writeFileSync(join(checkout, 'issues-reactions.json'), JSON.stringify(reactions));
+    writeFileSync(join(checkout, 'pulls-comments.json'), JSON.stringify(inline));
+    return run('reviews', '7', ...options);
   };
+  const reviews = (...args) => look(...args).status;
 
   assert.equal(reviews(pr()), 0, 'Green CI without other traces is done');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'Red CI ends the wait as FAILED, never DONE');
@@ -189,10 +199,15 @@ test('reviews waits only for traces on the current head and never reads failures
   const many = Array.from({ length: 100 }, (_, index) => ({ ...codex('Completed', 0), html_url: `old-${index}` }));
   assert.equal(reviews(pr(), { comments: [...many, codex('Running', 1)] }), 3, 'Comments beyond the first page are read');
   assert.equal(reviews(pr({ total: 2 })), 2, 'Unreadable checks are never done');
+  const inlineReply = { user: codexUser, html_url: 'i', created_at: minutesAgo(0), updated_at: minutesAgo(0) };
+  assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], inline: [inlineReply] }), 0, 'An inline review comment is the result');
+  assert.match(look(pr(), { inline: [inlineReply] }).stdout, /^inline chatgpt-codex-connector i$/m, 'Inline findings are listed');
+  const bigReview = look(pr({ threadPages: [Array(100).fill(true), [false]] }));
+  assert.equal(bigReview.status, 0, 'More than 100 threads still get a verdict');
+  assert.match(bigReview.stdout, /^unresolved threads: 1$/m, 'Threads on every page are counted');
 
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr()));
-  writeFileSync(join(checkout, 'comments.json'), '[]');
-  writeFileSync(join(checkout, 'reactions.json'), '[]');
+  for (const file of ['issues-comments', 'issues-reactions', 'pulls-comments']) writeFileSync(join(checkout, `${file}.json`), '[]');
   assert.equal(run('wait', '7').status, 0, 'wait returns once the head is done');
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr({ contexts: [check('COMPLETED', 'FAILURE')] })));
   assert.equal(run('wait', '7').status, 1, 'wait ends as FAILED on red CI');
@@ -203,6 +218,8 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.match(waitBriefly('--merged'), /^WAITING\nwaiting: human merge/);
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ ...pr(), state: 'MERGED' }));
   assert.equal(run('wait', '7', '--merged').status, 0, 'wait --merged returns once the PR is merged');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ ...pr(), state: 'CLOSED' }));
+  assert.equal(run('wait', '7', '--merged').status, 1, 'A PR closed without merge is FAILED, never delivered');
   writeFileSync(join(checkout, 'fail'), '');
   assert.equal(run('reviews', '7').status, 2);
   assert.equal(run('wait', '7').status, 2, 'wait reports a read failure instead of waiting silently');

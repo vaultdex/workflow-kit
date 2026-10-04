@@ -80,7 +80,8 @@ trust; new definitions need personal review and trust. See
 `block ISSUE OWNER/REPO#N`, `reviews PR` (one look: exit 0 done, 1 red CI,
 3 waiting, 2 error) and `wait PR` (repeats `reviews` every minute, prints `WAITING`
 lines on change and ends with `DONE`, `FAILED` or `ERROR`; both take
-`--stall MINUTES`, default 20; `wait PR --merged` waits for the human merge).
+`--stall MINUTES`, default 20; `wait PR --merged` waits for the human merge and
+ends `FAILED` if the PR is closed unmerged).
 Before implementation, complete [Start or resume](AGENT_RULES.md#start-or-resume);
 a check alone does not claim work.
 

@@ -163,8 +163,22 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){nodes{createdAt}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
-  reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
-  reviewThreads(first:100){totalCount nodes{isResolved}}}}}`;
+  reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}`;
+// ponytail: checks and review requests stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
+
+/** Unresolved review threads across every page; big reviews must still get a verdict. */
+function unresolvedThreads() {
+  let count = 0;
+  for (let after; ;) {
+    const { reviewThreads } = graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
+      pullRequest(number:$number){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}`,
+    { owner, name, number, ...(after && { after }) }).repository.pullRequest;
+    count += reviewThreads.nodes.filter(thread => !thread.isResolved).length;
+    if (!reviewThreads.pageInfo.hasNextPage) return count;
+    assert.ok(reviewThreads.pageInfo.endCursor && reviewThreads.pageInfo.endCursor !== after, 'Thread pagination did not advance');
+    after = reviewThreads.pageInfo.endCursor;
+  }
+}
 const rest = path => JSON.parse(execFileSync(gh.file, ['api', path], { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
 /** Every page, so an early bot summary on a long PR is never cut off. */
 function restAll(path) {
@@ -210,6 +224,8 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   const comments = restAll(`repos/${project.repository}/issues/${number}/comments`);
   const reviewList = restAll(`repos/${project.repository}/pulls/${number}/reviews`);
   const reactions = restAll(`repos/${project.repository}/issues/${number}/reactions`);
+  // Inline review comments and thread replies carry findings too.
+  const inline = restAll(`repos/${project.repository}/pulls/${number}/comments`);
   const short = pr.headRefOid.slice(0, 7);
   for (const comment of comments.filter(comment => isBot(comment.user) && after(comment.updated_at))) {
     // Summary comments (Codex) name the head in a table row that says Running until the review completes.
@@ -218,7 +234,7 @@ function reviews(stallMinutes = 20, now = Date.now()) {
       waiting.push({ text: `${login(comment.user)} running since ${since}`, since: Date.parse(since) });
     }
   }
-  const activity = [...comments.map(comment => [login(comment.user), comment.updated_at]),
+  const activity = [...[...comments, ...inline].map(comment => [login(comment.user), comment.updated_at]),
     ...reviewList.map(review => [login(review.user), review.submitted_at]),
     ...reactions.map(reaction => [login(reaction.user), reaction.created_at])];
   for (const reaction of reactions.filter(reaction => isBot(reaction.user) && after(reaction.created_at))) {
@@ -233,8 +249,8 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   }
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
-  assert.equal(pr.reviewThreads.nodes.length, pr.reviewThreads.totalCount, 'Not every review thread is readable');
-  lines.push(`unresolved threads: ${pr.reviewThreads.nodes.filter(thread => !thread.isResolved).length}`);
+  for (const comment of inline.filter(comment => after(comment.updated_at))) lines.push(`inline ${login(comment.user)} ${comment.html_url}`);
+  lines.push(`unresolved threads: ${unresolvedThreads()}`);
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
@@ -258,7 +274,8 @@ function mergeState() {
   const { pullRequest } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     pullRequest(number:$number){number state}}}`, { owner, name, number }).repository;
   const open = pullRequest.state === 'OPEN';
-  return { done: !open, failed: false, lines: [`#${pullRequest.number} ${pullRequest.state}`, ...open ? ['waiting: human merge'] : []] };
+  // Closed without merge is the end of the wait, but never a delivery.
+  return { done: !open, failed: pullRequest.state === 'CLOSED', lines: [`#${pullRequest.number} ${pullRequest.state}`, ...open ? ['waiting: human merge'] : []] };
 }
 
 async function wait() {
