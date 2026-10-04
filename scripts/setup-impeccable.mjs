@@ -90,7 +90,7 @@ try {
   for (const file of [...skills, ...fresh]) materialize(root, join(root, file), join(next, file));
   for (const file of stale) moveAside(root, join(root, file));
   console.log(`Impeccable ${revision.slice(0, 7)}: committed skills for six providers and companions refreshed.\n`
-    + "Hook engine and trust unchanged; install the engine with install-impeccable-hooks.mjs.");
+    + `Hook engine ${version} requires explicit installation with install-impeccable-hooks.mjs and personal trust.`);
 } finally {
   // Only this invocation's generated staging, confined to state.
   assert.equal(dirname(stage), state);

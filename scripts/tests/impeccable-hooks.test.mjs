@@ -45,7 +45,7 @@ for (const name of manifests) test(`${name}: a missing engine speaks once at Ses
 });
 
 test('an installed engine receives stdin and its failure is not suppressed', { skip: windows }, t => {
-  const f = fixture(t), engine = join(f.root, '.impeccable/vaultdex/engine-0.1.5/impeccable');
+  const f = fixture(t), engine = join(f.root, '.impeccable/vaultdex/engine-0.1.11/impeccable');
   mkdirSync(join(engine, '..'), { recursive: true });
   writeFileSync(engine, '#!/bin/sh\n[ "$1" = hook ] || exit 9\nIFS= read -r event\nprintf "%s\\n" "$event"\nexit 7\n', { mode: 0o755 });
   for (const name of manifests) for (const hook of commands(name, false)) {

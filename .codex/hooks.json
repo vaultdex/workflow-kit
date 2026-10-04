@@ -13,9 +13,9 @@
           },
           {
             "type": "command",
-            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then printf '%s\\n' '{\"systemMessage\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\"}}'; fi",
+            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.11/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ ! -x \"$engine\" ]; then printf '%s\\n' '{\"systemMessage\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\"}}'; fi",
             "timeout": 5,
-            "commandWindows": "if not exist \"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.5\\impeccable.exe\" (echo {\"systemMessage\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\"}})"
+            "commandWindows": "if not exist \"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.11\\impeccable.exe\" (echo {\"systemMessage\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Impeccable hooks missing, UI checks are off: run node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs and trust the hooks.\"}})"
           }
         ]
       },
@@ -63,8 +63,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ -x \"$engine\" ]; then \"$engine\" hook; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.5\\impeccable.exe\" (\"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.5\\impeccable.exe\" hook) else (exit /b 0)",
+            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.11/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ -x \"$engine\" ]; then \"$engine\" hook; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.11\\impeccable.exe\" (\"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.11\\impeccable.exe\" hook) else (exit /b 0)",
             "timeout": 120,
             "statusMessage": "Impeccable UI check (verified user installation)"
           }
@@ -76,8 +76,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.5/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ -x \"$engine\" ]; then \"$engine\" hook; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.5\\impeccable.exe\" (\"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.5\\impeccable.exe\" hook) else (exit /b 0)",
+            "command": "engine=\"$HOME/.impeccable/vaultdex/engine-0.1.11/impeccable\"; case \"${OSTYPE:-}\" in msys*|cygwin*) engine=\"$engine.exe\";; esac; if [ -x \"$engine\" ]; then \"$engine\" hook; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.11\\impeccable.exe\" (\"%USERPROFILE%\\.impeccable\\vaultdex\\engine-0.1.11\\impeccable.exe\" hook) else (exit /b 0)",
             "timeout": 120,
             "statusMessage": "Impeccable UI check (verified user installation)"
           }
