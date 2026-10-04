@@ -160,7 +160,7 @@ function setField() {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status app{slug} checkRuns(first:1){totalCount}}}
+  number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
@@ -229,9 +229,13 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   if (!contexts.nodes.length) waiting.push({ text: 'first CI check', since: Infinity });
   // An Actions suite without runs is a triggered workflow about to report. Other apps (Sonar, CodeRabbit,
   // Renovate …) open a suite on every push and often never run it, so only Actions counts, and it may stall.
-  for (const suite of commit.checkSuites.nodes.filter(suite => suite.app?.slug === 'github-actions'
-    && suite.status !== 'COMPLETED' && !suite.checkRuns.totalCount)) {
-    waiting.push({ text: `check suite ${suite.app?.slug ?? 'unknown'} without runs`, since: Date.parse(suite.createdAt) });
+  for (const suite of commit.checkSuites.nodes.filter(suite => suite.app?.slug === 'github-actions' && !suite.checkRuns.totalCount)) {
+    if (suite.status !== 'COMPLETED') waiting.push({ text: 'check suite github-actions without runs', since: Date.parse(suite.createdAt) });
+    // A workflow that fails to start (STARTUP_FAILURE) completes its suite without any run to show it.
+    else if (!passed.has(suite.conclusion)) {
+      failed = true;
+      lines.push(`check suite github-actions: ${suite.conclusion}`);
+    }
   }
   const comments = restAll(`repos/${project.repository}/issues/${number}/comments`);
   const reviewList = restAll(`repos/${project.repository}/pulls/${number}/reviews`);
@@ -279,7 +283,8 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
-  return { done: !pending.length, failed, lines };
+  // A known failure ends the wait at once: the fix starts now, whatever else is still running.
+  return { done: failed || !pending.length, failed, lines };
 }
 
 const stallOption = () => process.argv.includes('--stall') ? Number(process.argv[process.argv.indexOf('--stall') + 1]) : 20;

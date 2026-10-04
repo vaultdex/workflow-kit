@@ -163,7 +163,8 @@ test('reviews waits only for traces on the current head and never reads failures
   const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
   const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
   const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
-  const suite = (status = 'COMPLETED', runs = 1, minutes = 1) => ({ createdAt: minutesAgo(minutes), status, app: { slug: 'github-actions' }, checkRuns: { totalCount: runs } });
+  const suite = (status = 'COMPLETED', runs = 1, minutes = 1, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({
+    createdAt: minutesAgo(minutes), status, conclusion, app: { slug: 'github-actions' }, checkRuns: { totalCount: runs } });
   const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, requestEventTotal, threadPages,
     suites = [suite('COMPLETED', 1, pushed)], suiteTotal = suites.length } = {}) => ({
     number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
@@ -212,6 +213,8 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), suite('QUEUED', 0, 1)] })), 3, 'A workflow that has not reported yet waits');
   assert.equal(reviews(pr({ pushed: 60, suites: [suite('COMPLETED', 1, 60), suite('QUEUED', 0, 60)] })), 0, 'A suite that never runs stalls');
   assert.equal(reviews(pr({ suiteTotal: 101 })), 2, 'Unreadable check suites are never done');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), suite('COMPLETED', 0, 1, 'STARTUP_FAILURE')] })), 1, 'A workflow that fails to start is FAILED');
+  assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE'), check('IN_PROGRESS')] })), 1, 'A known failure ends the wait while other checks run');
   const appSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'sonarqubecloud' } };
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 0, 'Idle suites of other apps are no trace');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };

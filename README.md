@@ -75,13 +75,16 @@ trust; new definitions need personal review and trust. See
 ## Board commands
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
-`next`, `check ISSUE`, `status ISSUE "STATUS"`, `priority ISSUE High`,
-`field ISSUE NAME VALUE` (any single-select field, read back),
-`block ISSUE OWNER/REPO#N`, `reviews PR` (one look: exit 0 done, 1 red CI,
-3 waiting, 2 error) and `wait PR` (repeats `reviews` every minute, prints `WAITING`
-lines on change and ends with `DONE`, `FAILED` or `ERROR`; both take
-`--stall MINUTES`, default 20; `wait PR --merged` waits for the human merge and
-ends `FAILED` if the PR is closed unmerged).
+
+- `next`, `check ISSUE`, `status ISSUE "STATUS"`, `priority ISSUE High`,
+  `block ISSUE OWNER/REPO#N`.
+- `field ISSUE NAME VALUE`: any single-select field, read back after writing.
+- `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
+- `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
+  ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
+  `--stall MINUTES` (default 20). `wait PR --merged` waits for the human merge
+  and ends `FAILED` if the PR is closed unmerged.
+
 Before implementation, complete [Start or resume](AGENT_RULES.md#start-or-resume);
 a check alone does not claim work.
 
