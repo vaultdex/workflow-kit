@@ -12,6 +12,7 @@ test('kit scripts and docs contain no control characters besides tab and line br
     // Patches feed generated skills, so a stray byte there would spread.
     .split('\n').filter(file => /\.(mjs|js|md|json|ya?ml|patch)$/.test(file));
   assert.ok(files.length > 10, 'Expected to scan the kit sources');
-  const broken = files.filter(file => /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(readFileSync(`${root}/${file}`, 'utf8')));
+  // Every Unicode control character (C0, DEL and C1 such as U+0085) except tab, LF and CR.
+  const broken = files.filter(file => /(?![\t\n\r])\p{Cc}/u.test(readFileSync(`${root}/${file}`, 'utf8')));
   assert.deepEqual(broken, []);
 });
