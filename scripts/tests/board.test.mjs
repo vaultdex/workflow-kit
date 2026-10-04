@@ -167,7 +167,8 @@ test('reviews waits only for traces on the current head and never reads failures
     createdAt: minutesAgo(minutes), status, conclusion, app: { slug: 'github-actions' }, checkRuns: { totalCount: runs } });
   const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, requestEventTotal, threadPages,
     suites = [suite('COMPLETED', 1, pushed)], suiteTotal = suites.length } = {}) => ({
-    number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
+    number: 7, state: 'OPEN', headRefOid: 'abcdef1234', mergeStateStatus: 'CLEAN', reviewDecision: null,
+    latestOpinionatedReviews: { totalCount: 0, nodes: [] },
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
       checkSuites: { totalCount: suiteTotal, nodes: suites }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
     reviewRequests: { totalCount: requests.length, nodes: requests.map(login => ({ requestedReviewer: { login } })) },
@@ -225,6 +226,12 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr(), { comments: [{ ...codex('Running', 3), updated_at: minutesAgo(0) }] }), 3, 'A later edit of the summary itself is no result');
   const appSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'sonarqubecloud' } };
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 0, 'Idle suites of other apps are no trace');
+  const blocked = look({ ...pr(), mergeStateStatus: 'BLOCKED', reviewDecision: 'CHANGES_REQUESTED',
+    latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'coderabbitai' } }] } });
+  assert.equal(blocked.status, 0, 'Blockers are for the handoff; the wait itself is over');
+  assert.match(blocked.stdout, /^blocker: changes requested by coderabbitai$/m, 'A standing change request is named as a blocker');
+  assert.match(look({ ...pr(), mergeStateStatus: 'DIRTY' }).stdout, /^blocker: merge conflicts$/m);
+  assert.equal(reviews({ ...pr(), latestOpinionatedReviews: { totalCount: 101, nodes: [] } }), 2, 'Cut-off review decisions are never read as no blocker');
   const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['sonarqubecloud'] }));
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 3, 'A listed analyzer waits until it reports');
