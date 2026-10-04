@@ -204,9 +204,9 @@ const login = user => user?.login?.replace(/\[bot\]$/, '');
 const isBot = user => user?.type === 'Bot';
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
+const readPr = prNumber => graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
-function reviews(stallMinutes = 20, now = Date.now(), prNumber = number) {
-  const pr = graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
+function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber)) {
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
   if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', lines, pr };
@@ -360,14 +360,18 @@ function handoffIssue(issue, viewer) {
 /** Read all PR gates and native links, optionally requiring the previously checked head. */
 function handoffPr(issueId, expectedHead) {
   const reasons = [];
-  const result = reviews(stallOption(), Date.now(), Number(value));
+  const pr = readPr(Number(value));
+  assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
+  if (pr.state !== 'OPEN' || pr.isDraft) {
+    console.log('FAILED\nblocker: handoff needs an open non-draft PR');
+    process.exitCode = 1;
+    return;
+  }
+  const result = reviews(stallOption(), Date.now(), Number(value), pr);
   console.log(result.lines.join('\n'));
-  assert.equal(typeof result.pr.isDraft, 'boolean', 'PR draft state is unreadable');
-  if (result.pr.state !== 'OPEN' || result.pr.isDraft) reasons.push('handoff needs an open non-draft PR');
-  if (reasons.length || !result.done || result.failed) {
-    const failed = reasons.length > 0 || result.failed;
-    process.exitCode = failed ? 1 : 3;
-    console.log([failed ? 'FAILED' : 'WAITING', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+  if (!result.done || result.failed) {
+    process.exitCode = result.failed ? 1 : 3;
+    console.log(result.failed ? 'FAILED' : 'WAITING');
     return;
   }
   if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, 'PR head changed during handoff');
