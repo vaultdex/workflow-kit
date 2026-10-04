@@ -140,9 +140,9 @@ and empty sections.
    who reviews instead of assuming it. A trace is a check, status or review on the
    head commit, or a comment or reaction (including an announced review) created
    after the head was pushed. Once CI is green, a reviewer without such a trace is
-   not coming. Pending, cancelled or missing expected CI checks are not success. Read all findings and every review, comment and thread from bots
-   and humans, including every page of analyzer results such
-   as Sonar issues and hotspots. A green quality gate does not mean zero findings,
+   not coming. Pending, cancelled or missing expected CI checks are not success.
+   Read all findings and every review, comment and thread from bots and humans,
+   including every page of analyzer results such as Sonar issues and hotspots. A green quality gate does not mean zero findings,
    and a missing or stale analysis is not clean. Don't re-request a review that is
    running or finished for the current commit without a concrete reason.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
