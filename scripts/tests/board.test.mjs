@@ -165,10 +165,10 @@ test('reviews waits only for traces on the current head and never reads failures
   const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
   const suite = (status = 'COMPLETED', runs = 1, minutes = 1) => ({ createdAt: minutesAgo(minutes), status, app: { slug: 'github-actions' }, checkRuns: { totalCount: runs } });
   const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, threadPages,
-    suites = [suite('COMPLETED', 1, pushed)] } = {}) => ({
+    suites = [suite('COMPLETED', 1, pushed)], suiteTotal = suites.length } = {}) => ({
     number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
-      checkSuites: { nodes: suites }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
+      checkSuites: { totalCount: suiteTotal, nodes: suites }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
     reviewRequests: { totalCount: requests.length, nodes: requests.map(login => ({ requestedReviewer: { login } })) },
     requestEvents: { nodes: requestedAgo === undefined ? [] : requests.map(login => ({ createdAt: minutesAgo(requestedAgo), requestedReviewer: { login } })) },
     threadPages,
@@ -210,6 +210,7 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr(), { comments: [note], commentReactions: [reaction('eyes', 0)] }), 0, 'A 👀 on an unrelated comment is no trace');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), suite('QUEUED', 0, 1)] })), 3, 'A workflow that has not reported yet waits');
   assert.equal(reviews(pr({ pushed: 60, suites: [suite('COMPLETED', 1, 60), suite('QUEUED', 0, 60)] })), 0, 'A suite that never runs stalls');
+  assert.equal(reviews(pr({ suiteTotal: 101 })), 2, 'Unreadable check suites are never done');
   const appSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'sonarqubecloud' } };
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 0, 'Idle suites of other apps are no trace');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };

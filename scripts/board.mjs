@@ -160,13 +160,13 @@ function setField() {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){nodes{createdAt status app{slug} checkRuns{totalCount}}}
+  number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status app{slug} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){nodes{...on ReviewRequestedEvent{createdAt
     requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}}`;
-// ponytail: checks and review requests stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
+// ponytail: checks, check suites and review requests stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
 
 /** Unresolved review threads across every page; big reviews must still get a verdict. */
 function unresolvedThreads() {
@@ -205,6 +205,8 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   assert.equal(commit.oid, pr.headRefOid, 'Head commit not readable');
   // CI starts on push, so the first check suite dates the push. Before that the commit date is a
   // conservative lower bound: it can only add traces, never hide one.
+  assert.equal(commit.checkSuites.nodes.length, commit.checkSuites.totalCount, 'Not every check suite is readable');
+  // A bot sees the head through the same push event that opens the suites, so no trace predates them.
   const suites = commit.checkSuites.nodes.map(suite => Date.parse(suite.createdAt));
   const pushed = suites.length ? Math.min(...suites) : Date.parse(commit.committedDate);
   const after = time => Date.parse(time) >= pushed;
@@ -249,9 +251,10 @@ function reviews(stallMinutes = 20, now = Date.now()) {
   const activity = [...[...comments, ...inline].map(comment => [login(comment.user), comment.updated_at]),
     // A finishing review of the previous head never answers a trace on this one.
     ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at]),
+    // 👍 is Codex's "no findings"; a later 👀 is its own open trace below.
     ...reactions.map(reaction => [login(reaction.user), reaction.created_at])];
   for (const reaction of reactions.filter(reaction => isBot(reaction.user) && after(reaction.created_at))) {
-    // 👀 announces a review; any later comment, review or reaction by the same bot is its result.
+    // 👀 announces a review; a later comment, head review or final reaction by the same bot is its result.
     const answered = activity.some(([author, time]) => author === login(reaction.user) && Date.parse(time) > Date.parse(reaction.created_at));
     if (reaction.content === 'eyes' && !answered) waiting.push({ text: `${login(reaction.user)} reacted 👀`, since: Date.parse(reaction.created_at) });
   }
