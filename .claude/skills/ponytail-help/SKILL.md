@@ -39,7 +39,7 @@ forms above. Other hosts can load the named skill or its `SKILL.md` explicitly.
 ## Deactivate
 
 Say "stop ponytail" or "normal mode". With hooks, `/ponytail off` also works;
-resume with `/ponytail full` (bare `/ponytail` reports the current mode).
+resume with `/ponytail` (off enables the default level; an active mode reports its level).
 
 ## Checkout scope
 

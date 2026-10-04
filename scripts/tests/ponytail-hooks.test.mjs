@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,7 +12,7 @@ const git = (process.env.PATH || '').split(path.delimiter).filter(path.isAbsolut
   .map(directory => path.join(directory, windows ? 'git.exe' : 'git')).find(existsSync);
 // Deadlines only catch hung hooks; they must not measure speed on slow shared runners.
 const hookTimeout = Number(process.env.WORKFLOW_KIT_HOOK_TIMEOUT_MS) || 30_000;
-const version = '4.10.0-9';
+const version = '4.10.3-1';
 
 test('installed hooks run every manifest command without executing checkout programs', t => {
   assert.ok(git, 'Git must be available on an absolute PATH');
@@ -29,8 +29,12 @@ test('installed hooks run every manifest command without executing checkout prog
   const install = (extra = {}, node = process.execPath) => spawnSync(node, [installer], { cwd: checkout, env: { ...env, ...extra }, encoding: 'utf8' });
 
   // The snapshot and the Node it pins stay outside Git checkouts; identical reruns are fine.
+  const oldSnapshot = path.join(env.HOME, '.ponytail/vaultdex/4.10.0-9');
+  mkdirSync(oldSnapshot, { recursive: true });
+  writeFileSync(path.join(oldSnapshot, 'trusted.txt'), 'Previously trusted snapshot');
   const installed = install();
   assert.equal(installed.status, 0, installed.stderr);
+  assert.equal(readFileSync(path.join(oldSnapshot, 'trusted.txt'), 'utf8'), 'Previously trusted snapshot');
   assert.equal(install().status, 0, 'Identical reinstall');
   const linkedHome = path.join(temp, 'linked-home');
   mkdirSync(linkedHome);
@@ -103,4 +107,58 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   const [{ handler: cursorStart }] = handlers('.cursor/hooks.json');
   writeFileSync(activate, 'process.exit(7);');
   for (const shell of shells) assert.equal(execute(shell, cursor(shell, cursorStart.command)).status, 7, shell.executable);
+});
+
+test('adapted hooks preserve explicit host and checkout state and drain stdout on EOF or stuck stdin', async t => {
+  const temp = mkdtempSync(path.join(tmpdir(), 'ponytail lifecycle '));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const snapshot = path.join(temp, 'snapshot'), checkout = path.join(temp, 'checkout');
+  cpSync(path.join(root, '.agents/hooks'), snapshot, { recursive: true });
+  mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  mkdirSync(path.join(checkout, 'frontend'));
+  // Large rules force asynchronous pipe writes; process.exit would truncate them.
+  const rules = 'x'.repeat(256 * 1024);
+  writeFileSync(path.join(snapshot, 'ponytail-instructions.js'),
+    `exports.getPonytailInstructions = mode => mode + ':' + ${JSON.stringify(rules)};\n`);
+  const env = { ...process.env, HOME: path.join(temp, 'home'), USERPROFILE: path.join(temp, 'home'),
+    XDG_CONFIG_HOME: path.join(temp, 'config'), PONYTAIL_DEFAULT_MODE: 'lite',
+    PLUGIN_DATA: path.join(temp, 'inherited-codex'), COPILOT_PLUGIN_DATA: path.join(temp, 'inherited-copilot'),
+    QODER_SESSION_ID: 'inherited', CURSOR_VERSION: 'inherited', ZCODE_APP_VERSION: 'inherited',
+    CLAUDE_PROJECT_DIR: path.join(temp, 'inherited-project') };
+  const activate = (cwd, host, extra = {}, continuation = '') => {
+    const result = spawnSync(process.execPath, [path.join(snapshot, 'ponytail-activate.js'), host, continuation],
+      { cwd, env: { ...env, ...extra }, encoding: 'utf8', timeout: hookTimeout });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  assert.ok(activate(checkout, 'claude') === 'lite:' + rules, 'Explicit Claude overrides inherited hosts');
+  assert.ok(activate(path.join(checkout, 'frontend'), 'claude', {
+    PONYTAIL_DEFAULT_MODE: 'ultra', CLAUDE_PROJECT_DIR: path.join(temp, 'other-inherited-project'),
+  }, 'continue') === 'lite:' + rules, 'Resume shares canonical checkout state across subdirectories');
+  assert.deepEqual(JSON.parse(activate(checkout, 'codex', {}, 'continue')), {}, 'Other host has no mode');
+  const otherCheckout = path.join(temp, 'other-checkout');
+  mkdirSync(path.join(otherCheckout, '.git'), { recursive: true });
+  assert.equal(activate(otherCheckout, 'claude', {}, 'continue'), 'OK', 'Other checkout has no mode');
+  activate(checkout, 'codex');
+  for (const hook of ['mode-tracker', 'subagent']) for (const eof of [true, false]) {
+    const output = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [path.join(snapshot, `ponytail-${hook}.js`), 'codex'],
+        { cwd: checkout, env: { ...env, PONYTAIL_SUBAGENT_MATCHER: '^worker$' } });
+      const deadline = setTimeout(() => { child.kill(); reject(new Error(`${hook}: stdin hang`)); }, hookTimeout);
+      let stdout = '', stderr = '';
+      child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.stderr.on('data', chunk => { stderr += chunk; });
+      child.on('error', error => { clearTimeout(deadline); reject(error); });
+      child.on('close', code => {
+        clearTimeout(deadline);
+        code === 0 ? resolve(stdout) : reject(new Error(`${hook}: ${code} ${stderr}`));
+      });
+      const input = JSON.stringify(hook === 'mode-tracker' ? { prompt: '/ponytail lite' } : { agentName: 'worker' });
+      if (eof) child.stdin.end(input); else child.stdin.write(input);
+    });
+    const parsed = JSON.parse(output);
+    assert.equal(parsed.hookSpecificOutput.hookEventName, hook === 'mode-tracker' ? 'UserPromptSubmit' : 'SubagentStart');
+    assert.ok(parsed.hookSpecificOutput.additionalContext.endsWith('lite:' + rules), `${hook} eof=${eof}: complete rules`);
+  }
 });

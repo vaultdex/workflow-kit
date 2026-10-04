@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate codex; else printf '%s\\n' '{\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}}'; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" activate codex) else (echo {\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}})",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.3-1/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate codex; else printf '%s\\n' '{\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}}'; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.3-1\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.3-1\\launch.cmd\" activate codex) else (echo {\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}})",
             "timeout": 5,
             "statusMessage": "Loading Ponytail mode"
           },
@@ -24,8 +24,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate codex continue; else printf '%s\\n' '{\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}}'; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" activate codex continue) else (echo {\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}})",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.3-1/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" activate codex continue; else printf '%s\\n' '{\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}}'; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.3-1\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.3-1\\launch.cmd\" activate codex continue) else (echo {\"systemMessage\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\",\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ponytail hooks missing: run node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs and trust the hooks.\"}})",
             "timeout": 5,
             "statusMessage": "Loading Ponytail mode"
           }
@@ -37,8 +37,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" subagent codex; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" subagent codex) else (exit /b 0)",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.3-1/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" subagent codex; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.3-1\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.3-1\\launch.cmd\" subagent codex) else (exit /b 0)",
             "timeout": 5,
             "statusMessage": "Loading Ponytail mode"
           }
@@ -50,8 +50,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.0-9/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" mode-tracker codex; fi",
-            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.0-9\\launch.cmd\" mode-tracker codex) else (exit /b 0)",
+            "command": "launcher=\"$HOME/.ponytail/vaultdex/4.10.3-1/launch.sh\"; if [ -f \"$launcher\" ]; then /bin/sh \"$launcher\" mode-tracker codex; fi",
+            "commandWindows": "if exist \"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.3-1\\launch.cmd\" (\"%USERPROFILE%\\.ponytail\\vaultdex\\4.10.3-1\\launch.cmd\" mode-tracker codex) else (exit /b 0)",
             "timeout": 5
           }
         ]
