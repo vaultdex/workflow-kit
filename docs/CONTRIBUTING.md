@@ -140,29 +140,35 @@ and empty sections.
    wait PR` in the background, not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
    status or review on the head commit, or, created after the head was pushed, a
-   review comment, an announced review or a bot's reaction to the PR or a review
-   request. Once CI is green, a reviewer without such a trace is not coming. A
-   traced review finishes when it posts its result: a review, a completed summary or
-   a final status. If no result arrives within the time the reviewer's last
-   completed review on this PR took (otherwise its usual duration), it is stalled.
-   Pending, cancelled or missing expected CI checks are not success. Read all
-   findings and every review, comment and thread from bots and humans, including
-   every page of analyzer results such as Sonar issues and hotspots. A green quality
-   gate does not mean zero findings, and a missing or stale analysis is not clean.
-   Don't re-request a review that is running or finished for the current commit
-   without a concrete reason.
+   review comment, an open review request, an announced review or a bot's reaction
+   to the PR or a review request. Once CI is green, a reviewer without such a trace
+   is not coming. A traced review finishes when it posts its result: a review, a
+   completed summary or a final status. If no result arrives within the time the
+   reviewer's last completed review on this PR took (otherwise its usual duration),
+   it is stalled. Pending, cancelled or missing expected CI checks are not success.
+   Read all findings and every review, comment and thread from bots and humans,
+   including every page of analyzer results such as Sonar issues and hotspots. A
+   green quality gate does not mean zero findings, and a missing or stale analysis
+   is not clean. Don't re-request a review that is running or finished for the
+   current commit without a concrete reason.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review,
    set Automated review and wait again. Merge main only for conflicts or a real need.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
-   are unchanged.
+   are unchanged. Then run a retro once per PR: apply the retro skill
+   (`.agents/skills/retro/SKILL.md`) to your own session. Fix findings within the
+   issue's scope through step 4; record the rest as follow-up issues in the
+   repository that owns the fix, with evidence from the session. Report findings
+   about personal configuration (memory, shell profile, scheduled tasks) to the
+   human instead of editing it. List every finding and its disposition, or none,
+   in the handoff.
 6. Set Human review only when CI passes, every review with a trace on the current
    head has finished or stalled, each finding is fixed or linked to a follow-up, the
-   final proof has passed and no prerequisite is open. If a reviewer is confirmed
-   unavailable (quota, outage) or stalled, record the reviewer, cause and evidence
-   in the PR and hand off with that limitation stated. Otherwise pending or unknown
-   does not count as unavailable.
+   final proof has passed, the retro is recorded and no prerequisite is open. If a
+   reviewer is confirmed unavailable (quota, outage) or stalled, record the
+   reviewer, cause and evidence in the PR and hand off with that limitation stated.
+   Otherwise pending or unknown does not count as unavailable.
 7. After the human merges, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
 

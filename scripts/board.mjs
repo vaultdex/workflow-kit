@@ -163,78 +163,117 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   number state headRefOid commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){nodes{createdAt}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
-  reviews(last:100){nodes{author{__typename login} state submittedAt url commit{oid}}}
-  comments(last:100){nodes{author{__typename login} body createdAt updatedAt url}}
+  reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
   reviewThreads(first:100){totalCount nodes{isResolved}}}}}`;
 const rest = path => JSON.parse(execFileSync(gh.file, ['api', path], { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
+/** Every page, so an early bot summary on a long PR is never cut off. */
+function restAll(path) {
+  const items = [];
+  for (let page = 1; ; page++) {
+    const batch = rest(`${path}?per_page=100&page=${page}`);
+    items.push(...batch);
+    if (batch.length < 100) return items;
+  }
+}
+const login = user => user?.login?.replace(/\[bot\]$/, '');
+const isBot = user => user?.type === 'Bot';
+const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
-/** One look at the PR head: done (0), still waiting (3); read failures throw. */
+/** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
 function reviews(stallMinutes = 20, now = Date.now()) {
   const pr = graphql(prQuery, { owner, name, number }).repository.pullRequest;
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
-  if (pr.state !== 'OPEN') return { done: true, lines };
+  if (pr.state !== 'OPEN') return { done: true, failed: false, lines };
   const { commit } = pr.commits.nodes[0];
   assert.equal(commit.oid, pr.headRefOid, 'Head commit not readable');
-  // CI starts on push, so the first check suite dates the push; the commit date is the fallback.
+  // CI starts on push, so the first check suite dates the push. Before that the commit date is a
+  // conservative lower bound: it can only add traces, never hide one.
   const suites = commit.checkSuites.nodes.map(suite => Date.parse(suite.createdAt));
   const pushed = suites.length ? Math.min(...suites) : Date.parse(commit.committedDate);
   const after = time => Date.parse(time) >= pushed;
   const stalled = since => now - since > stallMinutes * 60_000; // false for Infinity
   const waiting = [];
+  let failed = false;
   const contexts = commit.statusCheckRollup?.contexts ?? { totalCount: 0, nodes: [] };
   assert.equal(contexts.nodes.length, contexts.totalCount, 'Not every check is readable');
   for (const check of contexts.nodes) {
     const label = check.name ?? check.context;
     const pending = check.__typename === 'CheckRun' ? check.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(check.state);
     // CI never stalls: a running check is not success however long it takes.
-    if (pending) waiting.push({ text: `check ${label}`, since: Infinity });
+    if (pending) { waiting.push({ text: `check ${label}`, since: Infinity }); continue; }
+    const result = check.conclusion ?? check.state;
+    if (!passed.has(result)) failed = true;
     // Descriptions carry results such as "Review rate limited" behind a green state.
-    else lines.push(`check ${label}: ${check.conclusion ?? check.state}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);
+    lines.push(`check ${label}: ${result}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);
   }
-  if (!contexts.nodes.length) waiting.push({ text: 'first CI check', since: pushed });
-  const bots = pr.comments.nodes.filter(comment => comment.author?.__typename === 'Bot');
+  if (!contexts.nodes.length) waiting.push({ text: 'first CI check', since: Infinity });
+  const comments = restAll(`repos/${project.repository}/issues/${number}/comments`);
+  const reviewList = restAll(`repos/${project.repository}/pulls/${number}/reviews`);
+  const reactions = restAll(`repos/${project.repository}/issues/${number}/reactions`);
   const short = pr.headRefOid.slice(0, 7);
-  for (const comment of bots.filter(comment => after(comment.updatedAt))) {
+  for (const comment of comments.filter(comment => isBot(comment.user) && after(comment.updated_at))) {
     // Summary comments (Codex) name the head in a table row that says Running until the review completes.
     for (const row of comment.body.split('\n').filter(row => row.includes('Running') && row.includes(short))) {
-      const since = row.match(/datetime="([^"]+)"/)?.[1] ?? comment.updatedAt;
-      waiting.push({ text: `${comment.author.login} running since ${since}`, since: Date.parse(since) });
+      const since = row.match(/datetime="([^"]+)"/)?.[1] ?? comment.updated_at;
+      waiting.push({ text: `${login(comment.user)} running since ${since}`, since: Date.parse(since) });
     }
   }
-  const reactions = rest(`repos/${project.repository}/issues/${number}/reactions?per_page=100`);
-  assert.ok(reactions.length < 100, 'Too many reactions to read completely');
-  for (const reaction of reactions.filter(reaction => reaction.user?.type === 'Bot' && after(reaction.created_at))) {
-    const login = reaction.user.login.replace(/\[bot\]$/, '');
-    const later = [...bots.map(comment => [comment.author.login, comment.updatedAt]),
-      ...pr.reviews.nodes.map(review => [review.author?.login, review.submittedAt]),
-      ...reactions.filter(other => other !== reaction).map(other => [other.user?.login?.replace(/\[bot\]$/, ''), other.created_at])]
-      .some(([author, time]) => author === login && Date.parse(time) > Date.parse(reaction.created_at));
+  const activity = [...comments.map(comment => [login(comment.user), comment.updated_at]),
+    ...reviewList.map(review => [login(review.user), review.submitted_at]),
+    ...reactions.map(reaction => [login(reaction.user), reaction.created_at])];
+  for (const reaction of reactions.filter(reaction => isBot(reaction.user) && after(reaction.created_at))) {
     // 👀 announces a review; any later comment, review or reaction by the same bot is its result.
-    if (reaction.content === 'eyes' && !later) waiting.push({ text: `${login} reacted 👀`, since: Date.parse(reaction.created_at) });
+    const answered = activity.some(([author, time]) => author === login(reaction.user) && Date.parse(time) > Date.parse(reaction.created_at));
+    if (reaction.content === 'eyes' && !answered) waiting.push({ text: `${login(reaction.user)} reacted 👀`, since: Date.parse(reaction.created_at) });
   }
-  for (const review of pr.reviews.nodes.filter(review => review.commit?.oid === pr.headRefOid)) lines.push(`review ${review.author?.login} ${review.state} ${review.url}`);
-  for (const comment of pr.comments.nodes.filter(comment => after(comment.updatedAt))) lines.push(`comment ${comment.author?.login} ${comment.url}`);
+  // GitHub drops a request once the review arrives, so every remaining request is an outstanding review.
+  assert.equal(pr.reviewRequests.nodes.length, pr.reviewRequests.totalCount, 'Not every review request is readable');
+  for (const { requestedReviewer: reviewer } of pr.reviewRequests.nodes) {
+    waiting.push({ text: `review requested from ${reviewer?.login ?? reviewer?.name ?? 'an unreadable reviewer'}`, since: pushed });
+  }
+  for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
+  for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
   assert.equal(pr.reviewThreads.nodes.length, pr.reviewThreads.totalCount, 'Not every review thread is readable');
   lines.push(`unresolved threads: ${pr.reviewThreads.nodes.filter(thread => !thread.isResolved).length}`);
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
-  return { done: !pending.length, lines };
+  return { done: !pending.length, failed, lines };
 }
 
 const stallOption = () => process.argv.includes('--stall') ? Number(process.argv[process.argv.indexOf('--stall') + 1]) : 20;
+// Waiting is over either way; FAILED keeps a red head from reading as a finished review.
+const outcome = ({ failed }) => failed ? ['FAILED', 1] : ['DONE', 0];
 
 function reviewsOnce() {
-  const { done, lines } = reviews(stallOption());
-  console.log([done ? 'DONE' : 'WAITING', ...lines].join('\n'));
-  process.exitCode = done ? 0 : 3;
+  const result = reviews(stallOption());
+  const [word, code] = result.done ? outcome(result) : ['WAITING', 3];
+  console.log([word, ...result.lines].join('\n'));
+  process.exitCode = code;
+}
+
+/** Waiting for the human merge is the other recurring wait; it ends when the PR is no longer open. */
+function mergeState() {
+  const { pullRequest } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    pullRequest(number:$number){number state}}}`, { owner, name, number }).repository;
+  const open = pullRequest.state === 'OPEN';
+  return { done: !open, failed: false, lines: [`#${pullRequest.number} ${pullRequest.state}`, ...open ? ['waiting: human merge'] : []] };
 }
 
 async function wait() {
+  const look = process.argv.includes('--merged') ? mergeState : () => reviews(stallOption());
+  let shown;
   for (;;) {
-    const { done, lines } = reviews(stallOption());
-    if (done) return console.log(['DONE', ...lines].join('\n'));
+    const result = look(), { done, lines } = result;
+    if (done) {
+      const [word, code] = outcome(result);
+      process.exitCode = code;
+      return console.log([word, ...lines].join('\n'));
+    }
+    // Interim output names what is still awaited, once per change, so a background run is never silent.
+    const waiting = lines.filter(line => line.startsWith('waiting:')).join('\n');
+    if (waiting !== shown) console.log(`WAITING\n${shown = waiting}`);
     await new Promise(resolve => setTimeout(resolve, 60_000));
   }
 }
@@ -257,11 +296,12 @@ function block() {
 const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
   reviews: reviewsOnce, wait };
 const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
-  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES]';
+  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged]';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
-  || (command === 'field' && !(/^[\w -]+$/.test(value ?? '') && /^[\w .-]+$/.test(process.argv[5] ?? '')))
+  // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
+  || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   || (['reviews', 'wait'].includes(command) && !(stallOption() > 0))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);

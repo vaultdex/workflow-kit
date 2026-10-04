@@ -18,18 +18,24 @@ function fixture(t) {
   chmodSync(gh, 0o755);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1' }));
   writeFileSync(join(checkout, 'api'), `const fs = require('node:fs');
-if (process.argv.some(arg => arg.includes('/reactions'))) {
-  process.stdout.write(fs.existsSync('reactions.json') ? fs.readFileSync('reactions.json', 'utf8') : '[]');
+const path = process.argv[2] ?? '';
+if (!path.startsWith('graphql')) {
+  if (fs.existsSync('fail')) process.exit(1);
+  // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
+  const file = path.split('?')[0].split('/').pop() + '.json';
+  const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
+  const items = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
+  process.stdout.write(JSON.stringify(items.slice((page - 1) * 100, page * 100)));
   process.exit(0);
 }
 const query = process.argv.find(arg => arg.startsWith('query=')).slice(6);
-if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.includes('viewer'))) process.exit(1);
+if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('query{viewer'))) process.exit(1);
 let data;
 if (query.startsWith('mutation')) {
   fs.appendFileSync('mutations', query + '\\n');
   fs.writeFileSync('stored', process.argv.find(arg => arg.startsWith('option=')).slice(7));
   data = {};
-} else if (query.includes('viewer')) data = { viewer: { login: 'worker' } };
+} else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
 else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
   projectItems: { nodes: [{ project: { id: 'P1' }, value: { name: fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8') } }] } } } };
 else if (query.includes('pullRequest(number')) data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
@@ -147,38 +153,64 @@ test('field sets any single-select value and fails when the read-back differs', 
 test('reviews waits only for traces on the current head and never reads failures as done', t => {
   const { checkout, run } = fixture(t);
   const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
-  const bot = login => ({ __typename: 'Bot', login });
-  const check = (status, extra = {}) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion: status === 'COMPLETED' ? 'SUCCESS' : null, ...extra });
-  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, comments = [], reviews = [] } = {}) => ({
+  const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
+  const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
+  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [] } = {}) => ({
     number: 7, state: 'OPEN', headRefOid: 'abcdef1234',
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
       checkSuites: { nodes: [{ createdAt: minutesAgo(pushed) }] }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
-    reviews: { nodes: reviews }, comments: { nodes: comments }, reviewThreads: { totalCount: 0, nodes: [] },
+    reviewRequests: { totalCount: requests.length, nodes: requests.map(login => ({ requestedReviewer: { login } })) },
+    reviewThreads: { totalCount: 0, nodes: [] },
   });
-  const codex = (row, minutes) => ({ author: bot('chatgpt-codex-connector'), url: 'u', createdAt: minutesAgo(minutes), updatedAt: minutesAgo(minutes),
+  const codex = (row, minutes) => ({ user: codexUser, html_url: 'u', created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes),
     body: `| Review | Status | Commit |\n| Code Review | ${row} <relative-time datetime="${minutesAgo(minutes)}"></relative-time> | \`abcdef1\` |` });
-  const reaction = (content, minutes) => ({ content, created_at: minutesAgo(minutes), user: { login: 'chatgpt-codex-connector[bot]', type: 'Bot' } });
-  const reviews = (data, reactions = [], ...options) => {
+  const reaction = (content, minutes) => ({ content, created_at: minutesAgo(minutes), user: codexUser });
+  const reviews = (data, { comments = [], reactions = [] } = {}, ...options) => {
     writeFileSync(join(checkout, 'pr.json'), JSON.stringify(data));
+    writeFileSync(join(checkout, 'comments.json'), JSON.stringify(comments));
     writeFileSync(join(checkout, 'reactions.json'), JSON.stringify(reactions));
     return run('reviews', '7', ...options).status;
   };
 
   assert.equal(reviews(pr()), 0, 'Green CI without other traces is done');
+  assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'Red CI ends the wait as FAILED, never DONE');
+  assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'SKIPPED')] })), 0);
   assert.equal(reviews(pr({ contexts: [check('IN_PROGRESS')] })), 3);
   assert.equal(reviews(pr({ pushed: 60, contexts: [check('IN_PROGRESS')] })), 3, 'Running CI never stalls');
-  assert.equal(reviews(pr({ contexts: [] })), 3, 'A fresh push without checks yet waits');
-  assert.equal(reviews(pr({ pushed: 60, contexts: [] })), 0, 'Checks that never start stall');
-  assert.equal(reviews(pr({ comments: [codex('Running', 1)] })), 3, 'A running summary for the head waits');
-  assert.equal(reviews(pr({ comments: [codex('Completed', 0)] })), 0);
-  assert.equal(reviews(pr({ comments: [codex('Running', 60)] })), 0, 'A review running past the usual duration stalls');
-  assert.equal(reviews(pr(), [reaction('eyes', 0)]), 3, 'An announced review waits');
-  assert.equal(reviews(pr(), [reaction('eyes', 0.5), reaction('+1', 0)]), 0, 'A later reaction by the same bot is its result');
-  assert.equal(reviews(pr({ pushed: 1 }), [reaction('eyes', 30)], '--stall', '120'), 0, 'Traces from before the push do not count');
+  assert.equal(reviews(pr({ pushed: 60, contexts: [] })), 3, 'CI that has not started yet never stalls');
+  assert.equal(reviews(pr(), { comments: [codex('Running', 1)] }), 3, 'A running summary for the head waits');
+  assert.equal(reviews(pr(), { comments: [codex('Completed', 0)] }), 0);
+  assert.equal(reviews(pr(), { comments: [codex('Running', 60)] }), 0, 'A review running past the usual duration stalls');
+  assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0)] }), 3, 'An announced review waits');
+  assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5), reaction('+1', 0)] }), 0, 'A later reaction by the same bot is its result');
+  assert.equal(reviews(pr(), { reactions: [reaction('eyes', 30)] }, '--stall', '120'), 0, 'Traces from before the push do not count');
+  assert.equal(reviews(pr({ requests: ['maintainer'] })), 3, 'An outstanding review request waits');
+  assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'] })), 0, 'An unanswered request stalls');
+  const many = Array.from({ length: 100 }, (_, index) => ({ ...codex('Completed', 0), html_url: `old-${index}` }));
+  assert.equal(reviews(pr(), { comments: [...many, codex('Running', 1)] }), 3, 'Comments beyond the first page are read');
   assert.equal(reviews(pr({ total: 2 })), 2, 'Unreadable checks are never done');
+
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr()));
+  writeFileSync(join(checkout, 'comments.json'), '[]');
+  writeFileSync(join(checkout, 'reactions.json'), '[]');
   assert.equal(run('wait', '7').status, 0, 'wait returns once the head is done');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr({ contexts: [check('COMPLETED', 'FAILURE')] })));
+  assert.equal(run('wait', '7').status, 1, 'wait ends as FAILED on red CI');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr({ contexts: [check('IN_PROGRESS')] })));
+  const waitBriefly = (...args) => spawnSync(process.execPath, [fileURLToPath(new URL('../board.mjs', import.meta.url)), 'wait', '7', ...args],
+    { cwd: checkout, encoding: 'utf8', env: { ...process.env, PATH: join(checkout, '..', 'bin') }, timeout: 3000 }).stdout;
+  assert.match(waitBriefly(), /^WAITING\nwaiting: check CI/, 'A background wait shows what it waits for');
+  assert.match(waitBriefly('--merged'), /^WAITING\nwaiting: human merge/);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ ...pr(), state: 'MERGED' }));
+  assert.equal(run('wait', '7', '--merged').status, 0, 'wait --merged returns once the PR is merged');
   writeFileSync(join(checkout, 'fail'), '');
   assert.equal(run('reviews', '7').status, 2);
   assert.equal(run('wait', '7').status, 2, 'wait reports a read failure instead of waiting silently');
+});
+
+test('field accepts Unicode and punctuation in names and options', t => {
+  const { run, writeIssue } = fixture(t);
+  writeIssue(issue());
+  assert.equal(run('field', '1', 'Größe', 'P0: urgent').status, 1, 'Validation lets the name through to the field lookup');
+  assert.equal(run('field', '1', 'Size', '-x').status, 2, 'An option-like value is still rejected');
 });
