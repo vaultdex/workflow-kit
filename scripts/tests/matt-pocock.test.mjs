@@ -36,10 +36,10 @@ test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local so
   const run = (script = 'setup-matt-pocock.mjs') => spawnSync(process.execPath, [join(fixture, 'scripts', script)], { cwd: consumer, encoding: 'utf8' });
   const tracked = git(source, 'ls-tree', '-r', '--name-only', revision, '--', 'skills').trim().split('\n');
   const skillTrees = tracked.filter(path => path.endsWith('/SKILL.md')).map(path => path.slice(0, -'/SKILL.md'.length));
-  assert.equal(skillTrees.length, 37, 'Update this inventory only after reviewing a new upstream pin');
+  assert.equal(skillTrees.length, 38, 'Update this inventory only after reviewing a new upstream pin');
   const expected = new Map(tracked.filter(path => skillTrees.some(skill => path.startsWith(`${skill}/`)))
     .map(path => [path.split('/').slice(2).join('/'), readFileSync(join(source, path), 'utf8').replaceAll('\r\n', '\n')]));
-  assert.equal(expected.size, 101, 'Every skill support file is part of the package');
+  assert.equal(expected.size, 103, 'Every skill support file is part of the package');
   write(join(consumer, '.agents/skills/ask-matt/LOCAL.md'), 'Keep my local work\n');
   write(join(consumer, '.agents/skills/project-custom/SKILL.md'), 'Keep unrelated skill\n');
   write(join(consumer, '.agents/skills/retired-skill/SKILL.md'), 'Retired upstream skill\n');

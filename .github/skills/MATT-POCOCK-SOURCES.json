@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/mattpocock/skills",
-  "revision": "24fe0ef7737efae15c87225755e9f6f5965e4888",
+  "revision": "4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d",
   "license": "MATT-POCOCK-LICENSE.md",
   "skills": {
     "ask-matt": "skills/engineering/ask-matt",
@@ -23,6 +23,7 @@
     "triage": "skills/engineering/triage",
     "wayfinder": "skills/engineering/wayfinder",
     "wizard": "skills/engineering/wizard",
+    "chief-of-staff": "skills/in-progress/chief-of-staff",
     "claude-handoff": "skills/in-progress/claude-handoff",
     "loop-me": "skills/in-progress/loop-me",
     "setup-ts-deep-modules": "skills/in-progress/setup-ts-deep-modules",

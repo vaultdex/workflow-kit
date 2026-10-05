@@ -5,8 +5,8 @@ Source: [mattpocock/skills](https://github.com/mattpocock/skills), pinned at
 including references, templates, scripts and `agents/openai.yaml`, without
 executing upstream installers.
 
-The initial pin includes all 37 skills: 20 engineering, seven productivity, four
-miscellaneous and six in-progress; upstream's Claude plugin has only 27 promoted skills.
+The pin includes all 38 skills: 20 engineering, seven productivity, four
+miscellaneous and seven in-progress; upstream's Claude plugin has only 27 promoted skills.
 
 Follow [generated files](../README.md#generated-files-and-ownership) for updates,
 discovery paths and preservation. Each provider's `MATT-POCOCK-SOURCES.json`
