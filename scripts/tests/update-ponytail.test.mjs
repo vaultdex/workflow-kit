@@ -55,5 +55,8 @@ test('an adaptation that overlaps an upstream change stops with the file name', 
     assert.throws(() => run({ [FILE]: leftover }), /still contains conflict markers/);
   // A bare ======= line is fine when the new upstream has it too (a Markdown heading underline).
   const underlined = lines([3, '=======']);
-  assert.doesNotThrow(() => refreshPatch({ patch, from: { [FILE]: previous }, to: { [FILE]: underlined }, files: [FILE], resolved: { [FILE]: underlined } }));
+  const withUnderline = resolved => refreshPatch({ patch, from: { [FILE]: previous }, to: { [FILE]: underlined }, files: [FILE], resolved: { [FILE]: resolved } });
+  assert.doesNotThrow(() => withUnderline(underlined));
+  // ...but an additional orphaned separator next to it is still a leftover.
+  assert.throws(() => withUnderline(`${underlined}=======\n`), /still contains conflict markers/);
 });

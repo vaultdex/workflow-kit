@@ -53,9 +53,11 @@ jobs:
             echo "SKIP=true" >> "$GITHUB_ENV"
             exit 0
           fi
-          other=$(git log --author='renovate\[bot\]' --format= --name-only origin/main..HEAD | grep -v '^$' | grep -v -x -e '\.gitmodules' -e '\.vendor/[^/]*' || true)
-          if [ -n "$other" ]; then
-            echo "::error::Renovate commits change more than submodule pins; not running with write access: $other"
+          # Whoever wrote the commits: nothing the job runs or dispatches may differ from main. That is every
+          # workflow, script and the Renovate config (the generated adaptation patch is data).
+          forbidden=$(git diff --name-only origin/main...HEAD | grep -E '^(\.github/workflows/|renovate\.json|\.node-version|scripts/)' | grep -v -x 'scripts/ponytail/adaptations.patch' || true)
+          if [ -n "$forbidden" ]; then
+            echo "::error::The branch changes workflows, scripts or Renovate config; not running with write access: $forbidden"
             exit 1
           fi
       # Whatever the branch changed under scripts/ never runs here: main's scripts replace it, and only the
@@ -101,8 +103,10 @@ jobs:
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$BRANCH"
-      # Also covers a re-run after a failed dispatch: a run on the head that is still going or has a verdict
-      # (success or failure), whatever its event, is enough; cancelled or skipped runs are not.
+      # A run on the head that is still going or has a verdict (success or failure), whatever its event,
+      # is enough; cancelled or skipped runs are not. Dispatch retries briefly; if it still fails, the job
+      # fails visibly and someone starts repository.yml for the branch by hand (a re-run would only repeat
+      # the original event SHA).
       - name: Start the repository CI
         if: env.SKIP != 'true'
         env:
@@ -113,7 +117,11 @@ jobs:
           runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --commit "$head" --json status,conclusion \
             --jq '[.[] | select(.status != "completed" or .conclusion == "success" or .conclusion == "failure")] | length')
           if [ "$runs" = 0 ]; then
-            gh workflow run repository.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+            for attempt in 1 2 3; do
+              gh workflow run repository.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" && break
+              [ "$attempt" = 3 ] && exit 1
+              sleep 10
+            done
           else
             echo "The repository CI already runs for $head."
           fi

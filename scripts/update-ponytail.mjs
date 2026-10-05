@@ -58,8 +58,10 @@ export function refreshPatch({ patch, from, to, files, resolved = {} }) {
     const conflicts = {};
     for (const file of files) {
       if (file in resolved) {
-        // Any marker form counts; a bare "=======" is only a leftover when the new upstream has no such line itself.
-        const leftover = /^(?:<{7} adapted|>{7} new upstream)$/m.test(resolved[file]) || (/^={7}$/m.test(resolved[file]) && !/^={7}$/m.test(to[file]));
+        // Any marker form counts; bare "=======" lines count by occurrence, since the new upstream may have its own
+        // (a Markdown heading underline) and an extra one is an orphaned conflict separator.
+        const separators = text => (text.match(/^={7}$/gm) ?? []).length;
+        const leftover = /^(?:<{7} adapted|>{7} new upstream)$/m.test(resolved[file]) || separators(resolved[file]) > separators(to[file]);
         assert.ok(!leftover, `${file} still contains conflict markers`);
         put(dirs.b, { [file]: resolved[file] });
         continue;
