@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { patchApplies, patchedFiles, refreshPatch } from '../update-ponytail.mjs';
+import { clearResolved, loadResolved, patchApplies, patchedFiles, refreshPatch, saveConflicts } from '../update-ponytail.mjs';
 
 const lines = (...overrides) => Array.from({ length: 12 }, (_, i) => overrides.find(([n]) => n === i + 1)?.[1] ?? `line ${i + 1}`).join('\n') + '\n';
 const FILE = 'hooks/ponytail-example.js';
@@ -60,4 +60,83 @@ test('an adaptation that overlaps an upstream change stops with the file name', 
   // ...but an extra separator elsewhere is a leftover, also when the legitimate one was deleted (same total count).
   for (const orphaned of [`${underlined}=======\n`, lines([3, 'Heading'], [7, '=======']), lines([7, '======='])])
     assert.throws(() => withUnderline(orphaned), /still contains conflict markers/);
+});
+
+test('conflict state is read, written and deleted only inside the checkout, never through a link', t => {
+  const base = mkdtempSync(join(tmpdir(), 'ponytail state test '));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, 'kit'), outside = join(base, 'outside');
+  mkdirSync(root);
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'keep.txt'), 'keep');
+  // A junction works without privileges on Windows and is an ordinary symlink elsewhere.
+  symlinkSync(outside, join(root, '.workflow-kit'), 'junction');
+  for (const act of [() => loadResolved(root, [FILE], 'new'), () => saveConflicts(root, { [FILE]: 'x' }, 'new'), () => clearResolved(root)])
+    assert.throws(act); // the wording is free; the filesystem checks below carry the behavior
+  assert.deepEqual(readdirSync(outside), ['keep.txt'], 'Nothing outside the checkout is created, changed or deleted');
+  assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'keep');
+  rmSync(join(root, '.workflow-kit'));
+
+  // The ordinary round trip: kept for the same target revision, discarded for another one.
+  saveConflicts(root, { [FILE]: 'marked up' }, 'new');
+  assert.deepEqual(loadResolved(root, [FILE], 'new'), { [FILE]: 'marked up' });
+  assert.deepEqual(loadResolved(root, [FILE], 'other'), {});
+  assert.equal(existsSync(join(root, '.workflow-kit/ponytail-resolve')), false);
+});
+
+test('conflict files are never written through a link in the state directory either', t => {
+  const base = mkdtempSync(join(tmpdir(), 'ponytail leaf test '));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, 'kit'), outside = join(base, 'outside');
+  const state = join(root, '.workflow-kit/ponytail-resolve');
+  mkdirSync(join(state, 'hooks'), { recursive: true });
+  mkdirSync(outside);
+  const victim = join(outside, 'victim.txt');
+  writeFileSync(victim, 'keep');
+  // File links need privileges on Windows (the CI runs them); a junction as the target needs none and is no regular file either.
+  const link = (target, leaf, type) => {
+    try { symlinkSync(target, leaf, type); return true; } catch (error) { if (error.code === 'EPERM') return false; throw error; }
+  };
+  let ran = 0;
+  for (const [leaf, target, type] of [[join(state, FILE), victim, 'file'], [join(state, 'TARGET'), victim, 'file'],
+    [join(state, FILE), join(outside, 'not-yet.txt'), 'file'], [join(state, 'TARGET'), outside, 'junction']]) {
+    rmSync(leaf, { force: true, recursive: true });
+    if (!link(target, leaf, type)) continue;
+    ran++;
+    assert.throws(() => saveConflicts(root, { [FILE]: 'marked up' }, 'new'));
+    assert.deepEqual(readdirSync(outside).sort(), ['victim.txt'], 'No file is created outside the checkout');
+    assert.equal(readFileSync(victim, 'utf8'), 'keep', 'The linked file keeps its content');
+    rmSync(leaf, { recursive: true });
+  }
+  assert.ok(ran >= 1, 'At least the junction case ran');
+});
+
+test('a linked or dangling TARGET is refused before any hand-edited resolution is discarded', t => {
+  const base = mkdtempSync(join(tmpdir(), 'ponytail target test '));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, 'kit'), outside = join(base, 'outside');
+  const state = join(root, '.workflow-kit/ponytail-resolve');
+  mkdirSync(join(state, 'hooks'), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'secret.txt'), 'outside');
+  const resolution = join(state, FILE);
+  writeFileSync(resolution, 'hand edited');
+  const link = (target, leaf, type) => {
+    try { symlinkSync(target, leaf, type); return true; } catch (error) { if (error.code === 'EPERM') return false; throw error; }
+  };
+  let ran = 0;
+  for (const [target, type] of [[join(outside, 'gone.txt'), 'file'], [join(outside, 'secret.txt'), 'file'], [outside, 'junction']]) {
+    const leaf = join(state, 'TARGET');
+    rmSync(leaf, { force: true, recursive: true });
+    if (!link(target, leaf, type)) continue;
+    ran++;
+    assert.throws(() => loadResolved(root, [FILE], 'new'));
+    assert.equal(readFileSync(resolution, 'utf8'), 'hand edited', 'The resolution is not discarded by a refused TARGET');
+    assert.deepEqual(readdirSync(outside).sort(), ['secret.txt'], 'Nothing outside the checkout is touched');
+    rmSync(leaf, { recursive: true });
+  }
+  assert.ok(ran >= 1, 'At least the junction case ran');
+  // Without any TARGET the directory still counts as stale and is discarded.
+  assert.deepEqual(loadResolved(root, [FILE], 'new'), {});
+  assert.equal(existsSync(state), false);
 });

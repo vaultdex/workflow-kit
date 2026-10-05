@@ -4,10 +4,11 @@
 // like `quilt refresh`; a real conflict stops with the file name instead of guessing.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkDirectory } from './provider-links.mjs';
 
 const kit = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = join(kit, '.vendor/ponytail');
@@ -84,6 +85,74 @@ export function refreshPatch({ patch, from, to, files, resolved = {} }) {
   }
 }
 
+// Conflicting files are written to this directory (ignored by Git) with markers; edit them and run the command again.
+// Every access first checks the whole path chain inside the checkout, so a link (symlink or junction) in the ignored
+// state directory can neither redirect a recursive delete nor an overwrite to somewhere else.
+const stateDirectory = root => join(root, '.workflow-kit/ponytail-resolve');
+/**
+ * Contents of a regular file inside the checkout, or undefined when it is absent. A link (also a dangling one) or a
+ * non-file is refused. The file is opened without following links and its type is checked on the opened descriptor,
+ * so a swap for a link between the check and the read cannot redirect the read.
+ */
+const readRegular = (root, path) => {
+  checkDirectory(root, dirname(path));
+  let entry;
+  try { entry = lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  assert.ok(entry.isFile(), `Refusing linked or non-file path: ${relative(root, path)}`);
+  let fd;
+  try { fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  try {
+    assert.ok(fstatSync(fd).isFile(), `Refusing linked or non-file path: ${relative(root, path)}`);
+    return readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+};
+
+/** Hand-resolved files of an earlier conflict. Files that do not carry this target revision are discarded. */
+export function loadResolved(root, files, to) {
+  const dir = stateDirectory(root);
+  checkDirectory(root, dir);
+  if (!existsSync(dir)) return {};
+  // A link as TARGET is refused before anything is deleted; only a missing or foreign TARGET discards the directory.
+  if (readRegular(root, join(dir, 'TARGET'))?.trim() !== to) {
+    rmSync(dir, { recursive: true, force: true });
+    return {};
+  }
+  const resolved = {};
+  for (const file of files) {
+    const text = readRegular(root, join(dir, file));
+    if (text !== undefined) resolved[file] = lf(text);
+  }
+  return resolved;
+}
+
+/** A write target must be a new path or a regular file: writing through a link (also a dangling one) would leave the checkout. */
+const writableFile = (root, path) => {
+  checkDirectory(root, dirname(path));
+  let entry;
+  try { entry = lstatSync(path); } catch { /* new path */ }
+  assert.ok(!entry || entry.isFile(), `Refusing linked or non-file path: ${relative(root, path)}`);
+  return path;
+};
+
+export function saveConflicts(root, conflicts, to) {
+  const dir = stateDirectory(root);
+  for (const [file, text] of Object.entries(conflicts)) {
+    checkDirectory(root, dirname(join(dir, file)));
+    mkdirSync(dirname(join(dir, file)), { recursive: true });
+    writeFileSync(writableFile(root, join(dir, file)), text);
+  }
+  writeFileSync(writableFile(root, join(dir, 'TARGET')), `${to}\n`);
+  return dir;
+}
+
+export function clearResolved(root) {
+  const dir = stateDirectory(root);
+  checkDirectory(root, dir);
+  rmSync(dir, { recursive: true, force: true });
+}
+
 export function patchedFiles(patch) {
   return [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]);
 }
@@ -103,25 +172,15 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     const lastPatchCommit = git(kit, 'log', '-1', '--format=%H', '--', 'scripts/ponytail/adaptations.patch').trim();
     const from = process.argv[2] ?? (lastPatchCommit && git(kit, 'ls-tree', lastPatchCommit, '.vendor/ponytail').split(/\s+/)[2]);
     assert.ok(from, 'No previous upstream revision: pass it as the first argument');
-    // Conflicting files are written here with markers; edit them and run this command again.
-    // Files that do not carry this target revision (another bump, or copied in without TARGET) are discarded.
-    const resolveDir = join(kit, '.workflow-kit/ponytail-resolve');
-    const targetFile = join(resolveDir, 'TARGET');
-    if (existsSync(resolveDir) && (!existsSync(targetFile) || readFileSync(targetFile, 'utf8').trim() !== to)) rmSync(resolveDir, { recursive: true, force: true });
-    const resolved = Object.fromEntries(files.filter(file => existsSync(join(resolveDir, file)))
-      .map(file => [file, lf(readFileSync(join(resolveDir, file), 'utf8'))]));
+    const resolved = loadResolved(kit, files, to);
     try {
       writeFileSync(patchPath, refreshPatch({ patch, from: upstream(from, files), to: target, files, resolved }));
     } catch (error) {
       if (!error.conflicts) throw error;
-      for (const [file, text] of Object.entries(error.conflicts)) {
-        mkdirSync(dirname(join(resolveDir, file)), { recursive: true });
-        writeFileSync(join(resolveDir, file), text);
-      }
-      writeFileSync(targetFile, `${to}\n`);
-      throw new Error(`${error.message}. Resolve the conflict markers in ${resolveDir}, then run node scripts/update-ponytail.mjs again.`);
+      const dir = saveConflicts(kit, error.conflicts, to);
+      throw new Error(`${error.message}. Resolve the conflict markers in ${dir}, then run node scripts/update-ponytail.mjs again.`);
     }
-    rmSync(resolveDir, { recursive: true, force: true });
+    clearResolved(kit);
     console.log(`Ponytail adaptations ported from ${from.slice(0, 7)} to ${to.slice(0, 7)}.`);
   }
   execFileSync(process.execPath, [join(kit, 'scripts/setup-ponytail.mjs')], { stdio: 'inherit' });

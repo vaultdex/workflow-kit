@@ -40,7 +40,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-          submodules: recursive
           persist-credentials: false
       # Policy: a branch with commits by someone else is theirs; leave it alone. Commit author names are
       # self-reported, so this is no security boundary: the job runs only the scripts of main (next step).
@@ -75,6 +74,15 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      # Submodules are fetched only once their sources proved to be main's (main's checker, see above): a commit that
+      # points .gitmodules at another repository would otherwise ship that repository's files as generated hooks.
+      - name: Fetch the submodules
+        if: env.SKIP != 'true'
+        run: |
+          set -euo pipefail
+          git show origin/main:.gitmodules > "$RUNNER_TEMP/main.gitmodules"
+          node scripts/check-submodule-sources.mjs "$RUNNER_TEMP/main.gitmodules"
+          git submodule update --init --recursive
       - name: Regenerate
         if: env.SKIP != 'true'
         run: |
