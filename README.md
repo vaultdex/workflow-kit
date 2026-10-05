@@ -90,7 +90,8 @@ trust; new definitions need personal review and trust. See
   It never closes the issue: that happens when the PR merges into the default branch.
 - `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
   repository ready for review, but only for the commit you pushed. It rereads the PR
-  (default 6 reads, 5 s apart) until GitHub reports `SHA` as the head, because the
+  (default 6 reads, 5 s apart; both waits, before the write and for the read-back, together
+  stay within 30 minutes, else exit 2) until GitHub reports `SHA` as the head, because the
   metadata can still show the previous push right after it and Draft-payload events
   then skip the checks. It refuses closed PRs, forks and a head that stays different (exit 1),
   writes once and counts only a read-back showing that head ready; API errors exit 2.

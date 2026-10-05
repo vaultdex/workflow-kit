@@ -479,10 +479,15 @@ const stallOption = () => numberOption('--stall', 20);
 const readyQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
   id number state isDraft isCrossRepository headRefOid headRepository{nameWithOwner}}}}`;
 const sleep = seconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
-/** Polling must end: a few reads, finite pauses, at most half an hour of waiting in total (also keeps seconds * 1000 finite). */
+/**
+ * Polling must end: a few reads, finite pauses, at most half an hour of waiting in total (also keeps seconds * 1000
+ * finite). `ready` waits in two loops (stale head before the write, read-back after it), each sleeping up to
+ * (attempts - 1) times, so both count.
+ */
 function readyOptionsBounded() {
   const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
-  return Number.isInteger(attempts) && attempts >= 1 && attempts <= 100 && Number.isFinite(interval) && interval >= 0 && attempts * interval <= 1800;
+  return Number.isInteger(attempts) && attempts >= 1 && attempts <= 100 && Number.isFinite(interval) && interval >= 0
+    && 2 * attempts * interval <= 1800;
 }
 
 /** Mark a Draft PR ready only for the explicitly expected pushed commit; stale metadata is waited out, never trusted. */
