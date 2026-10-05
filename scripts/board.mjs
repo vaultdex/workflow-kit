@@ -455,7 +455,60 @@ function handoff() {
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
 }
 
-const stallOption = () => process.argv.includes('--stall') ? Number(process.argv[process.argv.indexOf('--stall') + 1]) : 20;
+const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
+const stallOption = () => numberOption('--stall', 20);
+
+/** Metadata that can still describe the previous push right after it: identity, branch, state, draft, head. */
+const readyQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+  id number state isDraft isCrossRepository headRefOid headRepository{nameWithOwner}}}}`;
+const sleep = seconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
+/** Polling must end: a few reads, finite pauses, at most half an hour of waiting in total (also keeps seconds * 1000 finite). */
+function readyOptionsBounded() {
+  const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
+  return Number.isInteger(attempts) && attempts >= 1 && attempts <= 100 && Number.isFinite(interval) && interval >= 0 && attempts * interval <= 1800;
+}
+
+/** Mark a Draft PR ready only for the explicitly expected pushed commit; stale metadata is waited out, never trusted. */
+function ready() {
+  const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
+  const read = () => {
+    const pr = graphql(readyQuery, { owner, name, number }).repository.pullRequest;
+    assert.ok(pr?.id && pr.number === number, 'The PR is unreadable');
+    assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
+    return pr;
+  };
+  const refuse = (...reasons) => {
+    console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    process.exitCode = 1;
+  };
+  let pr;
+  for (let attempt = 1; ; attempt++) {
+    pr = read();
+    if (pr.state !== 'OPEN') return refuse(`PR #${number} is ${pr.state.toLowerCase()}`);
+    // A fork's or another repository's branch is not ours to mark ready.
+    // GitHub reports the canonical spelling; the configured OWNER/REPO may differ in case.
+    if (pr.isCrossRepository || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) return refuse(`PR #${number} does not come from a branch of ${project.repository}`);
+    if (!pr.isDraft) {
+      if (pr.headRefOid !== value.toLowerCase()) return refuse(`PR #${number} is already ready with head ${pr.headRefOid.slice(0, 7)}, not ${value.slice(0, 7)}`);
+      return console.log(`READY #${number} head ${pr.headRefOid} (already ready)`);
+    }
+    if (pr.headRefOid === value.toLowerCase()) break;
+    if (attempt >= attempts) return refuse(`PR #${number} still reports head ${pr.headRefOid.slice(0, 7)} after ${attempts} reads; expected ${value.slice(0, 7)}`);
+    sleep(interval);
+  }
+  // One more read narrows the window in which a new push could slip between check and mutation.
+  const current = read();
+  if (current.state !== 'OPEN' || !current.isDraft || current.headRefOid !== pr.headRefOid) return refuse('the PR changed after the check; read it again');
+  graphql('mutation($pr:ID!){markPullRequestReadyForReview(input:{pullRequestId:$pr}){pullRequest{number}}}', { pr: pr.id });
+  // A write only counts once the read-back shows the expected head ready.
+  for (let attempt = 1; ; attempt++) {
+    const done = read();
+    if (done.state === 'OPEN' && !done.isDraft && done.headRefOid === pr.headRefOid) break;
+    assert.ok(attempt < attempts, `Ready read-back differs: draft ${done.isDraft}, head ${done.headRefOid.slice(0, 7)}`);
+    sleep(interval);
+  }
+  console.log(`READY #${number} head ${pr.headRefOid}`);
+}
 // Waiting is over either way; FAILED keeps a red head from reading as a finished review.
 const outcome = ({ failed }) => failed ? ['FAILED', 1] : ['DONE', 0];
 
@@ -509,10 +562,11 @@ function block() {
 }
 
 const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait, handoff };
+  reviews: reviewsOnce, wait, handoff, ready };
 const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]';
+  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]'
+  + ' | ready PR SHA [--attempts N] [--interval SECONDS]';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
@@ -520,6 +574,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
   || (command === 'handoff' && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
+  || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
@@ -528,7 +583,7 @@ try {
   await commands[command]();
 } catch (error) {
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'ready'].includes(command)) throw error;
   console.log(`${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${String(error.stderr || error.message).trim()}`);
   process.exitCode = 2;
 }

@@ -83,6 +83,13 @@ trust; new definitions need personal review and trust. See
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
   and comment backlink on every delivered issue before writing status. Post and
   read back backlinks immediately after PR creation; see [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
+- `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
+  repository ready for review, but only for the commit you pushed. It rereads the PR
+  (default 6 reads, 5 s apart) until GitHub reports `SHA` as the head, because the
+  metadata can still show the previous push right after it and Draft-payload events
+  then skip the checks. It refuses closed PRs, forks and a head that stays different (exit 1),
+  writes once and counts only a read-back showing that head ready; API errors exit 2.
+  An already ready PR with that head succeeds without a write.
 - `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
   It also prints the merge state and `blocker:` lines (standing change requests,
   conflicts), because mergeable is not merge-ready.
