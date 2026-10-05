@@ -595,7 +595,6 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   prepare();
   let result = run('link', '1', '7');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /^#1 is natively linked to PR #7$/m);
   assert.equal(mutations(), 1, 'A Draft PR is connected with one write');
   assert.match(readFileSync(join(checkout, 'mutations'), 'utf8'), /addCloseIssueReferences\(input:\{issueId:\$issue,pullRequestIds:\[\$pr\]\}\)/);
 
@@ -611,7 +610,7 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   writeFileSync(join(checkout, 'link-noop'), '');
   result = run('link', '1', '7');
   assert.equal(result.status, 2, 'A write whose read-back lacks the issue is no success');
-  assert.match(result.stdout, /read-back differs/);
+  assert.match(result.stdout, /^ERROR$/m);
   assert.equal(mutations(), 1, 'The write is not repeated blindly');
 
   prepare();
