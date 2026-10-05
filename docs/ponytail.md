@@ -27,6 +27,11 @@ Snapshots are immutable per version; changed same-version snapshots are refused.
 New versions change hook commands and need trust again. Execution policies stay
 unchanged; no PowerShell script file runs.
 
+Codex uses its session shell for hooks. Its Windows commands support the default
+PowerShell session and pipe JSON stdin through the absolute system `cmd.exe` to
+the existing launcher, preserving its exit code. Select PowerShell for Windows
+Codex sessions; these commands are not standalone CMD snippets.
+
 | Host | Events |
 | --- | --- |
 | Codex, Claude Code | SessionStart, UserPromptSubmit, SubagentStart |

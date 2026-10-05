@@ -81,8 +81,8 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
     const start = event.toLowerCase() === 'sessionstart';
     for (const shell of shells) {
       const powershell = shell.executable.endsWith('powershell.exe');
-      if (powershell && !handler.powershell && manifest !== '.cursor/hooks.json') continue;
-      const native = powershell ? handler.powershell ?? handler.command : handler.command ?? handler.bash;
+      if (powershell && !handler.powershell && !['.codex/hooks.json', '.cursor/hooks.json'].includes(manifest)) continue;
+      const native = powershell ? handler.commandWindows ?? handler.powershell ?? handler.command : handler.command ?? handler.bash;
       const command = manifest === '.cursor/hooks.json' ? cursor(shell, native) : native;
       const result = execute(shell, command);
       assert.equal(result.status, 0, `${manifest} ${event}: ${result.stderr}`);
@@ -93,12 +93,6 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
       assert.equal(absent.status, 0, `${manifest} ${event} without snapshot: ${absent.stderr}`);
       assert.equal(Boolean(absent.stdout.trim()), start, `${manifest} ${event} without snapshot`);
     }
-    if (windows && handler.commandWindows) {
-      const result = spawnSync(path.join(process.env.SystemRoot, 'System32/cmd.exe'), ['/d', '/s', '/c', handler.commandWindows],
-        { cwd: path.join(checkout, 'frontend'), env: hostile, windowsVerbatimArguments: true, input, encoding: 'utf8', timeout: hookTimeout });
-      assert.equal(result.status, 0, `${manifest} ${event} (cmd): ${result.stderr}`);
-      if (result.stdout) assert.doesNotThrow(() => JSON.parse(result.stdout), `${manifest} ${event} (cmd): host JSON`);
-    }
     assert.equal(existsSync(marker), false, `${manifest} ${event}: a checkout program ran`);
   }
 
@@ -106,6 +100,7 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   const activate = path.join(env.HOME, '.ponytail/vaultdex', version, '.agents/hooks/ponytail-activate.js');
   const [{ handler: cursorStart }] = handlers('.cursor/hooks.json');
   writeFileSync(activate, 'process.exit(7);');
+  if (windows) assert.equal(execute(shells[0], handlers('.codex/hooks.json')[0].handler.commandWindows).status, 7, 'Codex preserves launcher failure');
   for (const shell of shells) assert.equal(execute(shell, cursor(shell, cursorStart.command)).status, 7, shell.executable);
 });
 
