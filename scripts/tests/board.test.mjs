@@ -147,7 +147,8 @@ const handoffPr = changes => ({
   mergeStateStatus: 'CLEAN', reviewDecision: null,
   latestOpinionatedReviews: { totalCount: 0, nodes: [] },
   commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: new Date().toISOString(),
-    checkSuites: { totalCount: 0, nodes: [] }, statusCheckRollup: { contexts: { totalCount: 1, nodes: [
+    checkSuites: { totalCount: 1, nodes: [{ createdAt: new Date().toISOString(), status: 'COMPLETED', conclusion: 'SUCCESS', app: { slug: 'github-actions' }, checkRuns: { totalCount: 1 } }] },
+    statusCheckRollup: { contexts: { totalCount: 1, nodes: [
       { __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' },
     ] } } } }] },
   reviewRequests: { totalCount: 0, nodes: [] }, requestEvents: { totalCount: 0, nodes: [] },
@@ -789,6 +790,13 @@ test('handoff needs the driver handoff comment created after the push of the cur
     assert.match(result.stdout, /^FAILED$/m, label);
     assert.equal(existsSync(mutations), false, `${label}: the status stays untouched`);
   }
+  // Reporting CI only through a status has no check suite: the push time of the head is unknown, so no comment can match it.
+  const base = handoffPr();
+  write([handoffComment()]);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ commits: { nodes: [{ commit: { ...base.commits.nodes[0].commit, checkSuites: { totalCount: 0, nodes: [] } } }] } })));
+  assert.equal(run('handoff', '1', '7').status, 1, 'An unknown push time never counts a comment as current');
+  assert.equal(existsSync(mutations), false);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(base));
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   write([handoffComment({ user: { login: 'Worker', type: 'User' } })]);
   const result = run('handoff', '1', '7');

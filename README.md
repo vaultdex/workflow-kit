@@ -123,8 +123,10 @@ trust; new definitions need personal review and trust. See
 
 `handoff` needs one comment on the PR from the driver (the authenticated GitHub user) that
 has the heading `## Übergabe` on its own line and was created after the push of the current
-head. A new head, for example after a review fix, asks for a new comment; an edited older
-comment does not count. Put the retro result and the list of all findings with their
+head. The push is dated by the creation of the head's first check suite, a few seconds after
+the push, so post the comment after the checks have started; a head without any check suite
+(CI reported only as a status) cannot be dated, and `handoff` refuses it. A new head, for
+example after a review fix, asks for a new comment; an edited older comment does not count. Put the retro result and the list of all findings with their
 disposition (fixed, linked follow-up issue, or none) under the heading, and, if a reviewer
 was unavailable or stalled, the reviewer, cause and evidence. The command checks the heading,
 author and time, not the content, which is for the human reviewer:

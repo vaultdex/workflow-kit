@@ -371,7 +371,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, lines, pr, pushed, comments };
+  return { done: failed || !pending.length, failed, lines, pr, pushed, pushedKnown: suites.length > 0, comments };
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
@@ -463,7 +463,10 @@ function handoffPr(issueId, viewer, expectedHead) {
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push('resolve review blockers and threads before handoff');
   }
-  if (!hasHandoffComment(result.comments, viewer, result.pushed)) {
+  // Without a check suite the push time is only the commit date, which says nothing about when the head was pushed.
+  if (!result.pushedKnown) {
+    reasons.push(`the push time of the head is unknown (no check suite), so a handoff comment cannot be matched to it`);
+  } else if (!hasHandoffComment(result.comments, viewer, result.pushed)) {
     reasons.push(`post the handoff comment on PR #${value} after the current head: a "## Übergabe" heading with the retro result and the findings list (README: Handoff comment)`);
   }
   if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
