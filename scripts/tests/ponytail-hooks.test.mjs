@@ -130,10 +130,10 @@ test('adapted hooks preserve explicit host and checkout state and drain stdout o
   assert.ok(activate(path.join(checkout, 'frontend'), 'claude', {
     PONYTAIL_DEFAULT_MODE: 'ultra', CLAUDE_PROJECT_DIR: path.join(temp, 'other-inherited-project'),
   }, 'continue') === 'lite:' + rules, 'Resume shares canonical checkout state across subdirectories');
-  assert.deepEqual(JSON.parse(activate(checkout, 'codex', {}, 'continue')), {}, 'Other host has no mode');
+  assert.equal(activate(checkout, 'codex', {}, 'continue'), '', 'Other host has no mode');
   const otherCheckout = path.join(temp, 'other-checkout');
   mkdirSync(path.join(otherCheckout, '.git'), { recursive: true });
-  assert.equal(activate(otherCheckout, 'claude', {}, 'continue'), 'OK', 'Other checkout has no mode');
+  assert.equal(activate(otherCheckout, 'claude', {}, 'continue'), '', 'Other checkout has no mode');
   activate(checkout, 'codex');
   for (const hook of ['mode-tracker', 'subagent']) for (const eof of [true, false]) {
     const output = await new Promise((resolve, reject) => {

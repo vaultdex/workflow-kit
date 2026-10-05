@@ -1,5 +1,5 @@
 diff --git a/hooks/ponytail-activate.js b/hooks/ponytail-activate.js
-index 6419200..bce5120 100644
+index 68894bd..af18d25 100644
 --- a/hooks/ponytail-activate.js
 +++ b/hooks/ponytail-activate.js
 @@ -3,13 +3,10 @@
@@ -18,10 +18,10 @@ index 6419200..bce5120 100644
  const { getPonytailInstructions } = require('./ponytail-instructions');
  const {
    clearMode,
-@@ -20,21 +17,22 @@ const {
+@@ -19,19 +16,20 @@ const {
+   isCodex,
    isCopilot,
    isCursor,
-   isZcode,
 +  readMode,
    setMode,
    writeHookOutput,
@@ -38,14 +38,12 @@ index 6419200..bce5120 100644
  // "off" mode — skip activation entirely, don't write flag or emit rules
  if (mode === 'off') {
    clearMode();
-   const hookOutput = (isCodex || isCopilot || isCursor || isZcode || isCodeBuddy) ? '' : 'OK';
-   writeHookOutput('SessionStart', 'off', hookOutput);
 -  process.exit(0);
 +  return;
  }
  
  // Cursor with the always-on rule in the workspace: the rule already carries the
-@@ -48,7 +46,7 @@ if (isCursor) {
+@@ -45,7 +43,7 @@ if (isCursor) {
      } catch (e) {
        // Silent fail — stdout closed/EPIPE at hook exit must not surface as a hook failure
      }
@@ -54,7 +52,7 @@ index 6419200..bce5120 100644
    }
  }
  
-@@ -60,57 +58,9 @@ try {
+@@ -57,103 +55,9 @@ try {
  }
  
  // 2. Emit the ponytail ruleset, filtered to the active intensity level.
@@ -62,29 +60,75 @@ index 6419200..bce5120 100644
 +const output = getPonytailInstructions(mode);
  
 -// 3. Detect missing statusline config — nudge Claude to help set it up
--// Skipped on ZCode: its statusline configuration story is unverified, and a
--// wrong pointer at Claude's settings.json would just mislead the agent.
--if (!isCodex && !isCopilot && !isCursor && !isZcode && !isCodeBuddy) try {
--  let hasStatusline = false;
+-if (!isCodex && !isCopilot && !isCursor && !isCodeBuddy) try {
+-  const isWindows = process.platform === 'win32';
+-  let statusCommand = null;
 -  if (fs.existsSync(settingsPath)) {
 -    // Strip UTF-8 BOM some editors prepend on Windows (breaks JSON.parse)
 -    const raw = fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '');
 -    const settings = JSON.parse(raw);
 -    if (settings.statusLine) {
--      hasStatusline = true;
+-      statusCommand = String(settings.statusLine.command || '');
 -    }
 -  }
 -
+-  // A statusLine already set up before #1032 can still run a script from a
+-  // plugin version that has since been deleted. Only absolute paths are checked,
+-  // so ~ or $HOME forms are never mistaken for missing files.
+-  const ref = statusCommand &&
+-    statusCommand.match(/"([^"]*ponytail-statusline\.(?:sh|ps1))"|(\S*ponytail-statusline\.(?:sh|ps1))/);
+-  const refPath = ref ? (ref[1] || ref[2]) : null;
+-  // isShellSafe keeps quotes, newlines and shell metacharacters from
+-  // settings.json out of the model context.
+-  // On Windows only drive-letter or UNC paths count: a Git Bash path such as
+-  // /c/Users/... is absolute to Node but does not resolve, so it would be
+-  // flagged as broken while it works.
+-  const checkable = refPath && isShellSafe(refPath) && path.isAbsolute(refPath) &&
+-    (!isWindows || /^([A-Za-z]:[\\/]|\\\\)/.test(refPath));
+-  const stalePath = checkable && !fs.existsSync(refPath) ? refPath : null;
+-
+-  // The plugin root is a versioned cache dir (.../ponytail/4.12.0/) that Claude
+-  // Code deletes on update, so a statusLine pointing into it goes blank after the
+-  // next update (#1032). Point it at a copy in the config dir instead. A statusLine
+-  // that already runs ponytail keeps its script type, so its copy stays fresh.
+-  const usePs1 = refPath ? refPath.endsWith('.ps1') : isWindows;
+-  const scriptName = usePs1 ? 'ponytail-statusline.ps1' : 'ponytail-statusline.sh';
+-  const scriptPath = path.join(claudeDir, scriptName);
+-
 -  // Nudge at most once — the flag file marks that the user has already seen
 -  // (and implicitly declined) the statusline setup offer. Repeating it every
--  // session start turns a helpful hint into a nag.
+-  // session start turns a helpful hint into a nag. A broken path is nudged once
+-  // per path: the flag records it.
 -  const nudgeFlagPath = path.join(claudeDir, '.ponytail-statusline-nudged');
--  if (!hasStatusline && !fs.existsSync(nudgeFlagPath)) {
--    try { fs.writeFileSync(nudgeFlagPath, ''); } catch (e) { /* best-effort */ }
--    const isWindows = process.platform === 'win32';
--    const scriptName = isWindows ? 'ponytail-statusline.ps1' : 'ponytail-statusline.sh';
--    const scriptPath = path.join(__dirname, scriptName);
--    if (isShellSafe(scriptPath)) {
+-  let nudged = null;
+-  try { nudged = fs.readFileSync(nudgeFlagPath, 'utf8'); } catch (e) { /* not nudged yet */ }
+-  const nudge = stalePath ? nudged !== stalePath : statusCommand === null && nudged === null;
+-
+-  // Refresh the copy every session so script fixes ship with plugin updates.
+-  // Copy to a new temp file, then rename: the rename replaces a symlink at
+-  // scriptPath instead of writing through it, and a concurrent session never
+-  // runs a half-written script.
+-  if (nudge || fs.existsSync(scriptPath)) {
+-    const tmpPath = scriptPath + '.' + process.pid + '.tmp';
+-    try {
+-      fs.copyFileSync(path.join(__dirname, scriptName), tmpPath, fs.constants.COPYFILE_EXCL);
+-      fs.chmodSync(tmpPath, 0o644);
+-      fs.renameSync(tmpPath, scriptPath);
+-    } finally {
+-      try { fs.unlinkSync(tmpPath); } catch (e) { /* renamed */ }
+-    }
+-  }
+-
+-  if (nudge) {
+-    try { fs.writeFileSync(nudgeFlagPath, stalePath || ''); } catch (e) { /* best-effort */ }
+-    if (stalePath) {
+-      output += "\n\n" +
+-        "STATUSLINE BROKEN: The statusLine in " + settingsPath + " runs " + stalePath +
+-        ", which no longer exists (the ponytail plugin was updated and its old version removed), " +
+-        "so the ponytail badge is blank. Replace that path with " + scriptPath + ", which survives updates, " +
+-        "quoting it for your shell. Keep the rest of the command. " +
+-        "Proactively offer to fix this for the user on first interaction.";
+-    } else if (isShellSafe(scriptPath)) {
 -      const command = isWindows
 -        ? `powershell -ExecutionPolicy Bypass -File "${scriptPath}"`
 -        : `bash "${scriptPath}"`;
@@ -97,13 +141,13 @@ index 6419200..bce5120 100644
 -        statusLineSnippet + " " +
 -        "Proactively offer to set this up for the user on first interaction.";
 -    } else {
--      // ponytail: install path has shell metacharacters — don't embed it in a
+-      // ponytail: config dir path has shell metacharacters; don't embed it in a
 -      // command snippet; have the agent wire it up by hand instead.
 -      output += "\n\n" +
 -        "STATUSLINE SETUP NEEDED: The ponytail plugin includes a statusline badge showing active mode. " +
--        "Its install path contains characters unsafe to embed in a shell command, so configure it manually: " +
+-        "Its path contains characters unsafe to embed in a shell command, so configure it manually: " +
 -        "add a statusLine command of type \"command\" that runs " + scriptName +
--        " from the plugin's hooks directory to " + settingsPath + ", quoting/escaping the path for your shell. " +
+-        " from " + claudeDir + " to " + settingsPath + ", quoting/escaping the path for your shell. " +
 -        "Proactively offer to set this up for the user on first interaction.";
 -    }
 -  }
@@ -115,57 +159,10 @@ index 6419200..bce5120 100644
  try {
    writeHookOutput('SessionStart', mode, output);
 diff --git a/hooks/ponytail-mode-tracker.js b/hooks/ponytail-mode-tracker.js
-index 39a8373..3083cc8 100644
+index 161a726..1cf96fa 100644
 --- a/hooks/ponytail-mode-tracker.js
 +++ b/hooks/ponytail-mode-tracker.js
-@@ -7,6 +7,7 @@ const {
-   clearMode,
-   cursorRuleNotice,
-   cursorRulePath,
-+  isCodex,
-   isCursor,
-   isQoder,
-   readMode,
-@@ -80,16 +81,15 @@ function finish() {
-             mode = getDefaultMode() === 'off' ? 'full' : getDefaultMode();
-           }
-         } else {
--          mode = getDefaultMode();
-+          mode = readMode() || getDefaultMode();
-         }
-       }
- 
-       if (isReportOnly) {
--        writeHookOutput(
--          'UserPromptSubmit',
--          mode,
--          'PONYTAIL MODE ACTIVE — level: ' + mode,
--        );
-+        const context = mode === 'off' ? 'PONYTAIL MODE OFF'
-+          : isQoder ? getPonytailInstructions(mode) : 'PONYTAIL MODE ACTIVE — level: ' + mode;
-+        writeHookOutput('UserPromptSubmit', mode, context);
-+        return; // A status query must not initialize Qoder's default mode.
-       } else if (mode && mode !== 'off') {
-         setMode(mode);
-         modeSwitched = true;
-@@ -97,14 +97,14 @@ function finish() {
-         // switch happens we fold the confirmation into the ruleset output
-         // below (one JSON on stdout) instead of emitting two separate writes.
-         if (!isQoder) {
--          // Cursor has no /ponytail command that would load the skill body
-+          // Cursor and Codex have no /ponytail command that loads the skill body
-           // for the new level, so the tracker delivers that level's ruleset
-           // along with the confirmation (#817).
-           const header = 'PONYTAIL MODE CHANGED — level: ' + mode;
-           writeHookOutput(
-             'UserPromptSubmit',
-             mode,
--            isCursor ? header + '\n\n' + getPonytailInstructions(mode) : header,
-+            isCursor || isCodex ? header + '\n\n' + getPonytailInstructions(mode) : header,
-           );
-         }
-       } else if (mode === 'off') {
-@@ -150,21 +150,19 @@ function finish() {
+@@ -158,21 +158,19 @@ function finish() {
  }
  
  process.stdin.on('data', chunk => { input += chunk; });
@@ -199,14 +196,10 @@ index 39a8373..3083cc8 100644
 +// Keep fallback alive for stuck stdin; normal EOF cancels it.
 +const fallback = setTimeout(finishInput, 1000);
 diff --git a/hooks/ponytail-runtime.js b/hooks/ponytail-runtime.js
-index f582e22..9dcc567 100644
+index 19b332a..0652743 100644
 --- a/hooks/ponytail-runtime.js
 +++ b/hooks/ponytail-runtime.js
-@@ -1,9 +1,14 @@
- const fs = require('fs');
- const path = require('path');
- const os = require('os');
-+const { createHash } = require('node:crypto');
+@@ -5,6 +5,10 @@ const { createHash } = require('crypto');
  const { getClaudeDir, getConfigDir } = require('./ponytail-config');
  
  const STATE_FILE = '.ponytail-active';
@@ -217,7 +210,7 @@ index f582e22..9dcc567 100644
  
  // ponytail: VS Code Copilot never sets COPILOT_PLUGIN_DATA — it only injects
  // CLAUDE_PLUGIN_ROOT, pointed at an install path under .vscode/agent-plugins/
-@@ -16,32 +21,39 @@ function isVsCodeCopilotRoot(pluginRoot) {
+@@ -17,29 +21,36 @@ function isVsCodeCopilotRoot(pluginRoot) {
      pluginRoot.toLowerCase().includes('.vscode');
  }
  
@@ -240,10 +233,6 @@ index f582e22..9dcc567 100644
  // way, so this check comes after the hosts with their own data dirs.
 -const isCursor = !isCopilot && !isCodex && !isQoder && !isCodeBuddy && Boolean(process.env.CURSOR_VERSION);
 +const isCursor = projectHost ? projectHost === 'cursor' : !isCopilot && !isCodex && !isQoder && !isCodeBuddy && Boolean(process.env.CURSOR_VERSION);
- // ZCode injects ZCODE_APP_VERSION into every child process, hooks included.
--const isZcode = !isCopilot && !isCodex && !isQoder && !isCursor &&
-+const isZcode = !projectHost && !isCopilot && !isCodex && !isQoder && !isCursor &&
-   Boolean(process.env.ZCODE_APP_VERSION);
  
  let stateDir = getClaudeDir();
 -if (isCodex) stateDir = process.env.PLUGIN_DATA;
@@ -264,16 +253,16 @@ index f582e22..9dcc567 100644
  
  const statePath = path.join(stateDir, STATE_FILE);
  
-@@ -50,7 +62,7 @@ const statePath = path.join(stateDir, STATE_FILE);
+@@ -48,7 +59,7 @@ const statePath = path.join(stateDir, STATE_FILE);
  // (#662, #809). Hosts without it keep the single shared flag.
  // ponytail: sessions in the SAME repo still share one mode, and the statusline
  // scripts read the shared flag (last write wins); key by session_id if either matters.
 -const projectDir = (process.env.CLAUDE_PROJECT_DIR || '').trim();
 +const projectDir = !projectHost && (process.env.CLAUDE_PROJECT_DIR || '').trim();
+ // Replacing separators with '_' aliases e.g. /work/a/b and /work/a_b (#662).
+ // Do not read old sanitized keys: they cannot be assigned to one project safely.
  const projectStatePath = projectDir
-   ? path.join(stateDir, 'ponytail-modes', projectDir.replace(/[^A-Za-z0-9._-]/g, '_'))
-   : null;
-@@ -102,9 +114,9 @@ function cursorRuleNotice(rule) {
+@@ -103,9 +114,9 @@ function cursorRuleNotice(rule) {
  
  function writeHookOutput(event, mode, context = '') {
    if (isCopilot) {
@@ -379,15 +368,15 @@ index d8fab97..db95d06 100644
 +the repository's CONTRIBUTING.md, not in a second ledger file. One-shot.
 +"stop ponytail-debt" or "normal mode" to revert.
 diff --git a/skills/ponytail-help/SKILL.md b/skills/ponytail-help/SKILL.md
-index 7d4fa00..c182e2a 100644
+index b3a3f60..c182e2a 100644
 --- a/skills/ponytail-help/SKILL.md
 +++ b/skills/ponytail-help/SKILL.md
 @@ -32,39 +32,31 @@ Level sticks until changed or session end.
  | **ponytail-gain** | `/ponytail-gain` | Measured-impact scoreboard: less code, less cost, more speed. |
  | **ponytail-help** | `/ponytail-help` | This card. |
  
--In Codex CLI and the IDE extension, invoke skills with `$ponytail`,
--`$ponytail-review`, or `$ponytail-help`. Claude Code and OpenCode use the
+-In Codex CLI and the IDE extension, invoke skills with `$ponytail:ponytail`,
+-`$ponytail:ponytail-review`, or `$ponytail:ponytail-help`. Claude Code and OpenCode use the
 -slash-command forms above (OpenCode ships all six as slash commands).
 +Select the repository skill in your agent's skill picker. Codex CLI supports
 +`$ponytail`; desktop picker syntax can vary. Claude Code uses the slash-command
