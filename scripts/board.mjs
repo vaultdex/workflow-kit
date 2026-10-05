@@ -117,6 +117,22 @@ function selectField(fieldName) {
   return { field, linked, choices: linked ? linked.options : field.options };
 }
 
+/**
+ * Put the issue on the Project. A new issue may already have been added by the Project's own automation: GitHub then
+ * refuses with "already exists", which is no failure as long as the item can be read afterwards.
+ */
+function addToProject(issue) {
+  try {
+    return graphql(`mutation($project:ID!,$content:ID!){addProjectV2ItemById(
+      input:{projectId:$project,contentId:$content}){item{id}}}`, { project: project.id, content: issue.id }).addProjectV2ItemById.item.id;
+  } catch (error) {
+    if (!/already exists in this project/i.test(String(error.stderr ?? ''))) throw error;
+    const id = projectItem(readIssue())?.id;
+    assert.ok(id, `GitHub reports #${issue.number} as already on the Project, but its item is unreadable`);
+    return id;
+  }
+}
+
 /** Write a selected field option; guarded delivery can reject the fresh issue before mutation. */
 function set(fieldName, optionName = value, beforeWrite) {
   let issue = readIssue();
@@ -141,8 +157,7 @@ function set(fieldName, optionName = value, beforeWrite) {
       issueFields:[{fieldId:$field,singleSelectOptionId:$option}]}){clientMutationId}}`,
     { issue: issue.id, field: linked.id, option: option.id });
   } else {
-    const item = projectItem(issue)?.id ?? graphql(`mutation($project:ID!,$content:ID!){addProjectV2ItemById(
-      input:{projectId:$project,contentId:$content}){item{id}}}`, { project: project.id, content: issue.id }).addProjectV2ItemById.item.id;
+    const item = projectItem(issue)?.id ?? addToProject(issue);
     graphql(`mutation($project:ID!,$item:ID!,$field:ID!,$option:String!){updateProjectV2ItemFieldValue(input:{projectId:$project,
       itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
     { project: project.id, item, field: field.id, option: option.id });
