@@ -5,8 +5,15 @@ Source: [mattpocock/skills](https://github.com/mattpocock/skills), pinned at
 including references, templates, scripts and `agents/openai.yaml`, without
 executing upstream installers.
 
-The initial pin includes all 37 skills: 20 engineering, seven productivity, four
-miscellaneous and six in-progress; upstream's Claude plugin has only 27 promoted skills.
+The pin includes every upstream skill (engineering, productivity, miscellaneous and
+in-progress), more than upstream's Claude plugin, which ships only the promoted ones.
+
+**Review of new skills.** An upstream update with a new skill stops at the test in
+`scripts/tests/matt-pocock.test.mjs` until a human has read the skill and added its path to
+`scripts/tests/matt-pocock-reviewed-skills.json`; the test names the skill. Everything else
+in an update (changed files, new reference files, new revision) passes without a manual step:
+the Renovate regenerate workflow regenerates the outputs, and the test compares every
+tracked file of every listed skill with the published copy.
 
 Follow [generated files](../README.md#generated-files-and-ownership) for updates,
 discovery paths and preservation. Each provider's `MATT-POCOCK-SOURCES.json`
