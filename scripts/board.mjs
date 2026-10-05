@@ -371,7 +371,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, lines, pr, pushed, pushedKnown: suites.length > 0, comments };
+  return { done: failed || !pending.length, failed, lines, pr, comments };
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
@@ -440,12 +440,13 @@ function handoffIssue(issue, viewer) {
 }
 
 /**
- * The driver's handoff comment: a "## Übergabe" heading in a PR comment by the authenticated user, created after the
- * push of the current head, so a new head asks for a new comment. Its content (retro result, findings list) is for the
- * human reviewer and is not judged here.
+ * The driver's handoff comment: a "## Übergabe" heading and a "Head: <SHA>" line in a PR comment by the authenticated
+ * user. The comment names the head it is about, so a new head asks for a new comment however (and whenever) the push
+ * happened, which no timestamp reliably tells. Its content (retro result, findings list) is for the human reviewer and
+ * is not judged here.
  */
-const hasHandoffComment = (comments, viewer, pushed) => comments.some(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
-  && /^## Übergabe\s*$/m.test(comment.body ?? '') && Date.parse(comment.created_at) >= pushed);
+const hasHandoffComment = (comments, viewer, headRefOid) => comments.some(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
+  && /^## Übergabe\s*$/m.test(comment.body ?? '') && new RegExp(`^Head:\\s*${headRefOid.slice(0, 7)}`, 'im').test(comment.body ?? ''));
 
 /** Read all PR gates and native links, optionally requiring the previously checked head. */
 function handoffPr(issueId, viewer, expectedHead) {
@@ -468,11 +469,8 @@ function handoffPr(issueId, viewer, expectedHead) {
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push('resolve review blockers and threads before handoff');
   }
-  // Without a check suite the push time is only the commit date, which says nothing about when the head was pushed.
-  if (!result.pushedKnown) {
-    reasons.push(`the push time of the head is unknown (no check suite), so a handoff comment cannot be matched to it`);
-  } else if (!hasHandoffComment(result.comments, viewer, result.pushed)) {
-    reasons.push(`post the handoff comment on PR #${value} after the current head: a "## Übergabe" heading with the retro result and the findings list (README: Handoff comment)`);
+  if (!hasHandoffComment(result.comments, viewer, result.pr.headRefOid)) {
+    reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${result.pr.headRefOid.slice(0, 7)}" line, the retro result and the findings list (README: Handoff comment)`);
   }
   if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
     console.log('WAITING\nwaiting: PR mergeability is not determined');

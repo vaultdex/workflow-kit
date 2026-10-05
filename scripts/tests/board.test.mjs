@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\n- Retro: keine Befunde',
+const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\nHead: abcdef1\n\n- Retro: keine Befunde',
   html_url: 'h', created_at: '2999-01-01T00:00:00Z', updated_at: '2999-01-01T00:00:00Z', ...changes });
 
 /** Isolated checkout with paginated GitHub responses and a record of every mutation. */
@@ -785,7 +785,7 @@ test('a field write succeeds when the Project already added the issue itself, an
   assert.equal(count('updateProjectV2ItemFieldValue'), 0);
 });
 
-test('handoff needs the driver handoff comment created after the push of the current head', t => {
+test('handoff needs the driver handoff comment that names the current head', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const mutations = join(checkout, 'mutations');
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
@@ -796,7 +796,9 @@ test('handoff needs the driver handoff comment created after the push of the cur
     ['another heading', [handoffComment({ body: 'Review ist durch' })]],
     ['the heading only inside a sentence', [handoffComment({ body: 'siehe ## Übergabe unten' })]],
     ['another author', [handoffComment({ user: { login: 'someone-else', type: 'User' } })]],
-    ['written before the last push, edited since', [handoffComment({ created_at: '2000-01-01T00:00:00Z' })]],
+    ['no head named (the format before this check)', [handoffComment({ body: '## Übergabe\n\n- Retro: keine Befunde' })]],
+    ['another head named, e.g. a comment for the previous push', [handoffComment({ body: '## Übergabe\n\nHead: 1234567\n\n- Retro: keine Befunde' })]],
+    ['the head named only inside a sentence', [handoffComment({ body: '## Übergabe\n\nFür Head: abcdef1 siehe oben (Zeile beginnt anders)' })]],
   ]) {
     write(comments);
     const result = run('handoff', '1', '7');
@@ -804,15 +806,16 @@ test('handoff needs the driver handoff comment created after the push of the cur
     assert.match(result.stdout, /^FAILED$/m, label);
     assert.equal(existsSync(mutations), false, `${label}: the status stays untouched`);
   }
-  // Reporting CI only through a status has no check suite: the push time of the head is unknown, so no comment can match it.
+  // No timestamp is involved: a head without any check suite (CI reported only as a status) works, and so does a comment
+  // that is older than the head's suite, because it names the head.
   const base = handoffPr();
-  write([handoffComment()]);
+  write([handoffComment({ created_at: '2000-01-01T00:00:00Z', updated_at: '2000-01-01T00:00:00Z' })]);
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ commits: { nodes: [{ commit: { ...base.commits.nodes[0].commit, checkSuites: { totalCount: 0, nodes: [] } } }] } })));
-  assert.equal(run('handoff', '1', '7').status, 1, 'An unknown push time never counts a comment as current');
-  assert.equal(existsSync(mutations), false);
-  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(base));
   writeFileSync(join(checkout, 'handoff-fixture'), '');
-  write([handoffComment({ user: { login: 'Worker', type: 'User' } })]);
+  assert.equal(run('handoff', '1', '7').status, 0, 'Naming the head is enough, with or without a check suite');
+  rmSync(join(checkout, 'stored'));
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(base));
+  write([handoffComment({ user: { login: 'Worker', type: 'User' }, body: '## Übergabe\n\nhead:   ABCDEF1234\n' })]);
   const result = run('handoff', '1', '7');
   assert.equal(result.status, 0, 'The authenticated user matches regardless of case: ' + result.stdout + result.stderr);
   assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
