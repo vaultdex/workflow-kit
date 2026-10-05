@@ -53,10 +53,11 @@ test('an adaptation that overlaps an upstream change stops with the file name', 
   assert.equal(apply(t, run({ [FILE]: merged }), next), merged);
   for (const leftover of ['<<<<<<< adapted\nx\n', 'x\n=======\ny\n', 'x\n>>>>>>> new upstream\n'])
     assert.throws(() => run({ [FILE]: leftover }), /still contains conflict markers/);
-  // A bare ======= line is fine when the new upstream has it too (a Markdown heading underline).
-  const underlined = lines([3, '=======']);
+  // A bare ======= line is fine where the new upstream has it too (a Markdown heading underline).
+  const underlined = lines([3, 'Heading\n=======']);
   const withUnderline = resolved => refreshPatch({ patch, from: { [FILE]: previous }, to: { [FILE]: underlined }, files: [FILE], resolved: { [FILE]: resolved } });
   assert.doesNotThrow(() => withUnderline(underlined));
-  // ...but an additional orphaned separator next to it is still a leftover.
-  assert.throws(() => withUnderline(`${underlined}=======\n`), /still contains conflict markers/);
+  // ...but an extra separator elsewhere is a leftover, also when the legitimate one was deleted (same total count).
+  for (const orphaned of [`${underlined}=======\n`, lines([3, 'Heading'], [7, '=======']), lines([7, '======='])])
+    assert.throws(() => withUnderline(orphaned), /still contains conflict markers/);
 });

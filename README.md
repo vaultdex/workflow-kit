@@ -131,8 +131,11 @@ and `actions: write` (the token reaches only the push and dispatch steps), runs 
 Renovate's authenticated event, not the branch name. Whatever the branch changed under
 `scripts/` never runs: main's scripts replace it, and only the branch's adaptation patch is
 kept as input. Whoever wrote its commits, the branch may not change any workflow, script,
-`.node-version` or `renovate.json` against main (the job fails instead of running, because it
-dispatches the branch's CI workflow with the write token). Commit author names prove nothing,
+`.node-version` or `renovate.json` against main, apart from the three files the updaters
+generate (the Ponytail adaptation patch and the Impeccable `VERSION` and `SHA256SUMS`). The job
+fails instead of running, because it dispatches the branch's CI workflow with the write token;
+it dispatches only while the branch still is the commit it pushed and cancels a run that
+started for another commit. Commit author names prove nothing,
 so the bot-author rule only leaves branches with other people's commits alone. If the CI
 dispatch fails after the push, the job fails and `repository.yml` is started for the branch by
 hand. `renovate.json` lists the bot's commit address in

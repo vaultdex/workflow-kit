@@ -54,8 +54,9 @@ jobs:
             exit 0
           fi
           # Whoever wrote the commits: nothing the job runs or dispatches may differ from main. That is every
-          # workflow, script and the Renovate config (the generated adaptation patch is data).
-          forbidden=$(git diff --name-only origin/main...HEAD | grep -E '^(\.github/workflows/|renovate\.json|\.node-version|scripts/)' | grep -v -x 'scripts/ponytail/adaptations.patch' || true)
+          # workflow, script and the Renovate config; the three files the updaters generate are data.
+          forbidden=$(git diff --name-only origin/main...HEAD | grep -E '^(\.github/workflows/|renovate\.json|\.node-version|scripts/)' \
+            | grep -v -x -e 'scripts/ponytail/adaptations.patch' -e 'scripts/impeccable/VERSION' -e 'scripts/impeccable/SHA256SUMS' || true)
           if [ -n "$forbidden" ]; then
             echo "::error::The branch changes workflows, scripts or Renovate config; not running with write access: $forbidden"
             exit 1
@@ -90,9 +91,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Generated outputs and the adaptation patch only; main's scripts stay out of the commit.
+          # Generated outputs and the three generated files under scripts/ only; main's scripts stay out.
           git add --all -- . ':(exclude)scripts' ':(exclude).node-version'
-          git add -- scripts/ponytail/adaptations.patch
+          git add -- scripts/ponytail/adaptations.patch scripts/impeccable/VERSION scripts/impeccable/SHA256SUMS
           if git diff --cached --quiet HEAD; then
             echo "Committed outputs are already current."
             exit 0
@@ -117,10 +118,21 @@ jobs:
           runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --commit "$head" --json status,conclusion \
             --jq '[.[] | select(.status != "completed" or .conclusion == "success" or .conclusion == "failure")] | length')
           if [ "$runs" = 0 ]; then
+            # workflow_dispatch takes a branch, not a commit, and runs that branch's workflow definition. Start it
+            # only while the branch still is the commit validated above, and stop any run it started for another one.
+            [ "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" = "$head" ] \
+              || { echo "::error::The branch moved after the push; not dispatching a workflow nobody validated."; exit 1; }
             for attempt in 1 2 3; do
               gh workflow run repository.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" && break
               [ "$attempt" = 3 ] && exit 1
               sleep 10
+            done
+            sleep 15
+            for id in $(HEAD_NOW="$head" gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --branch "$BRANCH" --event workflow_dispatch --limit 5 \
+              --json databaseId,headSha,status --jq '.[] | select(.status != "completed" and .headSha != env.HEAD_NOW) | .databaseId'); do
+              gh run cancel "$id" --repo "$GITHUB_REPOSITORY"
+              echo "::error::A dispatched run belonged to another commit and was cancelled."
+              exit 1
             done
           else
             echo "The repository CI already runs for $head."
