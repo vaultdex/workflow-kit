@@ -27,7 +27,10 @@ on the machine shares it.
 The installers run checkout content: the Ponytail one copies the checkout's `.agents`
 hook sources into the snapshot that trusted hooks execute, and no check of a working
 tree is reliable (branches, ignore settings and index flags can hide changes). So never
-run them in your current checkout. After `git fetch`, create a temporary
+run them in your current checkout, and only in a clone of the canonical repository:
+`gh repo view --json isFork --jq .isFork` must print `false`, because the default
+branch of a fork is contributor-controlled and a remote name proves nothing; in a fork,
+tell the human instead. After `git fetch`, create a temporary
 `git worktree add --detach <path> origin/<default branch>` (consumer projects also run
 `git submodule update --init .vendor/workflow-kit` there), run the installer in it, and
 remove it with `git worktree remove --force <path>` (a populated submodule blocks a plain remove).
