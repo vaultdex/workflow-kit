@@ -23,11 +23,8 @@ function fixture(t) {
 }
 function run(hook, f, input = '{}') {
   const command = windows ? hook.commandWindows ?? hook.powershell : hook.command ?? hook.bash;
-  const shell = !windows ? '/bin/sh' : hook.commandWindows
-    ? join(process.env.SystemRoot, 'System32/cmd.exe')
-    : join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const args = !windows ? ['-c', command] : hook.commandWindows ? ['/d', '/s', '/c', command]
-    : ['-NoProfile', '-NonInteractive', '-Command', command];
+  const shell = !windows ? '/bin/sh' : join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const args = !windows ? ['-c', command] : ['-NoProfile', '-NonInteractive', '-Command', command];
   return spawnSync(shell, args, { cwd: f.root, env: f.env, input, encoding: 'utf8', timeout: 10_000 });
 }
 
@@ -45,11 +42,17 @@ for (const name of manifests) test(`${name}: a missing engine speaks once at Ses
   }
 });
 
-test('an installed engine receives stdin and its failure is not suppressed', { skip: windows }, t => {
-  const f = fixture(t), engine = join(f.root, `.impeccable/vaultdex/engine-${version}/impeccable`);
+test('an installed engine receives stdin and its failure is not suppressed', t => {
+  const f = fixture(t), engine = join(f.root, `.impeccable/vaultdex/engine-${version}/impeccable${windows ? '.exe' : ''}`);
   mkdirSync(join(engine, '..'), { recursive: true });
-  writeFileSync(engine, '#!/bin/sh\n[ "$1" = hook ] || exit 9\nIFS= read -r event\nprintf "%s\\n" "$event"\nexit 7\n', { mode: 0o755 });
-  for (const name of manifests) for (const hook of commands(name, false)) {
+  if (windows) {
+    const compiled = spawnSync(join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+      ['-NoProfile', '-NonInteractive', '-Command', `Add-Type -OutputType ConsoleApplication -OutputAssembly $env:IMPECCABLE_HOOK_ENGINE -TypeDefinition '
+public class Engine { public static int Main(string[] args) { if (args.Length != 1 || args[0] != "hook") return 9; System.Console.Write(System.Console.In.ReadToEnd()); return 7; } }'`],
+      { env: { ...f.env, IMPECCABLE_HOOK_ENGINE: engine }, encoding: 'utf8' });
+    assert.equal(compiled.status, 0, compiled.stderr);
+  } else writeFileSync(engine, '#!/bin/sh\n[ "$1" = hook ] || exit 9\nIFS= read -r event\nprintf "%s\\n" "$event"\nexit 7\n', { mode: 0o755 });
+  for (const name of manifests.filter(name => !windows || name !== '.claude/settings.json')) for (const hook of commands(name, false)) {
     const result = run(hook, f, '{"hook_event_name":"Stop"}\n');
     assert.equal(result.status, 7, result.stderr);
     assert.equal(result.stdout.trim(), '{"hook_event_name":"Stop"}');
