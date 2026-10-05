@@ -38,7 +38,9 @@ only after the harness ran that project's hook, which the human trusted
 `git submodule update --init .vendor/workflow-kit` there), run the installer in it, and
 remove it with `git worktree remove --force <path>` (a populated submodule blocks a plain remove).
 
-If a hint persists after its installer ran once, tell the human instead of repeating it. Never
+If a hint persists after its installer ran once, tell the human instead of repeating it;
+when your checkout is behind `origin/<default branch>`, say so and update it (`git pull`),
+because its manifests may ask for an older snapshot version than the installer provides. Never
 write hook trust or personal agent settings; tell the human that trust and a fresh
 session remain theirs ([Hooks](README.md#hooks)).
 
