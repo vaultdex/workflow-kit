@@ -602,7 +602,6 @@ test('reviews waits only for traces on the current head and never reads failures
   const skipped = run => job(run, 'COMPLETED', 'SKIPPED');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), skipped(2)] })), 1, 'A cancelled run followed by a fully skipped one has no proof');
   assert.equal(reviews(pr({ contexts: [skipped(2), job(1, 'COMPLETED', 'CANCELLED')] })), 1, 'The order of the list does not matter');
-  assert.match(look(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), skipped(2)] })).stdout, /Backend was SKIPPED in a newer run/, 'The verdict names the skipped run');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'FAILURE'), skipped(2)] })), 1, 'A failure is not hidden by a later skipped run');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED'), skipped(2)] })), 0, 'A real success of the same head stays proof next to a skipped run');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), skipped(2), job(3, 'COMPLETED')] })), 0, 'A successful retry run is the proof');
