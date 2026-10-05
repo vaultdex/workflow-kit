@@ -47,7 +47,11 @@ if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('
 let data;
 if (query.startsWith('mutation')) {
   fs.appendFileSync('mutations', query + '\\n');
-  fs.writeFileSync('stored', process.argv.find(arg => arg.startsWith('option=')).slice(7));
+  const option = process.argv.find(arg => arg.startsWith('option='));
+  if (option) fs.writeFileSync('stored', option.slice(7));
+  if (query.includes('markPullRequestReadyForReview') && !fs.existsSync('ready-noop')) {
+    fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), isDraft: false }));
+  }
   data = {};
 } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
 else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
@@ -73,7 +77,16 @@ else if (query.includes('closingIssuesReferences')) {
       pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
       nodes: pages[index].map(id => id === null ? null : { id }) } } } };
 }
-else if (query.includes('pullRequest(number')) data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
+else if (query.includes('pullRequest(number')) {
+  if (fs.existsSync('pr-reads.json')) {
+    // Each read takes the next prepared overlay and the last one stays: metadata that catches up after a push.
+    const reads = JSON.parse(fs.readFileSync('pr-reads.json'));
+    const overlay = reads.length > 1 ? reads.shift() : reads[0];
+    fs.writeFileSync('pr-reads.json', JSON.stringify(reads));
+    fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...overlay }));
+  }
+  data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
+}
 else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
   id: 'F1', name: 'Status', options: ['Ready', 'In progress', 'Automated review', 'Human review'].map(name => ({ id: name, name }))
 }, { id: 'F2', name: 'Priority', options: ['High', 'Low'].map(name => ({ id: name, name })) },
@@ -577,4 +590,62 @@ test('field accepts Unicode and punctuation in names and options', t => {
   writeIssue(issue());
   assert.equal(run('field', '1', 'Größe', 'P0: urgent').status, 1, 'Validation lets the name through to the field lookup');
   assert.equal(run('field', '1', 'Size', '-x').status, 2, 'An option-like value is still rejected');
+});
+
+test('ready marks a Draft PR ready only for the expected pushed commit and never trusts stale metadata', t => {
+  const { checkout, run } = fixture(t);
+  const NEW = 'c0ffee'.repeat(6) + 'abcd', OLD = 'decade'.repeat(6) + 'abcd', OTHER = 'facade'.repeat(6) + 'abcd';
+  const quick = ['--attempts', '3', '--interval', '0.01'];
+  const mutations = () => existsSync(join(checkout, 'mutations')) ? readFileSync(join(checkout, 'mutations'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const prepare = (changes = {}, reads) => {
+    for (const file of ['mutations', 'pr-reads.json', 'ready-noop', 'fail']) rmSync(join(checkout, file), { force: true });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ id: 'PR7', number: 7, state: 'OPEN', isDraft: true, isCrossRepository: false,
+      headRefOid: NEW, headRepository: { nameWithOwner: 'test/example' }, ...changes }));
+    if (reads) writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify(reads));
+  };
+  const refused = (changes, pattern, reads, label) => {
+    prepare(changes, reads);
+    const result = run('ready', '7', NEW, ...quick);
+    assert.equal(result.status, 1, `${label}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, pattern, label);
+    assert.equal(mutations(), 0, `${label}: nothing is written`);
+  };
+
+  prepare();
+  let result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, new RegExp(`^READY #7 head ${NEW}$`, 'm'));
+  assert.equal(mutations(), 1, 'Exactly one Ready mutation');
+
+  prepare({ headRefOid: OLD }, [{ headRefOid: OLD }, { headRefOid: NEW }]);
+  result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 0, 'Metadata that catches up after a push is waited for: ' + result.stdout + result.stderr);
+  assert.equal(mutations(), 1);
+
+  refused({ headRefOid: OLD }, /still reports head decade/, [{ headRefOid: OLD }], 'A head that stays old');
+  refused({ isCrossRepository: true }, /does not come from a branch of test\/example/, undefined, 'A fork branch');
+  refused({ headRepository: { nameWithOwner: 'test/other' } }, /does not come from a branch/, undefined, 'Another repository');
+  refused({ state: 'CLOSED' }, /is closed/, undefined, 'A closed PR');
+  refused({ isDraft: false, headRefOid: OTHER }, /already ready with head facade/, undefined, 'Ready with another head');
+  refused({}, /changed after the check/, [{ headRefOid: NEW }, { headRefOid: OTHER }], 'A head that changes before the mutation');
+
+  prepare({ isDraft: false });
+  result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 0, 'Already ready for the expected head is a success without a write');
+  assert.equal(mutations(), 0);
+
+  prepare();
+  writeFileSync(join(checkout, 'fail'), '');
+  result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 2, 'An API error is ERROR, never a guess');
+  assert.match(result.stdout, /^ERROR$/m);
+  assert.equal(mutations(), 0);
+
+  prepare();
+  writeFileSync(join(checkout, 'ready-noop'), '');
+  result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 2, 'A write without a matching read-back is no success');
+  assert.equal(mutations(), 1, 'The mutation is not repeated blindly');
+
+  assert.equal(run('ready', '7', 'not-a-sha').status, 2, 'Only a full commit SHA is accepted');
 });
