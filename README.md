@@ -126,9 +126,10 @@ Renovate pull requests from this repository that change `.vendor/*`: it runs
 `scripts/update-ponytail.mjs` and `scripts/update-impeccable.mjs` as needed, then the CI
 generators, pushes the result to the Renovate branch and dispatches the repository CI on the
 new head (pushes with `GITHUB_TOKEN` start no workflows). The job holds `contents: write`
-and `actions: write`, runs only for `renovate[bot]` pull requests whose commits are all by
-bots, and stops before any script if the branch touches `.github/`, `renovate.json` or
-`scripts/` (apart from the generated `scripts/ponytail/adaptations.patch`).
+and `actions: write` (the token reaches only the push and dispatch steps), runs only for
+`renovate[bot]` pull requests whose commits are all by bots, and stops before any script if
+Renovate's own commits change more than `.gitmodules` and submodule pins. `renovate.json`
+lists the bot's commit address in `gitIgnoredAuthors`, so Renovate keeps updating the branch.
 
 When upstream edits lines our Ponytail adaptations rewrite, the job fails and names the files.
 Run `node scripts/update-ponytail.mjs` on the Renovate branch: it writes the conflicting

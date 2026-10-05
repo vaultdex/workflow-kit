@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { patchedFiles, refreshPatch } from '../update-ponytail.mjs';
+import { patchApplies, patchedFiles, refreshPatch } from '../update-ponytail.mjs';
 
 const lines = (...overrides) => Array.from({ length: 12 }, (_, i) => overrides.find(([n]) => n === i + 1)?.[1] ?? `line ${i + 1}`).join('\n') + '\n';
 const FILE = 'hooks/ponytail-example.js';
@@ -38,7 +38,8 @@ test('an adaptation is ported onto changed upstream and the new patch applies to
   const next = lines([6, 'upstream 6'], [11, 'upstream 11']);
   const refreshed = refreshPatch({ patch, from: { [FILE]: previous }, to: { [FILE]: next }, files: [FILE] });
   assert.equal(apply(t, refreshed, next), lines([3, 'adapted 3'], [6, 'upstream 6'], [11, 'upstream 11']));
-  assert.throws(() => apply(t, patch, next), /patch does not apply|patch failed/);
+  assert.equal(patchApplies(patch, { [FILE]: next }), false);
+  assert.equal(patchApplies(refreshed, { [FILE]: next }), true);
 });
 
 test('an adaptation that overlaps an upstream change stops with the file name', t => {

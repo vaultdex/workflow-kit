@@ -19,8 +19,26 @@ const lf = text => text.replaceAll('\r\n', '\n');
 const upstream = (revision, files) => {
   try { git(source, 'cat-file', '-e', `${revision}^{commit}`); }
   catch { git(source, 'fetch', '--no-tags', 'origin', revision); }
-  return Object.fromEntries(files.map(file => [file, lf(git(source, 'show', `${revision}:${file}`))]));
+  return Object.fromEntries(files.map(file => {
+    try { return [file, lf(git(source, 'show', `${revision}:${file}`))]; }
+    catch { throw new Error(`${file} does not exist in Ponytail ${revision.slice(0, 7)}; adapt scripts/ponytail/adaptations.patch by hand.`); }
+  }));
 };
+
+/** Whether `patch` applies cleanly to the upstream files in `contents`. */
+export function patchApplies(patch, contents) {
+  const stage = mkdtempSync(join(tmpdir(), 'ponytail-check-'));
+  try {
+    for (const [file, text] of Object.entries(contents)) {
+      mkdirSync(dirname(join(stage, file)), { recursive: true });
+      writeFileSync(join(stage, file), text);
+    }
+    writeFileSync(join(stage, '.check.patch'), patch);
+    return spawnSync('git', ['-c', 'core.autocrlf=false', 'apply', '--check', '--whitespace=error-all', '.check.patch'], { cwd: stage }).status === 0;
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+}
 
 /** `resolved` holds hand-edited results for files that conflicted in an earlier run. */
 export function refreshPatch({ patch, from, to, files, resolved = {} }) {
@@ -69,27 +87,33 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const to = git(source, 'rev-parse', 'HEAD').trim();
   // The generators read the index pin and reset the submodule to it, so stage a bump that is only checked out.
   if (git(kit, 'rev-parse', ':.vendor/ponytail').trim() !== to) git(kit, 'add', '--', '.vendor/ponytail');
-  // The patch targets the pin recorded in the last commit that changed it; pass a revision when the history is shallow.
-  const lastPatchCommit = git(kit, 'log', '-1', '--format=%H', '--', 'scripts/ponytail/adaptations.patch').trim();
-  const from = process.argv[2] ?? (lastPatchCommit && git(kit, 'ls-tree', lastPatchCommit, '.vendor/ponytail').split(/\s+/)[2]);
-  assert.ok(from, 'No previous upstream revision: pass it as the first argument');
-  if (from === to) {
-    console.log(`Ponytail adaptations already target ${to.slice(0, 7)}.`);
+  const patch = lf(readFileSync(patchPath, 'utf8'));
+  const files = patchedFiles(patch);
+  const target = upstream(to, files);
+  // A patch that already fits the new upstream (earlier run, or unrelated pin bump) needs no port.
+  if (patchApplies(patch, target)) {
+    console.log(`Ponytail adaptations already fit ${to.slice(0, 7)}.`);
   } else {
-    const patch = lf(readFileSync(patchPath, 'utf8'));
-    const files = patchedFiles(patch);
+    // The patch targets the pin recorded in the last commit that changed it; pass a revision when the history is shallow.
+    const lastPatchCommit = git(kit, 'log', '-1', '--format=%H', '--', 'scripts/ponytail/adaptations.patch').trim();
+    const from = process.argv[2] ?? (lastPatchCommit && git(kit, 'ls-tree', lastPatchCommit, '.vendor/ponytail').split(/\s+/)[2]);
+    assert.ok(from, 'No previous upstream revision: pass it as the first argument');
     // Conflicting files are written here with markers; edit them and run this command again.
+    // Files left over from another target revision are discarded.
     const resolveDir = join(kit, '.workflow-kit/ponytail-resolve');
+    const targetFile = join(resolveDir, 'TARGET');
+    if (existsSync(targetFile) && readFileSync(targetFile, 'utf8').trim() !== to) rmSync(resolveDir, { recursive: true, force: true });
     const resolved = Object.fromEntries(files.filter(file => existsSync(join(resolveDir, file)))
       .map(file => [file, lf(readFileSync(join(resolveDir, file), 'utf8'))]));
     try {
-      writeFileSync(patchPath, refreshPatch({ patch, from: upstream(from, files), to: upstream(to, files), files, resolved }));
+      writeFileSync(patchPath, refreshPatch({ patch, from: upstream(from, files), to: target, files, resolved }));
     } catch (error) {
       if (!error.conflicts) throw error;
       for (const [file, text] of Object.entries(error.conflicts)) {
         mkdirSync(dirname(join(resolveDir, file)), { recursive: true });
         writeFileSync(join(resolveDir, file), text);
       }
+      writeFileSync(targetFile, `${to}\n`);
       throw new Error(`${error.message}. Resolve the conflict markers in ${resolveDir}, then run node scripts/update-ponytail.mjs again.`);
     }
     rmSync(resolveDir, { recursive: true, force: true });

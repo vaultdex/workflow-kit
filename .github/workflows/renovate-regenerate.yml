@@ -25,9 +25,8 @@ jobs:
       actions: write
     env:
       BRANCH: ${{ github.event.pull_request.head.ref }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      GH_TOKEN: ${{ github.token }}
     steps:
+      # No stored credentials: the branch's scripts run next, and only the last two steps get the token.
       - uses: actions/checkout@v7.0.1
         env:
           GIT_CONFIG_COUNT: '1'
@@ -37,25 +36,21 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
           submodules: recursive
-      # Scripts from the branch run with a write token: only bots may have authored it,
-      # and it must not touch workflows or scripts (the adaptation patch is generated output).
+          persist-credentials: false
+      # Scripts from the branch run next: only bots may have authored it, and Renovate's own
+      # commits may only move submodule pins and .gitmodules. The bot's regeneration commits are generated output.
       - name: Check who changed the branch
         run: |
           set -euo pipefail
-          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
-            echo "Branch moved on; the run for the newer head takes over."
-            echo "SKIP=true" >> "$GITHUB_ENV"
-            exit 0
-          fi
           authors=$(git log --format='%an' origin/main..HEAD | sort -u)
           if [ -n "$(printf '%s\n' "$authors" | grep -v -x -e 'renovate\[bot\]' -e 'github-actions\[bot\]' || true)" ]; then
             echo "::notice::Commits by someone else on this branch; regenerate by hand: node scripts/update-ponytail.mjs"
             echo "SKIP=true" >> "$GITHUB_ENV"
             exit 0
           fi
-          forbidden=$(git diff --name-only origin/main...HEAD | grep -E '^(\.github/|renovate\.json|scripts/)' | grep -v -x 'scripts/ponytail/adaptations.patch' || true)
-          if [ -n "$forbidden" ]; then
-            echo "::error::Renovate branch changes files that must not run with write access: $forbidden"
+          other=$(git log --author='renovate\[bot\]' --format= --name-only origin/main..HEAD | grep -v '^$' | grep -v -x -e '\.gitmodules' -e '\.vendor/[^/]*' || true)
+          if [ -n "$other" ]; then
+            echo "::error::Renovate commits change more than submodule pins; not running with write access: $other"
             exit 1
           fi
       - uses: actions/setup-node@v7.0.0
@@ -73,8 +68,10 @@ jobs:
           if grep -qx '.vendor/impeccable' <<<"$changed"; then node scripts/update-impeccable.mjs; fi
           node scripts/init-project.mjs --existing
           node scripts/setup-skills.mjs
-      - name: Commit, push and start the repository CI
+      - name: Commit and push
         if: env.SKIP != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git add --intent-to-add --all
@@ -86,5 +83,20 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add --all
           git commit -q -m 'chore(skills): Ausgaben nach Submodul-Update regenerieren' -m 'Erzeugt vom Workflow Renovate regenerate (#93).'
-          git push origin "HEAD:refs/heads/$BRANCH"
-          gh workflow run repository.yml --ref "$BRANCH"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$BRANCH"
+      # Also covers a re-run after a failed dispatch: any run on the head, whatever its event, is enough.
+      - name: Start the repository CI
+        if: env.SKIP != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --commit "$head" --json databaseId --jq length)
+          if [ "$runs" = 0 ]; then
+            gh workflow run repository.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          else
+            echo "The repository CI already runs for $head."
+          fi
