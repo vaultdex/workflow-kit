@@ -28,7 +28,7 @@ tree is reliable (branches, ignore settings and index flags can hide changes). S
 run them in your current checkout. After `git fetch`, create a temporary
 `git worktree add --detach <path> origin/<default branch>` (consumer projects also run
 `git submodule update --init .vendor/workflow-kit` there), run the installer in it, and
-remove the worktree afterwards.
+remove it with `git worktree remove --force <path>` (a populated submodule blocks a plain remove).
 
 If the hint persists after one run, tell the human instead of repeating it. Never
 write hook trust or personal agent settings; tell the human that trust and a fresh
