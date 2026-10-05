@@ -1,0 +1,90 @@
+name: Renovate regenerate
+# Renovate only moves a submodule pin. Port the Ponytail adaptations, regenerate the committed
+# skills, push the result to the Renovate branch and start the repository CI for it.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .gitmodules
+      - .vendor/**
+permissions: {}
+concurrency:
+  group: renovate-regenerate-${{ github.head_ref }}
+  # A cancelled run could stop between push and CI dispatch.
+  cancel-in-progress: false
+jobs:
+  regenerate:
+    name: Regenerate Renovate outputs
+    if: github.event.pull_request.user.login == 'renovate[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      # contents: push the regenerated outputs. actions: pushes with GITHUB_TOKEN start no workflows,
+      # so the repository CI is dispatched on the new head instead.
+      contents: write
+      actions: write
+    env:
+      BRANCH: ${{ github.event.pull_request.head.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: init.defaultBranch
+          GIT_CONFIG_VALUE_0: main
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          submodules: recursive
+      # Scripts from the branch run with a write token: only bots may have authored it,
+      # and it must not touch workflows or scripts (the adaptation patch is generated output).
+      - name: Check who changed the branch
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+            echo "Branch moved on; the run for the newer head takes over."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          authors=$(git log --format='%an' origin/main..HEAD | sort -u)
+          if [ -n "$(printf '%s\n' "$authors" | grep -v -x -e 'renovate\[bot\]' -e 'github-actions\[bot\]' || true)" ]; then
+            echo "::notice::Commits by someone else on this branch; regenerate by hand: node scripts/update-ponytail.mjs"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          forbidden=$(git diff --name-only origin/main...HEAD | grep -E '^(\.github/|renovate\.json|scripts/)' | grep -v -x 'scripts/ponytail/adaptations.patch' || true)
+          if [ -n "$forbidden" ]; then
+            echo "::error::Renovate branch changes files that must not run with write access: $forbidden"
+            exit 1
+          fi
+      - uses: actions/setup-node@v7.0.0
+        if: env.SKIP != 'true'
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Regenerate
+        if: env.SKIP != 'true'
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only origin/main...HEAD)
+          # Ponytail first: the other generators fail on a stale adaptation patch.
+          if grep -qx '.vendor/ponytail' <<<"$changed"; then node scripts/update-ponytail.mjs; fi
+          if grep -qx '.vendor/impeccable' <<<"$changed"; then node scripts/update-impeccable.mjs; fi
+          node scripts/init-project.mjs --existing
+          node scripts/setup-skills.mjs
+      - name: Commit, push and start the repository CI
+        if: env.SKIP != 'true'
+        run: |
+          set -euo pipefail
+          git add --intent-to-add --all
+          if git diff --quiet HEAD; then
+            echo "Committed outputs are already current."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -q -m 'chore(skills): Ausgaben nach Submodul-Update regenerieren' -m 'Erzeugt vom Workflow Renovate regenerate (#93).'
+          git push origin "HEAD:refs/heads/$BRANCH"
+          gh workflow run repository.yml --ref "$BRANCH"
