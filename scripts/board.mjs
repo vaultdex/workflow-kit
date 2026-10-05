@@ -186,7 +186,8 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
-      ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
+      ...on CheckRun{databaseId name status conclusion title checkSuite{app{slug} workflowRun{workflow{name}}}}
+      ...on StatusContext{context state description}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
     requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}}`;
@@ -280,7 +281,16 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   let failed = false;
   const contexts = commit.statusCheckRollup?.contexts ?? { totalCount: 0, nodes: [] };
   assert.equal(contexts.nodes.length, contexts.totalCount, 'Not every check is readable');
-  for (const check of contexts.nodes) {
+  // The usual Draft-then-Ready sequence starts a second run of the same job on the same commit and cancels the first.
+  // Only the newest run of a job (app, workflow and name) counts; a newest run that is cancelled is still a failure.
+  // Runs without an id cannot be ordered and stay on their own.
+  const jobKey = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.name, check.name]);
+  const newest = new Map();
+  for (const check of contexts.nodes.filter(check => check.__typename === 'CheckRun' && Number.isSafeInteger(check.databaseId))) {
+    if (!(newest.get(jobKey(check))?.databaseId > check.databaseId)) newest.set(jobKey(check), check);
+  }
+  const current = contexts.nodes.filter(check => check.__typename !== 'CheckRun' || !Number.isSafeInteger(check.databaseId) || newest.get(jobKey(check)) === check);
+  for (const check of current) {
     const label = check.name ?? check.context;
     const pending = check.__typename === 'CheckRun' ? check.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(check.state);
     // CI never stalls: a running check is not success however long it takes.
