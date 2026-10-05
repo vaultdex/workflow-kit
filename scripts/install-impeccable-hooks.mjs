@@ -42,4 +42,6 @@ if (!existsSync(target)) {
 }
 assert.equal(digest(readFileSync(target)), expected,
   "Installed hook engine differs from reviewed pin; inspect/remove it explicitly before reinstalling");
+// A verified engine that lost its executable bit would keep the SessionStart hint alive: restore the mode on Unix.
+if (!windows) chmodSync(target, 0o555);
 console.log(`Verified hook engine: ${target}\nReview and enable the project hooks in your agent.`);
