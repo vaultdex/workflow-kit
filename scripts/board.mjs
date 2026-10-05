@@ -184,7 +184,7 @@ function setField() {
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
   number state isDraft headRefOid mergeStateStatus reviewDecision
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
-  commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} checkRuns(first:1){totalCount}}}
+  commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title checkSuite{databaseId app{slug} workflowRun{databaseId workflow{id name}}}}
       ...on StatusContext{context state description}}}}}}}
@@ -309,8 +309,21 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // Renovate …) open a suite on every push and often never run it, so they count only when the project
   // lists them in "awaitApps" (analyzers such as SonarCloud create their run only when finished). Both may stall.
   const awaited = new Set(['github-actions', ...project.awaitApps ?? []]);
-  for (const suite of commit.checkSuites.nodes.filter(suite => awaited.has(suite.app?.slug) && !suite.checkRuns.totalCount)) {
-    if (suite.status !== 'COMPLETED') waiting.push({ text: `check suite ${suite.app.slug} without runs`, since: Date.parse(suite.createdAt) });
+  // A suite of a NEWER run of the same workflow replaces an empty one (Draft then Ready cancels the first run before it
+  // reports). The replacing suite then answers for the workflow with its own status and conclusion, runs or not: its
+  // check runs alone would show only the jobs reported so far. Another workflow or app never replaces it.
+  const suiteFlow = suite => JSON.stringify([suite.app?.slug, suite.workflowRun?.workflow?.id]);
+  const suiteRun = suite => suite.workflowRun?.databaseId;
+  const newestSuiteRun = new Map();
+  for (const suite of commit.checkSuites.nodes.filter(suite => Number.isSafeInteger(suiteRun(suite)))) {
+    newestSuiteRun.set(suiteFlow(suite), Math.max(newestSuiteRun.get(suiteFlow(suite)) ?? -Infinity, suiteRun(suite)));
+  }
+  const empty = suite => !suite.checkRuns.totalCount;
+  const replaced = suite => Number.isSafeInteger(suiteRun(suite)) && suiteRun(suite) < newestSuiteRun.get(suiteFlow(suite));
+  const replacedEmpty = new Set(commit.checkSuites.nodes.filter(suite => awaited.has(suite.app?.slug) && empty(suite) && replaced(suite)).map(suiteFlow));
+  for (const suite of commit.checkSuites.nodes.filter(suite => awaited.has(suite.app?.slug) && !replaced(suite) && (empty(suite) || replacedEmpty.has(suiteFlow(suite))))) {
+    // A suite with runs is judged by CI that never stalls; an empty one is a workflow that may never report.
+    if (suite.status !== 'COMPLETED') waiting.push({ text: `check suite ${suite.app.slug}${empty(suite) ? ' without runs' : ' still running'}`, since: empty(suite) ? Date.parse(suite.createdAt) : Infinity });
     // A workflow that fails to start (STARTUP_FAILURE) completes its suite without any run to show it.
     else if (!passed.has(suite.conclusion)) {
       failed = true;
