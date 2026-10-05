@@ -30,7 +30,10 @@ tree is reliable (branches, ignore settings and index flags can hide changes). S
 run them in your current checkout, and only in a clone of the canonical repository:
 `gh repo view --json isFork --jq .isFork` must print `false`, because the default
 branch of a fork is contributor-controlled and a remote name proves nothing; in a fork,
-tell the human instead. After `git fetch`, create a temporary
+tell the human instead. The check cannot authenticate a standalone copy, so the rule
+assumes the human started you in the maintainers' own repository; the hint appears
+only after the harness ran that project's hook, which the human trusted
+([#132](https://github.com/vaultdex/workflow-kit/issues/132) decides the anchor). After `git fetch`, create a temporary
 `git worktree add --detach <path> origin/<default branch>` (consumer projects also run
 `git submodule update --init .vendor/workflow-kit` there), run the installer in it, and
 remove it with `git worktree remove --force <path>` (a populated submodule blocks a plain remove).
