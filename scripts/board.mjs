@@ -289,11 +289,19 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const runOf = check => check.checkSuite?.workflowRun?.databaseId ?? check.checkSuite?.databaseId;
   const jobKey = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id, check.name]);
   const orderable = check => check.__typename === 'CheckRun' && Number.isSafeInteger(runOf(check));
-  const newestRun = new Map();
+  // A SKIPPED run executed nothing, so it proves nothing and replaces nothing: a job's verdict is that of its newest run that
+  // is not SKIPPED (a cancelled or failed earlier run stays the verdict, a real retry decides). Only a job whose runs were
+  // all SKIPPED counts as skipped, which is how an optional job looks.
+  const newestSkipped = new Map(), newestExecuted = new Map();
   for (const check of contexts.nodes.filter(orderable)) {
-    newestRun.set(jobKey(check), Math.max(newestRun.get(jobKey(check)) ?? -Infinity, runOf(check)));
+    const newest = check.conclusion === 'SKIPPED' ? newestSkipped : newestExecuted;
+    newest.set(jobKey(check), Math.max(newest.get(jobKey(check)) ?? -Infinity, runOf(check)));
   }
-  const current = contexts.nodes.filter(check => !orderable(check) || runOf(check) === newestRun.get(jobKey(check)));
+  const decisiveRun = check => newestExecuted.get(jobKey(check)) ?? newestSkipped.get(jobKey(check));
+  const current = contexts.nodes.filter(check => !orderable(check) || runOf(check) === decisiveRun(check));
+  for (const check of current.filter(check => orderable(check) && newestSkipped.get(jobKey(check)) > runOf(check))) {
+    lines.push(`note: ${check.name} was SKIPPED in a newer run, which proves nothing; run ${runOf(check)} decides`);
+  }
   for (const check of current) {
     const label = check.name ?? check.context;
     const pending = check.__typename === 'CheckRun' ? check.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(check.state);
