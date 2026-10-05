@@ -299,18 +299,22 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // Inline review comments and thread replies carry findings too.
   const inline = restAll(`repos/${project.repository}/pulls/${pr.number}/comments`);
   // Results a bot can post: a review of this head, an issue comment, or a final (non-👀) reaction.
-  const results = [...comments.map(comment => [login(comment.user), comment.updated_at, comment.id]),
-    ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at, null]),
-    ...reactions.filter(reaction => reaction.content !== 'eyes').map(reaction => [login(reaction.user), reaction.created_at, null])];
+  // Codex runs a code and a security review side by side; the security result is its own comment under a
+  // "Security Review" heading, so it ends only the security row. A final reaction ends every kind.
+  const securityResult = body => /^#{1,6}\s.*Security Review/mi.test(body);
+  const results = [...comments.map(comment => [login(comment.user), comment.updated_at, comment.id, securityResult(comment.body) ? 'security' : 'code']),
+    ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at, null, 'code']),
+    ...reactions.filter(reaction => reaction.content !== 'eyes').map(reaction => [login(reaction.user), reaction.created_at, null, 'any'])];
   // The summary's own later edits are no result, so its comment id is skipped.
-  const answeredAfter = (author, since, own) => results.some(([who, time, id]) => who === author && (id === null || id !== own) && Date.parse(time) > since);
+  const answeredAfter = (author, since, own, kind) => results.some(([who, time, id, resultKind]) =>
+    who === author && (id === null || id !== own) && Date.parse(time) > since && (resultKind === 'any' || resultKind === kind));
   const short = pr.headRefOid.slice(0, 7);
   for (const comment of comments.filter(comment => isBot(comment.user) && after(comment.updated_at))) {
     // Summary comments (Codex) name the head in a table row that says Running until the review completes;
     // a result the same bot posts elsewhere ends it too.
     for (const row of comment.body.split('\n').filter(row => row.includes('Running') && row.includes(short))) {
       const since = row.match(/datetime="([^"]+)"/)?.[1] ?? comment.updated_at;
-      if (answeredAfter(login(comment.user), Date.parse(since), comment.id)) continue;
+      if (answeredAfter(login(comment.user), Date.parse(since), comment.id, /Security Review/i.test(row) ? 'security' : 'code')) continue;
       waiting.push({ text: `${login(comment.user)} running since ${since}`, since: Date.parse(since) });
     }
   }
@@ -468,7 +472,60 @@ function handoff() {
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
 }
 
-const stallOption = () => process.argv.includes('--stall') ? Number(process.argv[process.argv.indexOf('--stall') + 1]) : 20;
+const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
+const stallOption = () => numberOption('--stall', 20);
+
+/** Metadata that can still describe the previous push right after it: identity, branch, state, draft, head. */
+const readyQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+  id number state isDraft isCrossRepository headRefOid headRepository{nameWithOwner}}}}`;
+const sleep = seconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
+/** Polling must end: a few reads, finite pauses, at most half an hour of waiting in total (also keeps seconds * 1000 finite). */
+function readyOptionsBounded() {
+  const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
+  return Number.isInteger(attempts) && attempts >= 1 && attempts <= 100 && Number.isFinite(interval) && interval >= 0 && attempts * interval <= 1800;
+}
+
+/** Mark a Draft PR ready only for the explicitly expected pushed commit; stale metadata is waited out, never trusted. */
+function ready() {
+  const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
+  const read = () => {
+    const pr = graphql(readyQuery, { owner, name, number }).repository.pullRequest;
+    assert.ok(pr?.id && pr.number === number, 'The PR is unreadable');
+    assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
+    return pr;
+  };
+  const refuse = (...reasons) => {
+    console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    process.exitCode = 1;
+  };
+  let pr;
+  for (let attempt = 1; ; attempt++) {
+    pr = read();
+    if (pr.state !== 'OPEN') return refuse(`PR #${number} is ${pr.state.toLowerCase()}`);
+    // A fork's or another repository's branch is not ours to mark ready.
+    // GitHub reports the canonical spelling; the configured OWNER/REPO may differ in case.
+    if (pr.isCrossRepository || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) return refuse(`PR #${number} does not come from a branch of ${project.repository}`);
+    if (!pr.isDraft) {
+      if (pr.headRefOid !== value.toLowerCase()) return refuse(`PR #${number} is already ready with head ${pr.headRefOid.slice(0, 7)}, not ${value.slice(0, 7)}`);
+      return console.log(`READY #${number} head ${pr.headRefOid} (already ready)`);
+    }
+    if (pr.headRefOid === value.toLowerCase()) break;
+    if (attempt >= attempts) return refuse(`PR #${number} still reports head ${pr.headRefOid.slice(0, 7)} after ${attempts} reads; expected ${value.slice(0, 7)}`);
+    sleep(interval);
+  }
+  // One more read narrows the window in which a new push could slip between check and mutation.
+  const current = read();
+  if (current.state !== 'OPEN' || !current.isDraft || current.headRefOid !== pr.headRefOid) return refuse('the PR changed after the check; read it again');
+  graphql('mutation($pr:ID!){markPullRequestReadyForReview(input:{pullRequestId:$pr}){pullRequest{number}}}', { pr: pr.id });
+  // A write only counts once the read-back shows the expected head ready.
+  for (let attempt = 1; ; attempt++) {
+    const done = read();
+    if (done.state === 'OPEN' && !done.isDraft && done.headRefOid === pr.headRefOid) break;
+    assert.ok(attempt < attempts, `Ready read-back differs: draft ${done.isDraft}, head ${done.headRefOid.slice(0, 7)}`);
+    sleep(interval);
+  }
+  console.log(`READY #${number} head ${pr.headRefOid}`);
+}
 // Waiting is over either way; FAILED keeps a red head from reading as a finished review.
 const outcome = ({ failed }) => failed ? ['FAILED', 1] : ['DONE', 0];
 
@@ -522,10 +579,11 @@ function block() {
 }
 
 const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait, handoff, link };
+  reviews: reviewsOnce, wait, handoff, ready, link };
 const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]'
+  + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
@@ -534,6 +592,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
+  || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
@@ -542,7 +601,7 @@ try {
   await commands[command]();
 } catch (error) {
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'link'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link'].includes(command)) throw error;
   console.log(`${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${String(error.stderr || error.message).trim()}`);
   process.exitCode = 2;
 }

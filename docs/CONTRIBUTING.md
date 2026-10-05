@@ -165,7 +165,9 @@ backlink never closes an issue.
 1. Before the first push, focused checks pass, the diff is reviewed and current
    main is merged if the branch is behind. Push once, then update the same PR.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
-   Then mark it Ready for Review and set Automated review with the PR number and
+   Then mark it Ready for Review with `board.mjs ready PR SHA` (the commit you just
+   pushed: it waits until GitHub reports that head, so CI starts for the right
+   revision) and set Automated review with the PR number and
    all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
 3. Wait for CI and every review with a trace on the current head with `board.mjs
@@ -184,8 +186,8 @@ backlink never closes an issue.
    is not clean. Don't re-request a review that is running or finished for the
    current commit without a concrete reason.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
-   set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review,
-   set Automated review and wait again. Merge main only for conflicts or a real need.
+   set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
+   (`board.mjs ready PR SHA`), set Automated review and wait again. Merge main only for conflicts or a real need.
    After two correction pushes, collect new findings that neither block (P1,
    security, data loss) nor regress against main in one follow-up issue instead of
    another push; every push restarts CI and reviews.

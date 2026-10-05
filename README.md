@@ -88,6 +88,13 @@ trust; new definitions need personal review and trust. See
   default branch) and read `closingIssuesReferences` back. A Draft PR works; an existing
   connection is a success without a write; a write whose read-back lacks the issue exits 2.
   It never closes the issue: that happens when the PR merges into the default branch.
+- `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
+  repository ready for review, but only for the commit you pushed. It rereads the PR
+  (default 6 reads, 5 s apart) until GitHub reports `SHA` as the head, because the
+  metadata can still show the previous push right after it and Draft-payload events
+  then skip the checks. It refuses closed PRs, forks and a head that stays different (exit 1),
+  writes once and counts only a read-back showing that head ready; API errors exit 2.
+  An already ready PR with that head succeeds without a write.
 - `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
   It also prints the merge state and `blocker:` lines (standing change requests,
   conflicts), because mergeable is not merge-ready.
@@ -104,8 +111,9 @@ trust; new definitions need personal review and trust. See
   and ends `FAILED` if the PR is closed unmerged. Analyzers that create their
   check only when finished are awaited when listed in `"awaitApps"`
   ([setup](SETUP.md#3-board-and-labels)).
-  Recognized review traces: checks and statuses, Codex's `Running` summary, bot 👀
-  reactions and review requests. Free-text announcements of other bots are not
+  Recognized review traces: checks and statuses, Codex's `Running` summary (its code
+  and security rows end separately: a security result comment never ends a running code
+  review), bot 👀 reactions and review requests. Free-text announcements of other bots are not
   detected; check such reviewers by hand.
 
 Before implementation, complete [Start or resume](AGENT_RULES.md#start-or-resume);
