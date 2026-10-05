@@ -60,16 +60,6 @@ jobs:
             echo "::error::The branch changes workflows, scripts or Renovate config; not running with write access: $forbidden"
             exit 1
           fi
-      # Submodules are fetched only once their sources proved to be main's: a commit that points .gitmodules
-      # at another repository would otherwise ship that repository's files as generated hooks.
-      - name: Fetch the submodules
-        if: env.SKIP != 'true'
-        run: |
-          set -euo pipefail
-          urls() { git config "$@" --get-regexp '^submodule\..*\.url$' | sort; }
-          [ "$(urls -f .gitmodules)" = "$(urls --blob origin/main:.gitmodules)" ] \
-            || { echo "::error::.gitmodules names other submodule sources than main; not fetching them."; exit 1; }
-          git submodule update --init --recursive
       # Whatever the branch changed under scripts/ never runs here: main's scripts replace it, and only the
       # branch's adaptation patch (input data for the Ponytail port) is kept.
       - name: Run only the scripts of main
@@ -84,6 +74,15 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      # Submodules are fetched only once their sources proved to be main's (main's checker, see above): a commit that
+      # points .gitmodules at another repository would otherwise ship that repository's files as generated hooks.
+      - name: Fetch the submodules
+        if: env.SKIP != 'true'
+        run: |
+          set -euo pipefail
+          git show origin/main:.gitmodules > "$RUNNER_TEMP/main.gitmodules"
+          node scripts/check-submodule-sources.mjs "$RUNNER_TEMP/main.gitmodules"
+          git submodule update --init --recursive
       - name: Regenerate
         if: env.SKIP != 'true'
         run: |
