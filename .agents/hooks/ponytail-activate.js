@@ -16,7 +16,6 @@ const {
   isCodex,
   isCopilot,
   isCursor,
-  isZcode,
   readMode,
   setMode,
   writeHookOutput,
@@ -30,8 +29,6 @@ const mode = process.argv[3] === 'continue' ? readMode() || 'off' : getDefaultMo
 // "off" mode — skip activation entirely, don't write flag or emit rules
 if (mode === 'off') {
   clearMode();
-  const hookOutput = (isCodex || isCopilot || isCursor || isZcode || isCodeBuddy) ? '' : 'OK';
-  writeHookOutput('SessionStart', 'off', hookOutput);
   return;
 }
 
