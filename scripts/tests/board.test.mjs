@@ -33,7 +33,9 @@ if (!path.startsWith('graphql')) {
   if (parts[3] === 'issues' && parts.length === 5 && process.argv.includes('PATCH')) {
     // A body write; body-overwritten is what another session writes right after it.
     const issue = JSON.parse(fs.readFileSync(backlink));
-    issue.body = fs.readFileSync(fs.existsSync('body-overwritten') ? 'body-overwritten' : process.argv.find(arg => arg.startsWith('body=@')).slice(6), 'utf8');
+    // Like gh: body=@- is stdin, body=@<path> a file.
+    const source = process.argv.find(arg => arg.startsWith('body=@')).slice(6);
+    issue.body = fs.readFileSync(fs.existsSync('body-overwritten') ? 'body-overwritten' : source === '-' ? 0 : source, 'utf8');
     fs.writeFileSync(backlink, JSON.stringify(issue));
     fs.appendFileSync('patches', 'x\\n');
     process.stdout.write(JSON.stringify(issue));
@@ -840,7 +842,7 @@ test('body writes an issue body only on top of the one it is based on and proves
   server('alt\r\nzeile');
   let result = run('body', '1', change, base);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.equal([patches(), stored()].join('|'), '1|neu\nzeile\n');
+  assert.equal([patches(), stored()].join('|'), '1|neu\nzeile');
 
   // Changed by another session before the write: nothing is written, the difference is shown.
   reset();
@@ -860,6 +862,15 @@ test('body writes an issue body only on top of the one it is based on and proves
   assert.match(result.stdout, /^FAILED$/m);
   assert.match(result.stdout, /Fassung der anderen Session/);
   assert.equal(patches(), 1);
+
+  // A file named "-" must not be taken for stdin: the text that was read is written, never an empty body.
+  reset();
+  server('alt\nzeile');
+  file('-', 'neu aus Datei namens minus\n');
+  result = run('body', '1', '-', base);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal([patches(), stored()].join('|'), '1|neu aus Datei namens minus');
+  rmSync(join(checkout, '-'));
 
   // Already the wanted text: no write at all.
   reset();

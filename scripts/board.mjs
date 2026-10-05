@@ -430,8 +430,9 @@ function body() {
   const before = current();
   if (before !== base) return refuse(`the body of #${number} changed since you read it (diff: your base, then the current body); read it again, merge, write again`, diffText(base, before));
   if (before === fresh) return console.log(`BODY #${number} already has this text`);
-  execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}`, '-X', 'PATCH', '-F', `body=@${value}`],
-    { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 });
+  // The text already read and compared goes over stdin: gh would take a file named "-" for stdin and write an empty body.
+  execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}`, '-X', 'PATCH', '-F', 'body=@-'],
+    { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: fresh });
   const after = current();
   if (after !== fresh) return refuse(`the body of #${number} is not what was written: another session overwrote it meanwhile (diff: what you wrote, then the current body); read it, merge, write again`, diffText(fresh, after));
   console.log(`BODY #${number} written and read back`);

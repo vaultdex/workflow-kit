@@ -85,7 +85,9 @@ trust; new definitions need personal review and trust. See
   read back backlinks immediately after PR creation; see [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
 - `body ISSUE FILE BASE_FILE`: replace an issue body with `FILE` only if the current body
   still equals `BASE_FILE` (the body your change is based on; line endings and trailing
-  whitespace are ignored), then read it back. A body that changed meanwhile is refused with
+  whitespace are ignored; the text written is `FILE` with LF line endings and no trailing
+  whitespace, sent over stdin so the file name never matters), then read it back. A body that
+  changed meanwhile is refused with
   a `-`/`+` diff (exit 1, nothing written); a read-back that differs from `FILE` reports
   that another session overwrote it (exit 1, the write is not repeated); API and file
   errors exit 2. See [Changing a body](docs/CONTRIBUTING.md#issues).
