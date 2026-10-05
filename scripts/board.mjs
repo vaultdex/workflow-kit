@@ -458,6 +458,11 @@ const stallOption = () => numberOption('--stall', 20);
 const readyQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
   id number state isDraft isCrossRepository headRefOid headRepository{nameWithOwner}}}}`;
 const sleep = seconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
+/** Polling must end: a few reads, finite pauses, at most half an hour of waiting in total (also keeps seconds * 1000 finite). */
+function readyOptionsBounded() {
+  const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
+  return Number.isInteger(attempts) && attempts >= 1 && attempts <= 100 && Number.isFinite(interval) && interval >= 0 && attempts * interval <= 1800;
+}
 
 /** Mark a Draft PR ready only for the explicitly expected pushed commit; stale metadata is waited out, never trusted. */
 function ready() {
@@ -565,8 +570,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
   || (command === 'handoff' && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
-  || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !Number.isInteger(numberOption('--attempts', 6)) || !(numberOption('--attempts', 6) > 0)
-    || !(Number.isFinite(numberOption('--interval', 5)) && numberOption('--interval', 5) >= 0)))
+  || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);

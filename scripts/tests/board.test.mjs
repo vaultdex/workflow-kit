@@ -621,7 +621,10 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
   prepare({ headRepository: { nameWithOwner: 'Test/Example' } });
   assert.equal(run('ready', '7', NEW, ...quick).status, 0, 'Repository names compare case-insensitively');
   prepare({ headRefOid: OLD }, [{ headRefOid: OLD }]);
-  assert.equal(run('ready', '7', NEW, '--interval', 'Infinity').status, 2, 'An unbounded interval is rejected up front');
+  for (const options of [['--interval', 'Infinity'], ['--interval', '1e308'], ['--interval', '-1'], ['--attempts', '0'], ['--attempts', '1.5'],
+    ['--attempts', '101'], ['--attempts', '100', '--interval', '100']]) {
+    assert.equal(run('ready', '7', NEW, ...options).status, 2, `${options.join(' ')} could wait without end and is rejected up front`);
+  }
   assert.equal(mutations(), 0);
 
   prepare({ headRefOid: OLD }, [{ headRefOid: OLD }, { headRefOid: NEW }]);
