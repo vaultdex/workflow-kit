@@ -25,6 +25,21 @@ Without `--existing`, `init-project` also creates the starter files (AGENTS.md,
 CONTRIBUTING.md, issue and PR templates) that are missing; afterwards they belong to
 the project and are never overwritten.
 
+To update, move the gitlink first. `git submodule update` checks out the commit the
+index records, so run after a bump it silently puts the old kit back, and the
+generators then run against it without an error or a diff:
+
+```sh
+git -C .vendor/workflow-kit fetch origin
+git -C .vendor/workflow-kit checkout <kit-commit>      # the commit to adopt
+git add .vendor/workflow-kit
+git -C .vendor/workflow-kit submodule update --init    # the kit's own submodules only
+git submodule status .vendor/workflow-kit              # must show <kit-commit> without a leading + or -
+```
+
+Then run the two generators above. A generator run that changes nothing after an
+update proves nothing about the new kit; check the status line first.
+
 ### Generated files and ownership
 
 The kit owns hook handlers pointing into `~/.ponytail/vaultdex/` or
