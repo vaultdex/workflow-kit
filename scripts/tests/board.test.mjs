@@ -528,6 +528,21 @@ test('reviews waits only for traces on the current head and never reads failures
   const headReview = { user: codexUser, commit_id: 'abcdef1234', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { comments: [codex('Running', 1)], reviewList: [headReview] }), 0, 'A head review ends a Running summary');
   assert.equal(reviews(pr(), { comments: [{ ...codex('Running', 3), updated_at: minutesAgo(0) }] }), 3, 'A later edit of the summary itself is no result');
+  // Codex reviews code and security side by side: one summary, one row per kind, and a separate security result comment.
+  const summary = (rows, commit = 'abcdef1') => ({ id: ++commentId, user: codexUser, html_url: 'u', created_at: minutesAgo(10), updated_at: minutesAgo(1),
+    body: `| Review | Status | Commit |\n${rows.map(([kind, status, minutes]) =>
+      `| ${kind} | ${status} <relative-time datetime="${minutesAgo(minutes)}"></relative-time> | \`${commit}\` |`).join('\n')}` });
+  const securityResult = minutes => ({ id: ++commentId, user: codexUser, html_url: 's', created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes),
+    body: '### 🛡️ Codex Security Review\n\nSecurity review completed. No security issues were found.' });
+  const both = [['📝 **Code Review**', '⏳ **Running**', 3], ['🔒 **Security Review**', '⏳ **Running**', 3]];
+  assert.equal(reviews(pr(), { comments: [summary(both)] }), 3, 'Both kinds running wait');
+  assert.equal(reviews(pr(), { comments: [summary(both), securityResult(0)] }), 3, 'A security result leaves the running code review waiting');
+  assert.equal(reviews(pr(), { comments: [summary(both), securityResult(0)], reviewList: [headReview] }), 0, 'Both results end both rows');
+  assert.equal(reviews(pr(), { comments: [summary([both[1]]), securityResult(0)] }), 0, 'A security result ends a running security row');
+  assert.equal(reviews(pr(), { comments: [summary(both)], reviewList: [headReview] }), 3, 'A code review leaves the running security review waiting');
+  assert.equal(reviews(pr(), { comments: [summary(both), securityResult(5)] }), 3, 'A security result from before the row started answers nothing');
+  assert.equal(reviews(pr(), { comments: [summary(both)], reactions: [reaction('+1', 0)] }), 0, 'A final reaction ends every kind');
+  assert.equal(reviews(pr(), { comments: [summary(both, 'previous')] }), 0, 'Rows for another commit are not traces on this head');
   const appSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'sonarqubecloud' } };
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 0, 'Idle suites of other apps are no trace');
   const blocked = look({ ...pr(), mergeStateStatus: 'BLOCKED', reviewDecision: 'CHANGES_REQUESTED',

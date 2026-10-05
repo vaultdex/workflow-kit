@@ -99,8 +99,9 @@ trust; new definitions need personal review and trust. See
   and ends `FAILED` if the PR is closed unmerged. Analyzers that create their
   check only when finished are awaited when listed in `"awaitApps"`
   ([setup](SETUP.md#3-board-and-labels)).
-  Recognized review traces: checks and statuses, Codex's `Running` summary, bot 👀
-  reactions and review requests. Free-text announcements of other bots are not
+  Recognized review traces: checks and statuses, Codex's `Running` summary (its code
+  and security rows end separately: a security result comment never ends a running code
+  review), bot 👀 reactions and review requests. Free-text announcements of other bots are not
   detected; check such reviewers by hand.
 
 Before implementation, complete [Start or resume](AGENT_RULES.md#start-or-resume);
