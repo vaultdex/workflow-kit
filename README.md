@@ -125,3 +125,32 @@ node --test scripts/tests
 
 CI runs the commands above in one Linux job: about 20
 runs a month at up to 10 minutes on a free public runner.
+
+### Submodule updates by Renovate
+
+Renovate only moves a submodule pin, so the Ponytail adaptation patch and the committed
+skills are stale until regenerated. The workflow `Renovate regenerate` does that on
+Renovate pull requests from this repository that change `.vendor/*`: it runs
+`scripts/update-ponytail.mjs` and `scripts/update-impeccable.mjs` as needed, then the CI
+generators, pushes the result to the Renovate branch and dispatches the repository CI on the
+new head (pushes with `GITHUB_TOKEN` start no workflows). The job holds `contents: write`
+and `actions: write` (the token reaches only the push and dispatch steps), runs only for
+`renovate[bot]` pull requests whose commits are all by bots, and checks out the commit of
+Renovate's authenticated event, not the branch name. Whatever the branch changed under
+`scripts/` never runs: main's scripts replace it, and only the branch's adaptation patch is
+kept as input. Whoever wrote its commits, the branch may not change any workflow, script,
+`.node-version` or `renovate.json` against main, apart from the three files the updaters
+generate (the Ponytail adaptation patch and the Impeccable `VERSION` and `SHA256SUMS`). The job
+fails instead of running, because it dispatches the branch's CI workflow with the write token;
+it dispatches only while the branch still is the commit it pushed and cancels a run that
+started for another commit. Commit author names prove nothing,
+so the bot-author rule only leaves branches with other people's commits alone. If the CI
+dispatch fails after the push, the job fails and `repository.yml` is started for the branch by
+hand. `renovate.json` lists the bot's commit address in
+`gitIgnoredAuthors`, so Renovate keeps updating the branch.
+
+When upstream edits lines our Ponytail adaptations rewrite, the job fails and names the files.
+Run `node scripts/update-ponytail.mjs` on the Renovate branch: it writes the conflicting
+files with markers to `.workflow-kit/ponytail-resolve/`. Resolve the markers there, run the
+command again to port the patch and regenerate the skills, then commit and push. A branch with
+a commit by anyone else is left alone; the same command applies.
