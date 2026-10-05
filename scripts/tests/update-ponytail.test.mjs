@@ -51,5 +51,9 @@ test('an adaptation that overlaps an upstream change stops with the file name', 
   // The hand-edited result of that conflict becomes the new patch; leftover markers are rejected.
   const merged = lines([3, 'adapted upstream 3']);
   assert.equal(apply(t, run({ [FILE]: merged }), next), merged);
-  assert.throws(() => run({ [FILE]: '<<<<<<< adapted\nx\n' }), /still contains conflict markers/);
+  for (const leftover of ['<<<<<<< adapted\nx\n', 'x\n=======\ny\n', 'x\n>>>>>>> new upstream\n'])
+    assert.throws(() => run({ [FILE]: leftover }), /still contains conflict markers/);
+  // A bare ======= line is fine when the new upstream has it too (a Markdown heading underline).
+  const underlined = lines([3, '=======']);
+  assert.doesNotThrow(() => refreshPatch({ patch, from: { [FILE]: previous }, to: { [FILE]: underlined }, files: [FILE], resolved: { [FILE]: underlined } }));
 });

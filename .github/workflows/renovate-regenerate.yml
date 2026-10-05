@@ -15,7 +15,10 @@ concurrency:
 jobs:
   regenerate:
     name: Regenerate Renovate outputs
-    if: github.event.pull_request.user.login == 'renovate[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    # The sender is the authenticated pusher; commit author names are self-reported and prove nothing.
+    if: >-
+      github.event.pull_request.user.login == 'renovate[bot]' && github.event.sender.login == 'renovate[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
@@ -86,7 +89,8 @@ jobs:
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$BRANCH"
-      # Also covers a re-run after a failed dispatch: any run on the head, whatever its event, is enough.
+      # Also covers a re-run after a failed dispatch: a run on the head that is still going or has a verdict
+      # (success or failure), whatever its event, is enough; cancelled or skipped runs are not.
       - name: Start the repository CI
         if: env.SKIP != 'true'
         env:
@@ -94,7 +98,8 @@ jobs:
         run: |
           set -euo pipefail
           head=$(git rev-parse HEAD)
-          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --commit "$head" --json databaseId --jq length)
+          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --commit "$head" --json status,conclusion \
+            --jq '[.[] | select(.status != "completed" or .conclusion == "success" or .conclusion == "failure")] | length')
           if [ "$runs" = 0 ]; then
             gh workflow run repository.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
           else

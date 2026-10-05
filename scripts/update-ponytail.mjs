@@ -58,7 +58,9 @@ export function refreshPatch({ patch, from, to, files, resolved = {} }) {
     const conflicts = {};
     for (const file of files) {
       if (file in resolved) {
-        assert.ok(!/^<{7} /m.test(resolved[file]), `${file} still contains conflict markers`);
+        // Any marker form counts; a bare "=======" is only a leftover when the new upstream has no such line itself.
+        const leftover = /^(?:<{7} adapted|>{7} new upstream)$/m.test(resolved[file]) || (/^={7}$/m.test(resolved[file]) && !/^={7}$/m.test(to[file]));
+        assert.ok(!leftover, `${file} still contains conflict markers`);
         put(dirs.b, { [file]: resolved[file] });
         continue;
       }
@@ -99,10 +101,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     const from = process.argv[2] ?? (lastPatchCommit && git(kit, 'ls-tree', lastPatchCommit, '.vendor/ponytail').split(/\s+/)[2]);
     assert.ok(from, 'No previous upstream revision: pass it as the first argument');
     // Conflicting files are written here with markers; edit them and run this command again.
-    // Files left over from another target revision are discarded.
+    // Files that do not carry this target revision (another bump, or copied in without TARGET) are discarded.
     const resolveDir = join(kit, '.workflow-kit/ponytail-resolve');
     const targetFile = join(resolveDir, 'TARGET');
-    if (existsSync(targetFile) && readFileSync(targetFile, 'utf8').trim() !== to) rmSync(resolveDir, { recursive: true, force: true });
+    if (existsSync(resolveDir) && (!existsSync(targetFile) || readFileSync(targetFile, 'utf8').trim() !== to)) rmSync(resolveDir, { recursive: true, force: true });
     const resolved = Object.fromEntries(files.filter(file => existsSync(join(resolveDir, file)))
       .map(file => [file, lf(readFileSync(join(resolveDir, file), 'utf8'))]));
     try {
