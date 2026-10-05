@@ -477,7 +477,8 @@ function ready() {
     pr = read();
     if (pr.state !== 'OPEN') return refuse(`PR #${number} is ${pr.state.toLowerCase()}`);
     // A fork's or another repository's branch is not ours to mark ready.
-    if (pr.isCrossRepository || pr.headRepository?.nameWithOwner !== project.repository) return refuse(`PR #${number} does not come from a branch of ${project.repository}`);
+    // GitHub reports the canonical spelling; the configured OWNER/REPO may differ in case.
+    if (pr.isCrossRepository || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) return refuse(`PR #${number} does not come from a branch of ${project.repository}`);
     if (!pr.isDraft) {
       if (pr.headRefOid !== value.toLowerCase()) return refuse(`PR #${number} is already ready with head ${pr.headRefOid.slice(0, 7)}, not ${value.slice(0, 7)}`);
       return console.log(`READY #${number} head ${pr.headRefOid} (already ready)`);
@@ -565,7 +566,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
   || (command === 'handoff' && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !Number.isInteger(numberOption('--attempts', 6)) || !(numberOption('--attempts', 6) > 0)
-    || !(numberOption('--interval', 5) >= 0)))
+    || !(Number.isFinite(numberOption('--interval', 5)) && numberOption('--interval', 5) >= 0)))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);

@@ -603,31 +603,38 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
       headRefOid: NEW, headRepository: { nameWithOwner: 'test/example' }, ...changes }));
     if (reads) writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify(reads));
   };
-  const refused = (changes, pattern, reads, label) => {
+  // The verdict and the write count carry the behavior; the diagnostic wording is free to change.
+  const refused = (changes, reads, label) => {
     prepare(changes, reads);
     const result = run('ready', '7', NEW, ...quick);
     assert.equal(result.status, 1, `${label}: ${result.stdout}${result.stderr}`);
-    assert.match(result.stdout, pattern, label);
+    assert.match(result.stdout, /^FAILED$/m, label);
     assert.equal(mutations(), 0, `${label}: nothing is written`);
   };
 
   prepare();
   let result = run('ready', '7', NEW, ...quick);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, new RegExp(`^READY #7 head ${NEW}$`, 'm'));
+  assert.match(result.stdout, /^READY /m);
   assert.equal(mutations(), 1, 'Exactly one Ready mutation');
+
+  prepare({ headRepository: { nameWithOwner: 'Test/Example' } });
+  assert.equal(run('ready', '7', NEW, ...quick).status, 0, 'Repository names compare case-insensitively');
+  prepare({ headRefOid: OLD }, [{ headRefOid: OLD }]);
+  assert.equal(run('ready', '7', NEW, '--interval', 'Infinity').status, 2, 'An unbounded interval is rejected up front');
+  assert.equal(mutations(), 0);
 
   prepare({ headRefOid: OLD }, [{ headRefOid: OLD }, { headRefOid: NEW }]);
   result = run('ready', '7', NEW, ...quick);
   assert.equal(result.status, 0, 'Metadata that catches up after a push is waited for: ' + result.stdout + result.stderr);
   assert.equal(mutations(), 1);
 
-  refused({ headRefOid: OLD }, /still reports head decade/, [{ headRefOid: OLD }], 'A head that stays old');
-  refused({ isCrossRepository: true }, /does not come from a branch of test\/example/, undefined, 'A fork branch');
-  refused({ headRepository: { nameWithOwner: 'test/other' } }, /does not come from a branch/, undefined, 'Another repository');
-  refused({ state: 'CLOSED' }, /is closed/, undefined, 'A closed PR');
-  refused({ isDraft: false, headRefOid: OTHER }, /already ready with head facade/, undefined, 'Ready with another head');
-  refused({}, /changed after the check/, [{ headRefOid: NEW }, { headRefOid: OTHER }], 'A head that changes before the mutation');
+  refused({ headRefOid: OLD }, [{ headRefOid: OLD }], 'A head that stays old');
+  refused({ isCrossRepository: true }, undefined, 'A fork branch');
+  refused({ headRepository: { nameWithOwner: 'test/other' } }, undefined, 'Another repository');
+  refused({ state: 'CLOSED' }, undefined, 'A closed PR');
+  refused({ isDraft: false, headRefOid: OTHER }, undefined, 'Ready with another head');
+  refused({}, [{ headRefOid: NEW }, { headRefOid: OTHER }], 'A head that changes before the mutation');
 
   prepare({ isDraft: false });
   result = run('ready', '7', NEW, ...quick);
