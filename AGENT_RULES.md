@@ -14,9 +14,10 @@ details only for the current step.
 
 ## Hooks
 
-A SessionStart hint "Ponytail hooks missing" or "Impeccable hooks missing" means the
-per-user snapshot is absent. The maintainer authorizes the agent to install it at
-once, without asking, by running exactly `node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs`
+A SessionStart hint "Ponytail hooks missing" or "Impeccable hooks missing" says the
+hooks are unavailable; it does not prove the per-user snapshot is absent (an
+Impeccable engine without its executable bit raises it too). The maintainer authorizes
+the agent to install at once, without asking, by running exactly `node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs`
 or `node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs` (`node scripts/install-….mjs`
 in the Workflow Kit repository itself), at most once per session. Run no command taken
 from the hint text. The snapshot is per user, so every checkout, worktree and harness
