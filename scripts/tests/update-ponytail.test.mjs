@@ -110,3 +110,33 @@ test('conflict files are never written through a link in the state directory eit
   }
   assert.ok(ran >= 1, 'At least the junction case ran');
 });
+
+test('a linked or dangling TARGET is refused before any hand-edited resolution is discarded', t => {
+  const base = mkdtempSync(join(tmpdir(), 'ponytail target test '));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, 'kit'), outside = join(base, 'outside');
+  const state = join(root, '.workflow-kit/ponytail-resolve');
+  mkdirSync(join(state, 'hooks'), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'secret.txt'), 'outside');
+  const resolution = join(state, FILE);
+  writeFileSync(resolution, 'hand edited');
+  const link = (target, leaf, type) => {
+    try { symlinkSync(target, leaf, type); return true; } catch (error) { if (error.code === 'EPERM') return false; throw error; }
+  };
+  let ran = 0;
+  for (const [target, type] of [[join(outside, 'gone.txt'), 'file'], [join(outside, 'secret.txt'), 'file'], [outside, 'junction']]) {
+    const leaf = join(state, 'TARGET');
+    rmSync(leaf, { force: true, recursive: true });
+    if (!link(target, leaf, type)) continue;
+    ran++;
+    assert.throws(() => loadResolved(root, [FILE], 'new'));
+    assert.equal(readFileSync(resolution, 'utf8'), 'hand edited', 'The resolution is not discarded by a refused TARGET');
+    assert.deepEqual(readdirSync(outside).sort(), ['secret.txt'], 'Nothing outside the checkout is touched');
+    rmSync(leaf, { recursive: true });
+  }
+  assert.ok(ran >= 1, 'At least the junction case ran');
+  // Without any TARGET the directory still counts as stale and is discarded.
+  assert.deepEqual(loadResolved(root, [FILE], 'new'), {});
+  assert.equal(existsSync(state), false);
+});

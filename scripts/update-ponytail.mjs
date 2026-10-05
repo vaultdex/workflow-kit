@@ -4,7 +4,7 @@
 // like `quilt refresh`; a real conflict stops with the file name instead of guessing.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,10 +89,24 @@ export function refreshPatch({ patch, from, to, files, resolved = {} }) {
 // Every access first checks the whole path chain inside the checkout, so a link (symlink or junction) in the ignored
 // state directory can neither redirect a recursive delete nor an overwrite to somewhere else.
 const stateDirectory = root => join(root, '.workflow-kit/ponytail-resolve');
-const regularFile = (root, path) => {
+/**
+ * Contents of a regular file inside the checkout, or undefined when it is absent. A link (also a dangling one) or a
+ * non-file is refused. The file is opened without following links and its type is checked on the opened descriptor,
+ * so a swap for a link between the check and the read cannot redirect the read.
+ */
+const readRegular = (root, path) => {
   checkDirectory(root, dirname(path));
-  assert.ok(lstatSync(path).isFile(), `Refusing linked or non-file path: ${relative(root, path)}`);
-  return path;
+  let entry;
+  try { entry = lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  assert.ok(entry.isFile(), `Refusing linked or non-file path: ${relative(root, path)}`);
+  let fd;
+  try { fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  try {
+    assert.ok(fstatSync(fd).isFile(), `Refusing linked or non-file path: ${relative(root, path)}`);
+    return readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
 };
 
 /** Hand-resolved files of an earlier conflict. Files that do not carry this target revision are discarded. */
@@ -100,13 +114,17 @@ export function loadResolved(root, files, to) {
   const dir = stateDirectory(root);
   checkDirectory(root, dir);
   if (!existsSync(dir)) return {};
-  const targetFile = join(dir, 'TARGET');
-  if (!existsSync(targetFile) || readFileSync(regularFile(root, targetFile), 'utf8').trim() !== to) {
+  // A link as TARGET is refused before anything is deleted; only a missing or foreign TARGET discards the directory.
+  if (readRegular(root, join(dir, 'TARGET'))?.trim() !== to) {
     rmSync(dir, { recursive: true, force: true });
     return {};
   }
-  return Object.fromEntries(files.filter(file => existsSync(join(dir, file)))
-    .map(file => [file, lf(readFileSync(regularFile(root, join(dir, file)), 'utf8'))]));
+  const resolved = {};
+  for (const file of files) {
+    const text = readRegular(root, join(dir, file));
+    if (text !== undefined) resolved[file] = lf(text);
+  }
+  return resolved;
 }
 
 /** A write target must be a new path or a regular file: writing through a link (also a dangling one) would leave the checkout. */
