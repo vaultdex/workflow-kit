@@ -565,8 +565,9 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), suite('COMPLETED', 0, 1, 'STARTUP_FAILURE')] })), 1, 'A workflow that fails to start is FAILED');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE'), check('IN_PROGRESS')] })), 1, 'A known failure ends the wait while other checks run');
   // Draft then Ready starts a second run of the same job and cancels the first: only the newest run of a job counts.
-  const job = (id, status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null, name = 'Backend', workflow = 'Backend importer', workflowId = `W-${workflow}`) =>
-    ({ ...check(status, conclusion), databaseId: id, name, checkSuite: { app: { slug: 'github-actions' }, workflowRun: { workflow: { id: workflowId, name: workflow } } } });
+  // `run` is the workflow run the job belongs to; by default every job is the only one of its own run.
+  const job = (run, status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null, name = 'Backend', workflow = 'Backend importer', workflowId = `W-${workflow}`) =>
+    ({ ...check(status, conclusion), name, checkSuite: { databaseId: run * 10, app: { slug: 'github-actions' }, workflowRun: { databaseId: run, workflow: { id: workflowId, name: workflow } } } });
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED')] })), 1, 'A single cancelled run is a failure');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), job(2, 'COMPLETED')] })), 0, 'A cancelled run followed by a green one is no failure');
   assert.equal(reviews(pr({ contexts: [job(2, 'COMPLETED'), job(1, 'COMPLETED', 'CANCELLED')] })), 0, 'The order of the list does not matter');
@@ -578,6 +579,14 @@ test('reviews waits only for traces on the current head and never reads failures
     'Two workflows with the same display name and job name stay two jobs');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED', 'Backend', 'Build', 'W-1'), job(2, 'COMPLETED', 'SUCCESS', 'Backend', 'Build', 'W-1')] })), 0,
     'Runs of one workflow id are one job');
+  // Jobs of one workflow run never replace each other, even with the same display name; a later run replaces earlier ones.
+  assert.equal(reviews(pr({ contexts: [job(10, 'COMPLETED', 'FAILURE'), job(10, 'COMPLETED', 'SUCCESS')] })), 1,
+    'Two jobs with one display name in the same run: a success does not hide the failure');
+  assert.equal(reviews(pr({ contexts: [job(10, 'COMPLETED', 'CANCELLED', 'Lint'), job(10, 'COMPLETED', 'SUCCESS', 'Test'),
+    job(11, 'COMPLETED', 'SUCCESS', 'Lint'), job(11, 'COMPLETED', 'SUCCESS', 'Test')] })), 0,
+    'A complete newer run supersedes the cancelled run of the earlier one');
+  assert.equal(reviews(pr({ contexts: [job(10, 'COMPLETED', 'SUCCESS'), job(11, 'COMPLETED', 'FAILURE'), job(11, 'COMPLETED', 'SUCCESS')] })), 1,
+    'A failing job of the newest run stays a failure next to a same-named success');
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'A later read failure keeps the known CI verdict');
   rmSync(join(checkout, 'fail-rest'));
