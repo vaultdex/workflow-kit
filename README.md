@@ -83,6 +83,11 @@ trust; new definitions need personal review and trust. See
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
   and comment backlink on every delivered issue before writing status. Post and
   read back backlinks immediately after PR creation; see [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
+- `link ISSUE PR`: connect the issue natively to the PR (the GraphQL
+  `addCloseIssueReferences` mutation behind a closing keyword, which acts only on the
+  default branch) and read `closingIssuesReferences` back. A Draft PR works; an existing
+  connection is a success without a write; a write whose read-back lacks the issue exits 2.
+  It never closes the issue: that happens when the PR merges into the default branch.
 - `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
   repository ready for review, but only for the commit you pushed. It rereads the PR
   (default 6 reads, 5 s apart) until GitHub reports `SHA` as the head, because the

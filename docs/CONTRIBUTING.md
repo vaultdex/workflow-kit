@@ -123,9 +123,9 @@ delivery never closes an issue; split the undeliverable part first
 ([undeliverable acceptance](#undeliverable-acceptance)). A branch created from the
 issue is a branch connection, not proof of a direct PR connection. After creating
 the PR or changing its body or base, verify the delivered issue in
-`gh pr view PR --json closingIssuesReferences`. On a non-default base, manually
-connect the issue through GitHub's Development sidebar (or the GraphQL
-`addCloseIssueReferences` mutation), then read it back. This connection closes
+`gh pr view PR --json closingIssuesReferences`. On a non-default base, connect
+the issue with `board.mjs link ISSUE PR` (or GitHub's Development sidebar); the
+command reads the connection back. This connection closes
 the issue only when merged into the default branch; keep the project's release
 rules for references and completion.
 
