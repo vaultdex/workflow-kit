@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\n- Retro: keine Befunde',
+  html_url: 'h', created_at: '2999-01-01T00:00:00Z', updated_at: '2999-01-01T00:00:00Z', ...changes });
+
 /** Isolated checkout with paginated GitHub responses and a record of every mutation. */
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'workflow-board-'));
@@ -18,6 +21,8 @@ function fixture(t) {
   copyFileSync(process.execPath, gh);
   chmodSync(gh, 0o755);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1' }));
+  // By default the driver has posted the handoff comment long after any push; tests about it replace this file.
+  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment()]));
   writeFileSync(join(checkout, 'api'), `const fs = require('node:fs');
 const path = process.argv[2] ?? '';
 if (!path.startsWith('graphql')) {
@@ -763,4 +768,30 @@ test('a field write succeeds when the Project already added the issue itself, an
   prepare('add-fails');
   assert.notEqual(run('priority', '1', 'High').status, 0, 'Any other refusal stays a failure');
   assert.equal(count('updateProjectV2ItemFieldValue'), 0);
+});
+
+test('handoff needs the driver handoff comment created after the push of the current head', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const mutations = join(checkout, 'mutations');
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  const write = comments => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
+  for (const [label, comments] of [
+    ['no comment at all', []],
+    ['another heading', [handoffComment({ body: 'Review ist durch' })]],
+    ['the heading only inside a sentence', [handoffComment({ body: 'siehe ## Übergabe unten' })]],
+    ['another author', [handoffComment({ user: { login: 'someone-else', type: 'User' } })]],
+    ['written before the last push, edited since', [handoffComment({ created_at: '2000-01-01T00:00:00Z' })]],
+  ]) {
+    write(comments);
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 1, `${label}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /^FAILED$/m, label);
+    assert.equal(existsSync(mutations), false, `${label}: the status stays untouched`);
+  }
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  write([handoffComment({ user: { login: 'Worker', type: 'User' } })]);
+  const result = run('handoff', '1', '7');
+  assert.equal(result.status, 0, 'The authenticated user matches regardless of case: ' + result.stdout + result.stderr);
+  assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
 });

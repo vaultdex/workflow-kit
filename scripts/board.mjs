@@ -371,7 +371,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, lines, pr };
+  return { done: failed || !pending.length, failed, lines, pr, pushed, comments };
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
@@ -434,8 +434,16 @@ function handoffIssue(issue, viewer) {
   return true;
 }
 
+/**
+ * The driver's handoff comment: a "## Übergabe" heading in a PR comment by the authenticated user, created after the
+ * push of the current head, so a new head asks for a new comment. Its content (retro result, findings list) is for the
+ * human reviewer and is not judged here.
+ */
+const hasHandoffComment = (comments, viewer, pushed) => comments.some(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
+  && /^## Übergabe\s*$/m.test(comment.body ?? '') && Date.parse(comment.created_at) >= pushed);
+
 /** Read all PR gates and native links, optionally requiring the previously checked head. */
-function handoffPr(issueId, expectedHead) {
+function handoffPr(issueId, viewer, expectedHead) {
   const reasons = [];
   const pr = readPr(Number(value));
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
@@ -454,6 +462,9 @@ function handoffPr(issueId, expectedHead) {
   if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, 'PR head changed during handoff');
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push('resolve review blockers and threads before handoff');
+  }
+  if (!hasHandoffComment(result.comments, viewer, result.pushed)) {
+    reasons.push(`post the handoff comment on PR #${value} after the current head: a "## Übergabe" heading with the retro result and the findings list (README: Handoff comment)`);
   }
   if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
     console.log('WAITING\nwaiting: PR mergeability is not determined');
@@ -475,10 +486,10 @@ function handoff() {
   const { viewer } = graphql('query{viewer{login}}');
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
   if (!handoffIssue(issue, viewer)) return;
-  const pr = handoffPr(issue.id);
+  const pr = handoffPr(issue.id, viewer);
   if (!pr) return;
   if (!set('Status', 'Human review', () => {
-    if (!handoffPr(issue.id, pr.headRefOid)) return;
+    if (!handoffPr(issue.id, viewer, pr.headRefOid)) return;
     const current = readIssue();
     assert.equal(current?.id, issue.id, 'Issue identity changed during handoff');
     return handoffIssue(current, viewer) ? current : undefined;
