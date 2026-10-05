@@ -417,7 +417,12 @@ function diffText(before, after) {
 function body() {
   const lines = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n').trimEnd();
   const [fresh, base] = [value, process.argv[5]].map(lines);
-  const current = () => String(rest(`repos/${project.repository}/issues/${number}`).body ?? '').replaceAll('\r\n', '\n').trimEnd();
+  const current = () => {
+    const issue = rest(`repos/${project.repository}/issues/${number}`);
+    // The Issues API also serves pull requests under their number; a PR description is no issue body to replace.
+    assert.ok(issue?.number === number && !issue.pull_request, `#${number} is not an issue of ${project.repository}`);
+    return String(issue.body ?? '').replaceAll('\r\n', '\n').trimEnd();
+  };
   const refuse = (reason, diff) => {
     console.log(['FAILED', `blocker: ${reason}`, diff.trimEnd()].filter(Boolean).join('\n'));
     process.exitCode = 1;

@@ -830,7 +830,7 @@ test('handoff needs the driver handoff comment created after the push of the cur
 test('body writes an issue body only on top of the one it is based on and proves the write', t => {
   const { checkout, run } = fixture(t);
   const file = (name, text) => { writeFileSync(join(checkout, name), text); return name; };
-  const server = body => writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0, body }));
+  const server = (body, extra = {}) => writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0, body, ...extra }));
   const stored = () => JSON.parse(readFileSync(join(checkout, 'backlink-1.json'), 'utf8')).body;
   const patches = () => existsSync(join(checkout, 'patches')) ? readFileSync(join(checkout, 'patches'), 'utf8').split('\n').filter(Boolean).length : 0;
   const reset = () => { rmSync(join(checkout, 'patches'), { force: true }); rmSync(join(checkout, 'body-overwritten'), { force: true }); };
@@ -865,6 +865,14 @@ test('body writes an issue body only on top of the one it is based on and proves
   reset();
   server('neu\nzeile');
   assert.equal(run('body', '1', change, change).status, 0);
+  assert.equal(patches(), 0);
+
+  // A pull request answers under its number as well (with a pull_request key): its description is never replaced.
+  reset();
+  server('alt\nzeile', { pull_request: { url: 'x' } });
+  assert.equal(run('body', '1', change, base).status, 2);
+  server('alt\nzeile', { number: 2 });
+  assert.equal(run('body', '1', change, base).status, 2, 'A different number is not the requested issue');
   assert.equal(patches(), 0);
 
   // Unreadable input and API errors are errors, never a written body.
