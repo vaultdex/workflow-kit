@@ -47,7 +47,11 @@ if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('
 let data;
 if (query.startsWith('mutation')) {
   fs.appendFileSync('mutations', query + '\\n');
-  fs.writeFileSync('stored', process.argv.find(arg => arg.startsWith('option=')).slice(7));
+  const option = process.argv.find(arg => arg.startsWith('option='));
+  if (option) fs.writeFileSync('stored', option.slice(7));
+  if (query.includes('addCloseIssueReferences') && !fs.existsSync('link-noop')) {
+    fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), linkPages: [['I1']] }));
+  }
   data = {};
 } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
 else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
@@ -577,4 +581,43 @@ test('field accepts Unicode and punctuation in names and options', t => {
   writeIssue(issue());
   assert.equal(run('field', '1', 'Größe', 'P0: urgent').status, 1, 'Validation lets the name through to the field lookup');
   assert.equal(run('field', '1', 'Size', '-x').status, 2, 'An option-like value is still rejected');
+});
+
+test('link connects the issue natively to the PR, repeats safely and trusts only the read-back', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue('In progress'));
+  const mutations = () => existsSync(join(checkout, 'mutations')) ? readFileSync(join(checkout, 'mutations'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const prepare = (changes = {}) => {
+    for (const file of ['mutations', 'link-noop', 'fail']) rmSync(join(checkout, file), { force: true });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [[]], ...changes })));
+  };
+
+  prepare();
+  let result = run('link', '1', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^#1 is natively linked to PR #7$/m);
+  assert.equal(mutations(), 1, 'A Draft PR is connected with one write');
+  assert.match(readFileSync(join(checkout, 'mutations'), 'utf8'), /addCloseIssueReferences\(input:\{issueId:\$issue,pullRequestIds:\[\$pr\]\}\)/);
+
+  result = run('link', '1', '7');
+  assert.equal(result.status, 0, 'A second run finds the link already there');
+  assert.equal(mutations(), 1, 'No second write');
+
+  prepare({ state: 'CLOSED' });
+  assert.equal(run('link', '1', '7').status, 2, 'A closed PR is never linked');
+  assert.equal(mutations(), 0);
+
+  prepare();
+  writeFileSync(join(checkout, 'link-noop'), '');
+  result = run('link', '1', '7');
+  assert.equal(result.status, 2, 'A write whose read-back lacks the issue is no success');
+  assert.match(result.stdout, /read-back differs/);
+  assert.equal(mutations(), 1, 'The write is not repeated blindly');
+
+  prepare();
+  writeFileSync(join(checkout, 'fail'), '');
+  assert.equal(run('link', '1', '7').status, 2, 'An API error is ERROR');
+  assert.equal(mutations(), 0);
+
+  assert.equal(run('link', '1', 'seven').status, 2, 'Only a PR number is accepted');
 });

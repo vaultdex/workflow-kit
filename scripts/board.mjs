@@ -356,14 +356,14 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
-function connectedIssues(pr) {
+function connectedIssues(pr, draftAllowed = false) {
   const ids = new Set();
   for (let after; ;) {
     const current = graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
       pullRequest(number:$number){state isDraft headRefOid closingIssuesReferences(first:100,after:$after){totalCount
         pageInfo{hasNextPage endCursor} nodes{id}}}}}`, { owner, name, number: pr.number, ...(after && { after }) })
       .repository.pullRequest;
-    assert.ok(current?.state === 'OPEN' && current.isDraft === false && current.headRefOid === pr.headRefOid,
+    assert.ok(current?.state === 'OPEN' && (draftAllowed || current.isDraft === false) && current.headRefOid === pr.headRefOid,
       'PR changed after the review check; read the current head again');
     const links = current.closingIssuesReferences;
     assert.ok(links?.nodes && links.pageInfo, 'Native issue links are unreadable');
@@ -378,6 +378,23 @@ function connectedIssues(pr) {
     assert.ok(links.pageInfo.endCursor && links.pageInfo.endCursor !== after, 'Issue-link pagination did not advance');
     after = links.pageInfo.endCursor;
   }
+}
+
+/** Connect the issue natively to the PR (what a closing keyword does only on the default branch) and read it back. */
+function link() {
+  const prNumber = Number(value);
+  const issue = readIssue();
+  assert.ok(issue?.id, 'Issue identity is unreadable');
+  const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    pullRequest(number:$number){id number state headRefOid}}}`, { owner, name, number: prNumber }).repository;
+  assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${value} is not an open pull request of ${project.repository}`);
+  // Already connected is a success without a write; a Draft PR can be connected too.
+  if (!connectedIssues(pr, true).has(issue.id)) {
+    graphql('mutation($issue:ID!,$pr:ID!){addCloseIssueReferences(input:{issueId:$issue,pullRequestIds:[$pr]}){clientMutationId}}',
+      { issue: issue.id, pr: pr.id });
+    assert.ok(connectedIssues(pr, true).has(issue.id), `Native link read-back differs: PR #${value} does not close issue #${number}`);
+  }
+  console.log(`#${number} is natively linked to PR #${value}`);
 }
 
 /** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
@@ -505,17 +522,18 @@ function block() {
 }
 
 const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait, handoff };
+  reviews: reviewsOnce, wait, handoff, link };
 const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]';
+  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]'
+  + ' | link ISSUE PR';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
-  || (command === 'handoff' && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
+  || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
@@ -524,7 +542,7 @@ try {
   await commands[command]();
 } catch (error) {
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'link'].includes(command)) throw error;
   console.log(`${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${String(error.stderr || error.message).trim()}`);
   process.exitCode = 2;
 }
