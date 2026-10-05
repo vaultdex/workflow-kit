@@ -598,6 +598,21 @@ test('reviews waits only for traces on the current head and never reads failures
     'A complete newer run supersedes the cancelled run of the earlier one');
   assert.equal(reviews(pr({ contexts: [job(10, 'COMPLETED', 'SUCCESS'), job(11, 'COMPLETED', 'FAILURE'), job(11, 'COMPLETED', 'SUCCESS')] })), 1,
     'A failing job of the newest run stays a failure next to a same-named success');
+  // A SKIPPED run executed nothing: it neither replaces nor hides an earlier run of the same job.
+  const skipped = run => job(run, 'COMPLETED', 'SKIPPED');
+  assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), skipped(2)] })), 1, 'A cancelled run followed by a fully skipped one has no proof');
+  assert.equal(reviews(pr({ contexts: [skipped(2), job(1, 'COMPLETED', 'CANCELLED')] })), 1, 'The order of the list does not matter');
+  assert.match(look(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), skipped(2)] })).stdout, /Backend was SKIPPED in a newer run/, 'The verdict names the skipped run');
+  assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'FAILURE'), skipped(2)] })), 1, 'A failure is not hidden by a later skipped run');
+  assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED'), skipped(2)] })), 0, 'A real success of the same head stays proof next to a skipped run');
+  assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), skipped(2), job(3, 'COMPLETED')] })), 0, 'A successful retry run is the proof');
+  assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), skipped(2), job(3, 'COMPLETED', 'FAILURE')] })), 1, 'A failed retry stays failed');
+  assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), skipped(2), job(3, 'IN_PROGRESS')] })), 3, 'A running retry waits');
+  assert.equal(reviews(pr({ contexts: [job(1, 'IN_PROGRESS'), skipped(2)] })), 3, 'A skipped run does not hide a running one');
+  assert.equal(reviews(pr({ contexts: [skipped(1), skipped(2)] })), 0, 'A job that was only ever skipped is optional');
+  assert.equal(reviews(pr({ contexts: [skipped(1), job(2, 'COMPLETED', 'SUCCESS', 'Lint')] })), 0, 'A skipped optional job next to a real success passes');
+  assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), job(2, 'COMPLETED', 'SKIPPED', 'Backend', 'Frontend')] })), 1,
+    'A skipped run of another workflow does not stand in for it');
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'A later read failure keeps the known CI verdict');
   rmSync(join(checkout, 'fail-rest'));
