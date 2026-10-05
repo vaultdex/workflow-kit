@@ -637,10 +637,14 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
   assert.equal(run('ready', '7', NEW, ...quick).status, 0, 'Repository names compare case-insensitively');
   prepare({ headRefOid: OLD }, [{ headRefOid: OLD }]);
   for (const options of [['--interval', 'Infinity'], ['--interval', '1e308'], ['--interval', '-1'], ['--attempts', '0'], ['--attempts', '1.5'],
-    ['--attempts', '101'], ['--attempts', '100', '--interval', '100']]) {
+    ['--attempts', '101'], ['--attempts', '100', '--interval', '100'], ['--attempts', '100', '--interval', '18'],
+    ['--attempts', '61', '--interval', '15']]) {
     assert.equal(run('ready', '7', NEW, ...options).status, 2, `${options.join(' ')} could wait without end and is rejected up front`);
   }
   assert.equal(mutations(), 0);
+
+  prepare();
+  assert.equal(run('ready', '7', NEW, '--attempts', '60', '--interval', '15').status, 0, 'Both waits together exactly at the half-hour cap are allowed');
 
   prepare({ headRefOid: OLD }, [{ headRefOid: OLD }, { headRefOid: NEW }]);
   result = run('ready', '7', NEW, ...quick);
