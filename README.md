@@ -124,17 +124,20 @@ trust; new definitions need personal review and trust. See
 ### Handoff comment
 
 `handoff` needs one comment on the PR from the driver (the authenticated GitHub user) that
-has the heading `## Übergabe` on its own line and was created after the push of the current
-head. The push is dated by the creation of the head's first check suite, a few seconds after
-the push, so post the comment after the checks have started; a head without any check suite
-(CI reported only as a status) cannot be dated, and `handoff` refuses it. A new head, for
-example after a review fix, asks for a new comment; an edited older comment does not count. Put the retro result and the list of all findings with their
-disposition (fixed, linked follow-up issue, or none) under the heading, and, if a reviewer
-was unavailable or stalled, the reviewer, cause and evidence. The command checks the heading,
-author and time, not the content, which is for the human reviewer:
+has the heading `## Übergabe` on its own line and a line `Head: <SHA>` that starts with the
+first seven characters of the PR's current head commit. The comment names the head it is
+about, so no timestamp is involved: a new head, for example after a review fix, asks for a new
+comment, a comment for an earlier push does not count, and it works the same for a head without
+a check suite or one that was pushed and checked on another branch first. Put the retro result
+and the list of all findings with their disposition (fixed, linked follow-up issue, or none)
+under the heading, and, if a reviewer was unavailable or stalled, the reviewer, cause and
+evidence. The command checks heading, head and author, not the content, which is for the human
+reviewer:
 
 ```md
 ## Übergabe
+
+Head: abcdef1
 
 - Retro: <Ergebnis oder „keine Befunde“>
 - Befunde: <je Befund: behoben (Commit), Folge-Issue (Link), oder „keine“>

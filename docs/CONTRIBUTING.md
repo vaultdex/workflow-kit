@@ -207,7 +207,7 @@ backlink never closes an issue.
    reviewer is confirmed unavailable (quota, outage) or stalled, record the
    reviewer, cause and evidence in the PR and hand off with that limitation stated
    in the handoff comment. Post that [handoff comment](../README.md#handoff-comment)
-   on the PR after the last push; `board.mjs handoff` refuses without it.
+   on the PR for the current head (a `Head: <SHA>` line); `board.mjs handoff` refuses without it.
    Otherwise pending or unknown does not count as unavailable. Mergeable is not
    merge-ready: resolve every `blocker:` that `board.mjs reviews` lists (a standing
    change request, conflicts) or name it for the human when only a human may clear
