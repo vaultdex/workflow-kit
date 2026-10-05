@@ -153,7 +153,20 @@ started for another commit. Commit author names prove nothing,
 so the bot-author rule only leaves branches with other people's commits alone. If the CI
 dispatch fails after the push, the job fails and `repository.yml` is started for the branch by
 hand. `renovate.json` lists the bot's commit address in
-`gitIgnoredAuthors`, so Renovate keeps updating the branch.
+`gitIgnoredAuthors`, so Renovate keeps updating the branch. Submodules are not fetched at
+checkout: the job first requires the submodule URLs in the branch's `.gitmodules` to equal
+main's and fails otherwise, so a branch cannot point the generators at another repository.
+`update-ponytail.mjs` keeps its conflict files in `.workflow-kit/ponytail-resolve/` and
+refuses to read, write or delete there when any part of that path is a link.
+
+Known limit, accepted ([#104](https://github.com/vaultdex/workflow-kit/issues/104)): the CI dispatch
+runs the Renovate branch's workflow definition, because `workflow_dispatch` takes a branch or tag,
+not a commit. Between the push and the dispatch another repository writer could move the branch;
+the job checks the branch just before and cancels a run it started for another commit, but cannot
+undo what such a run already did. A writer can run any workflow definition on a branch of their
+own with the same permissions, so this race gives them nothing more. Dispatching `main`'s
+workflow instead is no way out: its check runs would hang on `main`'s head, not the PR's. If the
+threat model changes, report the CI result as a commit status from the job itself.
 
 When upstream edits lines our Ponytail adaptations rewrite, the job fails and names the files.
 Run `node scripts/update-ponytail.mjs` on the Renovate branch: it writes the conflicting

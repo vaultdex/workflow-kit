@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { patchApplies, patchedFiles, refreshPatch } from '../update-ponytail.mjs';
+import { clearResolved, loadResolved, patchApplies, patchedFiles, refreshPatch, saveConflicts } from '../update-ponytail.mjs';
 
 const lines = (...overrides) => Array.from({ length: 12 }, (_, i) => overrides.find(([n]) => n === i + 1)?.[1] ?? `line ${i + 1}`).join('\n') + '\n';
 const FILE = 'hooks/ponytail-example.js';
@@ -60,4 +60,26 @@ test('an adaptation that overlaps an upstream change stops with the file name', 
   // ...but an extra separator elsewhere is a leftover, also when the legitimate one was deleted (same total count).
   for (const orphaned of [`${underlined}=======\n`, lines([3, 'Heading'], [7, '=======']), lines([7, '======='])])
     assert.throws(() => withUnderline(orphaned), /still contains conflict markers/);
+});
+
+test('conflict state is read, written and deleted only inside the checkout, never through a link', t => {
+  const base = mkdtempSync(join(tmpdir(), 'ponytail state test '));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, 'kit'), outside = join(base, 'outside');
+  mkdirSync(root);
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'keep.txt'), 'keep');
+  // A junction works without privileges on Windows and is an ordinary symlink elsewhere.
+  symlinkSync(outside, join(root, '.workflow-kit'), 'junction');
+  for (const act of [() => loadResolved(root, [FILE], 'new'), () => saveConflicts(root, { [FILE]: 'x' }, 'new'), () => clearResolved(root)])
+    assert.throws(act, /linked or non-directory/);
+  assert.deepEqual(readdirSync(outside), ['keep.txt'], 'Nothing outside the checkout is created, changed or deleted');
+  assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'keep');
+  rmSync(join(root, '.workflow-kit'));
+
+  // The ordinary round trip: kept for the same target revision, discarded for another one.
+  saveConflicts(root, { [FILE]: 'marked up' }, 'new');
+  assert.deepEqual(loadResolved(root, [FILE], 'new'), { [FILE]: 'marked up' });
+  assert.deepEqual(loadResolved(root, [FILE], 'other'), {});
+  assert.equal(existsSync(join(root, '.workflow-kit/ponytail-resolve')), false);
 });
