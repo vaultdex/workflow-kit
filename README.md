@@ -106,8 +106,10 @@ trust; new definitions need personal review and trust. See
   threads/conflicts before writing and reading back Human review (exit 0 verified,
   1 blocked, 2 unreadable or changed state, 3 waiting). Native links are read on
   every page, including manual links on release branches; text and branch links
-  alone do not count. Session ownership, final proof and finding dispositions remain
-  driver responsibilities. Use this for delivery; `status` is metadata maintenance.
+  alone do not count. It also requires the [handoff comment](#handoff-comment) on the
+  PR for the current head (exit 1 otherwise, status untouched). Session ownership, final
+  proof and the content of the findings remain driver responsibilities. Use this for
+  delivery; `status` is metadata maintenance.
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
   `--stall MINUTES` (default 20). `wait PR --merged` waits for the human merge
@@ -118,6 +120,26 @@ trust; new definitions need personal review and trust. See
   and security rows end separately: a security result comment never ends a running code
   review), bot 👀 reactions and review requests. Free-text announcements of other bots are not
   detected; check such reviewers by hand.
+
+### Handoff comment
+
+`handoff` needs one comment on the PR from the driver (the authenticated GitHub user) that
+has the heading `## Übergabe` on its own line and was created after the push of the current
+head. The push is dated by the creation of the head's first check suite, a few seconds after
+the push, so post the comment after the checks have started; a head without any check suite
+(CI reported only as a status) cannot be dated, and `handoff` refuses it. A new head, for
+example after a review fix, asks for a new comment; an edited older comment does not count. Put the retro result and the list of all findings with their
+disposition (fixed, linked follow-up issue, or none) under the heading, and, if a reviewer
+was unavailable or stalled, the reviewer, cause and evidence. The command checks the heading,
+author and time, not the content, which is for the human reviewer:
+
+```md
+## Übergabe
+
+- Retro: <Ergebnis oder „keine Befunde“>
+- Befunde: <je Befund: behoben (Commit), Folge-Issue (Link), oder „keine“>
+- Eingeschränkte Reviewer: <Reviewer, Ursache, Beleg, oder „keine“>
+```
 
 Before implementation, complete [Start or resume](AGENT_RULES.md#start-or-resume);
 a check alone does not claim work.
