@@ -411,7 +411,12 @@ function link() {
   if (!connectedIssues(pr, true).has(issue.id)) {
     graphql('mutation($issue:ID!,$pr:ID!){addCloseIssueReferences(input:{issueId:$issue,pullRequestIds:[$pr]}){clientMutationId}}',
       { issue: issue.id, pr: pr.id });
-    assert.ok(connectedIssues(pr, true).has(issue.id), `Native link read-back differs: PR #${value} does not close issue #${number}`);
+    // GitHub shows the new connection with a delay (seen live: the first read-back right after the write was empty).
+    // Read back a few times; the write is never repeated.
+    for (let attempt = 1; !connectedIssues(pr, true).has(issue.id); attempt++) {
+      assert.ok(attempt < 5, `Native link read-back differs: PR #${value} does not close issue #${number}`);
+      sleep(1);
+    }
   }
   console.log(`#${number} is natively linked to PR #${value}`);
 }

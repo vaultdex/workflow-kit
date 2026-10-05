@@ -86,7 +86,9 @@ trust; new definitions need personal review and trust. See
 - `link ISSUE PR`: connect the issue natively to the PR (the GraphQL
   `addCloseIssueReferences` mutation behind a closing keyword, which acts only on the
   default branch) and read `closingIssuesReferences` back. A Draft PR works; an existing
-  connection is a success without a write; a write whose read-back lacks the issue exits 2.
+  connection is a success without a write; the read-back after the write is repeated up to
+  five times, one second apart (GitHub shows a new connection with a delay), and a write
+  whose read-back still lacks the issue exits 2. The write itself is never repeated.
   It never closes the issue: that happens when the PR merges into the default branch.
 - `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
   repository ready for review, but only for the commit you pushed. It rereads the PR

@@ -50,7 +50,10 @@ if (query.startsWith('mutation')) {
   const option = process.argv.find(arg => arg.startsWith('option='));
   if (option) fs.writeFileSync('stored', option.slice(7));
   if (query.includes('addCloseIssueReferences') && !fs.existsSync('link-noop')) {
-    fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), linkPages: [['I1']] }));
+    // link-delay: the connection shows only after that many reads, like GitHub's delayed consistency.
+    const delay = fs.existsSync('link-delay') ? Number(fs.readFileSync('link-delay', 'utf8')) : 0;
+    const before = JSON.parse(fs.readFileSync('pr.json'));
+    fs.writeFileSync('pr.json', JSON.stringify(delay ? { ...before, linkPending: delay } : { ...before, linkPages: [['I1']] }));
   }
   if (query.includes('markPullRequestReadyForReview') && !fs.existsSync('ready-noop')) {
     fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), isDraft: false }));
@@ -81,7 +84,11 @@ else if (query.includes('reviewThreads(first:100,after')) {
 }
 else if (query.includes('closingIssuesReferences')) {
   if (fs.existsSync('fail-links')) process.exit(1);
-  const pr = JSON.parse(fs.readFileSync('pr.json'));
+  let pr = JSON.parse(fs.readFileSync('pr.json'));
+  if (pr.linkPending !== undefined) {
+    pr = pr.linkPending > 0 ? { ...pr, linkPending: pr.linkPending - 1 } : { ...pr, linkPending: undefined, linkPages: [['I1']] };
+    fs.writeFileSync('pr.json', JSON.stringify(pr));
+  }
   const pages = pr.linkPages ?? [[]];
   const cursor = process.argv.find(arg => arg.startsWith('after='));
   const index = cursor ? Number(cursor.slice(6)) : 0;
@@ -641,6 +648,13 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   result = run('link', '1', '7');
   assert.equal(result.status, 0, 'A second run finds the link already there');
   assert.equal(mutations(), 1, 'No second write');
+
+  prepare();
+  writeFileSync(join(checkout, 'link-delay'), '2');
+  result = run('link', '1', '7');
+  assert.equal(result.status, 0, 'A connection GitHub shows only after a delay is read back repeatedly: ' + result.stdout + result.stderr);
+  assert.equal(mutations(), 1, 'The write is not repeated while waiting');
+  rmSync(join(checkout, 'link-delay'));
 
   prepare({ state: 'CLOSED' });
   assert.equal(run('link', '1', '7').status, 2, 'A closed PR is never linked');
