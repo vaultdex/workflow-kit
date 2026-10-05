@@ -52,7 +52,20 @@ if (query.startsWith('mutation')) {
   if (query.includes('markPullRequestReadyForReview') && !fs.existsSync('ready-noop')) {
     fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), isDraft: false }));
   }
-  data = {};
+  if (query.includes('addProjectV2ItemById')) {
+    // add-exists: the Project's own automation was faster, so GitHub refuses like this and the item is readable now
+    // (unless add-exists-unreadable); add-fails: any other refusal.
+    if (fs.existsSync('add-exists')) {
+      if (!fs.existsSync('add-exists-unreadable')) fs.copyFileSync('issue-with-item.json', 'issue.json');
+      process.stderr.write('gh: Content already exists in this project\\n');
+      process.exit(1);
+    }
+    if (fs.existsSync('add-fails')) {
+      process.stderr.write('gh: Resource not accessible by integration\\n');
+      process.exit(1);
+    }
+    data = { addProjectV2ItemById: { item: { id: 'PI1' } } };
+  } else data = {};
 } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
 else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
   projectItems: { nodes: [{ project: { id: 'P1' }, value: { name: fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8') } }] } } } };
@@ -673,4 +686,36 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
   assert.equal(mutations(), 1, 'The mutation is not repeated blindly');
 
   assert.equal(run('ready', '7', 'not-a-sha').status, 2, 'Only a full commit SHA is accepted');
+});
+
+test('a field write succeeds when the Project already added the issue itself, and fails on every other refusal', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const noItem = { ...issue(), projectItems: { nodes: [] } };
+  const mutations = () => existsSync(join(checkout, 'mutations')) ? readFileSync(join(checkout, 'mutations'), 'utf8').split('\n').filter(Boolean) : [];
+  const count = (name, list = mutations()) => list.filter(line => line.includes(name)).length;
+  const prepare = (...flags) => {
+    for (const file of ['mutations', 'stored', 'add-exists', 'add-exists-unreadable', 'add-fails']) rmSync(join(checkout, file), { force: true });
+    writeIssue(noItem);
+    writeFileSync(join(checkout, 'issue-with-item.json'), JSON.stringify(issue()));
+    for (const flag of flags) writeFileSync(join(checkout, flag), '');
+  };
+
+  prepare();
+  let result = run('priority', '1', 'High');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual([count('addProjectV2ItemById'), count('updateProjectV2ItemFieldValue')], [1, 1], 'A missing item is added once, then written');
+
+  prepare('add-exists');
+  result = run('priority', '1', 'High');
+  assert.equal(result.status, 0, 'Already on the Project is no failure: ' + result.stdout + result.stderr);
+  assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'High', 'The value is still written');
+  assert.deepEqual([count('addProjectV2ItemById'), count('updateProjectV2ItemFieldValue')], [1, 1]);
+
+  prepare('add-exists', 'add-exists-unreadable');
+  assert.notEqual(run('priority', '1', 'High').status, 0, 'Already there but no readable item stays a failure');
+  assert.equal(count('updateProjectV2ItemFieldValue'), 0, 'Nothing is written without an item');
+
+  prepare('add-fails');
+  assert.notEqual(run('priority', '1', 'High').status, 0, 'Any other refusal stays a failure');
+  assert.equal(count('updateProjectV2ItemFieldValue'), 0);
 });
