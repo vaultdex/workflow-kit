@@ -520,8 +520,9 @@ test('reviews waits only for traces on the current head and never reads failures
   const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
   const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
   const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
-  const suite = (status = 'COMPLETED', runs = 1, minutes = 1, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({
-    createdAt: minutesAgo(minutes), status, conclusion, app: { slug: 'github-actions' }, checkRuns: { totalCount: runs } });
+  const suite = (status = 'COMPLETED', runs = 1, minutes = 1, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null, run, workflowId = 'W-Frontend', slug = 'github-actions') => ({
+    createdAt: minutesAgo(minutes), status, conclusion, app: { slug }, checkRuns: { totalCount: runs },
+    workflowRun: run === undefined ? null : { databaseId: run, workflow: { id: workflowId } } });
   const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, requestEventTotal, threadPages,
     suites = [suite('COMPLETED', 1, pushed)], suiteTotal = suites.length } = {}) => ({
     number: 7, state: 'OPEN', headRefOid: 'abcdef1234', mergeStateStatus: 'CLEAN', reviewDecision: null,
@@ -575,6 +576,19 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr({ suiteTotal: 101 })), 2, 'Unreadable check suites are never done');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), suite('COMPLETED', 0, 1, 'STARTUP_FAILURE')] })), 1, 'A workflow that fails to start is FAILED');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE'), check('IN_PROGRESS')] })), 1, 'A known failure ends the wait while other checks run');
+  // Draft then Ready: the first run's suite is cancelled before it reports a check run, the second run's suite carries them.
+  const cancelled = suite('COMPLETED', 0, 1, 'CANCELLED', 10);
+  assert.equal(reviews(pr({ suites: [cancelled] })), 1, 'A single empty cancelled suite is a failure');
+  assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 0, 'A newer successful suite of the same workflow replaces it');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1, 'SUCCESS', 11), cancelled] })), 0, 'The order of the suites does not matter');
+  assert.equal(reviews(pr({ suites: [cancelled, suite('QUEUED', 0, 1, null, 11)] })), 3, 'A newer suite that has not reported yet waits');
+  assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 0, 1, 'CANCELLED', 11)] })), 1, 'A newest cancelled suite is a failure');
+  assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 0, 1, 'STARTUP_FAILURE', 11)] })), 1, 'A newer suite that fails to start is a failure');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 0, 1, 'STARTUP_FAILURE', 10)] })), 1, 'A startup failure without a replacement is a failure');
+  assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'SUCCESS', 11, 'W-Other')] })), 1, 'Another workflow does not replace it');
+  assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'SUCCESS', 11, 'W-Frontend', 'other-app')] })), 1, 'Another app does not replace it');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 0, 1, 'CANCELLED', 12), suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 1, 'An older successful suite does not replace a newer cancelled one');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 0, 1, 'CANCELLED'), suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 1, 'A suite without a workflow run cannot be ordered and stays a failure');
   // Draft then Ready starts a second run of the same job and cancels the first: only the newest run of a job counts.
   // `run` is the workflow run the job belongs to; by default every job is the only one of its own run.
   const job = (run, status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null, name = 'Backend', workflow = 'Backend importer', workflowId = `W-${workflow}`) =>
