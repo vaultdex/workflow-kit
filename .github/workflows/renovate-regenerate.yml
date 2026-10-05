@@ -29,19 +29,21 @@ jobs:
     env:
       BRANCH: ${{ github.event.pull_request.head.ref }}
     steps:
-      # No stored credentials: the branch's scripts run next, and only the last two steps get the token.
+      # The commit Renovate's authenticated event named, not the branch name: a push by someone else in
+      # between makes the final push fail instead of running that commit. No stored credentials either;
+      # only the last two steps get the token.
       - uses: actions/checkout@v7.0.1
         env:
           GIT_CONFIG_COUNT: '1'
           GIT_CONFIG_KEY_0: init.defaultBranch
           GIT_CONFIG_VALUE_0: main
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
-      # Scripts from the branch run next: only bots may have authored it, and Renovate's own
-      # commits may only move submodule pins and .gitmodules. The bot's regeneration commits are generated output.
+      # Policy: a branch with commits by someone else is theirs; leave it alone. Commit author names are
+      # self-reported, so this is no security boundary: the job runs only the scripts of main (next step).
       - name: Check who changed the branch
         run: |
           set -euo pipefail
@@ -56,6 +58,15 @@ jobs:
             echo "::error::Renovate commits change more than submodule pins; not running with write access: $other"
             exit 1
           fi
+      # Whatever the branch changed under scripts/ never runs here: main's scripts replace it, and only the
+      # branch's adaptation patch (input data for the Ponytail port) is kept.
+      - name: Run only the scripts of main
+        if: env.SKIP != 'true'
+        run: |
+          set -euo pipefail
+          cp scripts/ponytail/adaptations.patch "$RUNNER_TEMP/branch-adaptations.patch"
+          git archive origin/main scripts .node-version | tar -x
+          cp "$RUNNER_TEMP/branch-adaptations.patch" scripts/ponytail/adaptations.patch
       - uses: actions/setup-node@v7.0.0
         if: env.SKIP != 'true'
         with:
@@ -77,14 +88,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git add --intent-to-add --all
-          if git diff --quiet HEAD; then
+          # Generated outputs and the adaptation patch only; main's scripts stay out of the commit.
+          git add --all -- . ':(exclude)scripts' ':(exclude).node-version'
+          git add -- scripts/ponytail/adaptations.patch
+          if git diff --cached --quiet HEAD; then
             echo "Committed outputs are already current."
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all
           git commit -q -m 'chore(skills): Ausgaben nach Submodul-Update regenerieren' -m 'Erzeugt vom Workflow Renovate regenerate (#93).'
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"

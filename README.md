@@ -127,9 +127,13 @@ Renovate pull requests from this repository that change `.vendor/*`: it runs
 generators, pushes the result to the Renovate branch and dispatches the repository CI on the
 new head (pushes with `GITHUB_TOKEN` start no workflows). The job holds `contents: write`
 and `actions: write` (the token reaches only the push and dispatch steps), runs only for
-`renovate[bot]` pull requests whose commits are all by bots, and stops before any script if
-Renovate's own commits change more than `.gitmodules` and submodule pins. `renovate.json`
-lists the bot's commit address in `gitIgnoredAuthors`, so Renovate keeps updating the branch.
+`renovate[bot]` pull requests whose commits are all by bots, and checks out the commit of
+Renovate's authenticated event, not the branch name. Whatever the branch changed under
+`scripts/` never runs: main's scripts replace it, and only the branch's adaptation patch is
+kept as input. Renovate's own commits may change nothing but `.gitmodules` and submodule
+pins. Commit author names prove nothing, so the bot-author rule only leaves branches with
+other people's commits alone. `renovate.json` lists the bot's commit address in
+`gitIgnoredAuthors`, so Renovate keeps updating the branch.
 
 When upstream edits lines our Ponytail adaptations rewrite, the job fails and names the files.
 Run `node scripts/update-ponytail.mjs` on the Renovate branch: it writes the conflicting
