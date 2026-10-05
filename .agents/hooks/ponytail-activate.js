@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ponytail — Claude Code SessionStart activation hook (also Codex, Copilot,
-// Grok and Cursor sessionStart)
+// Grok, CodeBuddy and Cursor sessionStart)
 //
 // Runs on every session start:
 //   1. Writes the active mode to the runtime's user-local state directory
@@ -12,6 +12,7 @@ const {
   clearMode,
   cursorRuleNotice,
   cursorRulePath,
+  isCodeBuddy,
   isCodex,
   isCopilot,
   isCursor,
@@ -29,7 +30,7 @@ const mode = process.argv[3] === 'continue' ? readMode() || 'off' : getDefaultMo
 // "off" mode — skip activation entirely, don't write flag or emit rules
 if (mode === 'off') {
   clearMode();
-  const hookOutput = (isCodex || isCopilot || isCursor || isZcode) ? '' : 'OK';
+  const hookOutput = (isCodex || isCopilot || isCursor || isZcode || isCodeBuddy) ? '' : 'OK';
   writeHookOutput('SessionStart', 'off', hookOutput);
   return;
 }

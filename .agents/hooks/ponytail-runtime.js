@@ -25,13 +25,16 @@ const isCopilot = projectHost ? projectHost === 'copilot' : Boolean(process.env.
   isVsCodeCopilotRoot(process.env.CLAUDE_PLUGIN_ROOT);
 const isCodex = projectHost ? projectHost === 'codex' : !isCopilot && Boolean(process.env.PLUGIN_DATA);
 const isQoder = !projectHost && !isCopilot && !isCodex && Boolean(process.env.QODER_SESSION_ID);
+// CodeBuddy (#854) loads the Claude-format plugin and sets CLAUDE_PLUGIN_ROOT
+// too, but adds CODEBUDDY_PLUGIN_ROOT only for its own plugin hook processes.
+const isCodeBuddy = !projectHost && !isCopilot && !isCodex && !isQoder && Boolean(process.env.CODEBUDDY_PLUGIN_ROOT);
 // Cursor (#817): CURSOR_VERSION is set only in the environment Cursor builds
 // for hook processes (Cursor 3.20.17 assigns it in exactly one place, the hook
 // env builder), so it never leaks into a Claude Code session running inside
 // Cursor's terminal. Cursor also sets it when it runs a Claude-format plugin's
 // hooks next to CLAUDE_PLUGIN_ROOT, and it needs Cursor-shaped JSON either
 // way, so this check comes after the hosts with their own data dirs.
-const isCursor = projectHost ? projectHost === 'cursor' : !isCopilot && !isCodex && !isQoder && Boolean(process.env.CURSOR_VERSION);
+const isCursor = projectHost ? projectHost === 'cursor' : !isCopilot && !isCodex && !isQoder && !isCodeBuddy && Boolean(process.env.CURSOR_VERSION);
 // ZCode injects ZCODE_APP_VERSION into every child process, hooks included.
 const isZcode = !projectHost && !isCopilot && !isCodex && !isQoder && !isCursor &&
   Boolean(process.env.ZCODE_APP_VERSION);
@@ -42,6 +45,7 @@ if (isCodex && !projectHost) stateDir = process.env.PLUGIN_DATA;
 // getClaudeDir() rather than building a path from undefined.
 if (isCopilot) stateDir = process.env.COPILOT_PLUGIN_DATA || getClaudeDir();
 if (isQoder) stateDir = path.join(os.homedir(), '.qoder');
+if (isCodeBuddy) stateDir = process.env.CODEBUDDY_CONFIG_DIR || path.join(os.homedir(), '.codebuddy');
 if (isCursor) stateDir = path.join(os.homedir(), '.cursor');
 if (projectHost) {
   // ponytail: mode is shared by sessions of one host in one checkout, as upstream;
@@ -132,13 +136,14 @@ function writeHookOutput(event, mode, context = '') {
     process.stdout.write(JSON.stringify(output));
     return;
   }
-  if (isQoder || isZcode) {
+  if (isQoder || isZcode || isCodeBuddy) {
     // Qoder: hookSpecificOutput JSON, same shape as Codex minus systemMessage.
     // UserPromptSubmit additionalContext is injected into the Agent's conversation.
     // ZCode parses hook stdout as strict JSON too — raw text fails validation
     // and is silently discarded (#798). Unlike Qoder it has SessionStart, so
     // activate.js handles startup injection and only the output shape differs
     // from Claude Code.
+    // CodeBuddy would take raw stdout too, but also echoes it into the chat.
     const output = {};
     if (context) {
       output.hookSpecificOutput = {
@@ -175,6 +180,7 @@ module.exports = {
   clearMode,
   cursorRuleNotice,
   cursorRulePath,
+  isCodeBuddy,
   isCodex,
   isCopilot,
   isCursor,
