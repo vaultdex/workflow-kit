@@ -30,6 +30,17 @@ if (!path.startsWith('graphql')) {
   // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
   const parts = path.split('?')[0].split('/');
   const backlink = 'backlink-' + parts[4] + '.json';
+  if (parts[3] === 'issues' && parts.length === 5 && process.argv.includes('PATCH')) {
+    // A body write; body-overwritten is what another session writes right after it.
+    const issue = JSON.parse(fs.readFileSync(backlink));
+    // Like gh: body=@- is stdin, body=@<path> a file.
+    const source = process.argv.find(arg => arg.startsWith('body=@')).slice(6);
+    issue.body = fs.readFileSync(fs.existsSync('body-overwritten') ? 'body-overwritten' : source === '-' ? 0 : source, 'utf8');
+    fs.writeFileSync(backlink, JSON.stringify(issue));
+    fs.appendFileSync('patches', 'x\\n');
+    process.stdout.write(JSON.stringify(issue));
+    process.exit(0);
+  }
   if (parts[3] === 'issues' && parts.length === 5) {
     process.stdout.write(fs.readFileSync(backlink));
     process.exit(0);
@@ -819,4 +830,71 @@ test('handoff needs the driver handoff comment that names the current head', t =
   const result = run('handoff', '1', '7');
   assert.equal(result.status, 0, 'The authenticated user matches regardless of case: ' + result.stdout + result.stderr);
   assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
+});
+
+test('body writes an issue body only on top of the one it is based on and proves the write', t => {
+  const { checkout, run } = fixture(t);
+  const file = (name, text) => { writeFileSync(join(checkout, name), text); return name; };
+  const server = (body, extra = {}) => writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0, body, ...extra }));
+  const stored = () => JSON.parse(readFileSync(join(checkout, 'backlink-1.json'), 'utf8')).body;
+  const patches = () => existsSync(join(checkout, 'patches')) ? readFileSync(join(checkout, 'patches'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const reset = () => { rmSync(join(checkout, 'patches'), { force: true }); rmSync(join(checkout, 'body-overwritten'), { force: true }); };
+  const change = file('change.md', 'neu\nzeile\n'), base = file('base.md', 'alt\nzeile\n');
+
+  // Unchanged since it was read (GitHub may return CRLF): written once and read back.
+  server('alt\r\nzeile');
+  let result = run('body', '1', change, base);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal([patches(), stored()].join('|'), '1|neu\nzeile');
+
+  // Changed by another session before the write: nothing is written, the difference is shown.
+  reset();
+  server('alt\nvon einer anderen Session ergänzt');
+  result = run('body', '1', change, base);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^FAILED$/m);
+  assert.match(result.stdout, /von einer anderen Session ergänzt/, 'The current text is part of the diff');
+  assert.equal([patches(), stored()].join('|'), '0|alt\nvon einer anderen Session ergänzt');
+
+  // Overwritten right after the write: the read-back reports it, and the write is not repeated.
+  reset();
+  server('alt\nzeile');
+  writeFileSync(join(checkout, 'body-overwritten'), 'Fassung der anderen Session');
+  result = run('body', '1', change, base);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^FAILED$/m);
+  assert.match(result.stdout, /Fassung der anderen Session/);
+  assert.equal(patches(), 1);
+
+  // A file named "-" must not be taken for stdin: the text that was read is written, never an empty body.
+  reset();
+  server('alt\nzeile');
+  file('-', 'neu aus Datei namens minus\n');
+  result = run('body', '1', '-', base);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal([patches(), stored()].join('|'), '1|neu aus Datei namens minus');
+  rmSync(join(checkout, '-'));
+
+  // Already the wanted text: no write at all.
+  reset();
+  server('neu\nzeile');
+  assert.equal(run('body', '1', change, change).status, 0);
+  assert.equal(patches(), 0);
+
+  // A pull request answers under its number as well (with a pull_request key): its description is never replaced.
+  reset();
+  server('alt\nzeile', { pull_request: { url: 'x' } });
+  assert.equal(run('body', '1', change, base).status, 2);
+  server('alt\nzeile', { number: 2 });
+  assert.equal(run('body', '1', change, base).status, 2, 'A different number is not the requested issue');
+  assert.equal(patches(), 0);
+
+  // Unreadable input and API errors are errors, never a written body.
+  reset();
+  server('alt\nzeile');
+  assert.equal(run('body', '1', 'missing.md', base).status, 2);
+  assert.equal(run('body', '1', change).status, 2, 'The base the change rests on is required');
+  writeFileSync(join(checkout, 'fail-rest'), '');
+  assert.equal(run('body', '1', change, base).status, 2);
+  assert.equal(patches(), 0);
 });

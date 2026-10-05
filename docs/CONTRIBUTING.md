@@ -82,6 +82,15 @@ Use the issue form's sections:
 Small tasks stay short. Move answers and decisions from comments into the body,
 naming their source. See the [examples](task-writing-examples.md).
 
+**Changing a body.** Several sessions often work on related issues, and GitHub replaces a
+whole body without any version check. Change the body of an issue another session may also
+edit only with `board.mjs body ISSUE FILE BASE_FILE`: `BASE_FILE` holds the body your change
+is based on (`gh issue view N --json body --jq .body`), `FILE` the new one. The command
+refuses and prints the difference when the body changed since you read it, and reports a
+conflict when the read-back after the write is not what was written. On a conflict read the
+body again, merge both changes and write again. A small window between the read and the write
+remains, because GitHub has no conditional write; the read-back catches every overwrite before it.
+
 **Metadata.** Every issue, including Backlog items and follow-ups, gets one
 repository milestone, a Project Priority and area/type labels when it is created,
 and keeps them after closing. Set the real fields (`gh issue create --milestone …
