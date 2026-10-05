@@ -117,6 +117,22 @@ function selectField(fieldName) {
   return { field, linked, choices: linked ? linked.options : field.options };
 }
 
+/**
+ * Put the issue on the Project. A new issue may already have been added by the Project's own automation: GitHub then
+ * refuses with "already exists", which is no failure as long as the item can be read afterwards.
+ */
+function addToProject(issue) {
+  try {
+    return graphql(`mutation($project:ID!,$content:ID!){addProjectV2ItemById(
+      input:{projectId:$project,contentId:$content}){item{id}}}`, { project: project.id, content: issue.id }).addProjectV2ItemById.item.id;
+  } catch (error) {
+    if (!/already exists in this project/i.test(String(error.stderr ?? ''))) throw error;
+    const id = projectItem(readIssue())?.id;
+    assert.ok(id, `GitHub reports #${issue.number} as already on the Project, but its item is unreadable`);
+    return id;
+  }
+}
+
 /** Write a selected field option; guarded delivery can reject the fresh issue before mutation. */
 function set(fieldName, optionName = value, beforeWrite) {
   let issue = readIssue();
@@ -141,8 +157,7 @@ function set(fieldName, optionName = value, beforeWrite) {
       issueFields:[{fieldId:$field,singleSelectOptionId:$option}]}){clientMutationId}}`,
     { issue: issue.id, field: linked.id, option: option.id });
   } else {
-    const item = projectItem(issue)?.id ?? graphql(`mutation($project:ID!,$content:ID!){addProjectV2ItemById(
-      input:{projectId:$project,contentId:$content}){item{id}}}`, { project: project.id, content: issue.id }).addProjectV2ItemById.item.id;
+    const item = projectItem(issue)?.id ?? addToProject(issue);
     graphql(`mutation($project:ID!,$item:ID!,$field:ID!,$option:String!){updateProjectV2ItemFieldValue(input:{projectId:$project,
       itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
     { project: project.id, item, field: field.id, option: option.id });
@@ -299,18 +314,22 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // Inline review comments and thread replies carry findings too.
   const inline = restAll(`repos/${project.repository}/pulls/${pr.number}/comments`);
   // Results a bot can post: a review of this head, an issue comment, or a final (non-👀) reaction.
-  const results = [...comments.map(comment => [login(comment.user), comment.updated_at, comment.id]),
-    ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at, null]),
-    ...reactions.filter(reaction => reaction.content !== 'eyes').map(reaction => [login(reaction.user), reaction.created_at, null])];
+  // Codex runs a code and a security review side by side; the security result is its own comment under a
+  // "Security Review" heading, so it ends only the security row. A final reaction ends every kind.
+  const securityResult = body => /^#{1,6}\s.*Security Review/mi.test(body);
+  const results = [...comments.map(comment => [login(comment.user), comment.updated_at, comment.id, securityResult(comment.body) ? 'security' : 'code']),
+    ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at, null, 'code']),
+    ...reactions.filter(reaction => reaction.content !== 'eyes').map(reaction => [login(reaction.user), reaction.created_at, null, 'any'])];
   // The summary's own later edits are no result, so its comment id is skipped.
-  const answeredAfter = (author, since, own) => results.some(([who, time, id]) => who === author && (id === null || id !== own) && Date.parse(time) > since);
+  const answeredAfter = (author, since, own, kind) => results.some(([who, time, id, resultKind]) =>
+    who === author && (id === null || id !== own) && Date.parse(time) > since && (resultKind === 'any' || resultKind === kind));
   const short = pr.headRefOid.slice(0, 7);
   for (const comment of comments.filter(comment => isBot(comment.user) && after(comment.updated_at))) {
     // Summary comments (Codex) name the head in a table row that says Running until the review completes;
     // a result the same bot posts elsewhere ends it too.
     for (const row of comment.body.split('\n').filter(row => row.includes('Running') && row.includes(short))) {
       const since = row.match(/datetime="([^"]+)"/)?.[1] ?? comment.updated_at;
-      if (answeredAfter(login(comment.user), Date.parse(since), comment.id)) continue;
+      if (answeredAfter(login(comment.user), Date.parse(since), comment.id, /Security Review/i.test(row) ? 'security' : 'code')) continue;
       waiting.push({ text: `${login(comment.user)} running since ${since}`, since: Date.parse(since) });
     }
   }
@@ -352,18 +371,18 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, lines, pr };
+  return { done: failed || !pending.length, failed, lines, pr, comments };
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
-function connectedIssues(pr) {
+function connectedIssues(pr, draftAllowed = false) {
   const ids = new Set();
   for (let after; ;) {
     const current = graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
       pullRequest(number:$number){state isDraft headRefOid closingIssuesReferences(first:100,after:$after){totalCount
         pageInfo{hasNextPage endCursor} nodes{id}}}}}`, { owner, name, number: pr.number, ...(after && { after }) })
       .repository.pullRequest;
-    assert.ok(current?.state === 'OPEN' && current.isDraft === false && current.headRefOid === pr.headRefOid,
+    assert.ok(current?.state === 'OPEN' && (draftAllowed || current.isDraft === false) && current.headRefOid === pr.headRefOid,
       'PR changed after the review check; read the current head again');
     const links = current.closingIssuesReferences;
     assert.ok(links?.nodes && links.pageInfo, 'Native issue links are unreadable');
@@ -378,6 +397,28 @@ function connectedIssues(pr) {
     assert.ok(links.pageInfo.endCursor && links.pageInfo.endCursor !== after, 'Issue-link pagination did not advance');
     after = links.pageInfo.endCursor;
   }
+}
+
+/** Connect the issue natively to the PR (what a closing keyword does only on the default branch) and read it back. */
+function link() {
+  const prNumber = Number(value);
+  const issue = readIssue();
+  assert.ok(issue?.id, 'Issue identity is unreadable');
+  const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    pullRequest(number:$number){id number state headRefOid}}}`, { owner, name, number: prNumber }).repository;
+  assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${value} is not an open pull request of ${project.repository}`);
+  // Already connected is a success without a write; a Draft PR can be connected too.
+  if (!connectedIssues(pr, true).has(issue.id)) {
+    graphql('mutation($issue:ID!,$pr:ID!){addCloseIssueReferences(input:{issueId:$issue,pullRequestIds:[$pr]}){clientMutationId}}',
+      { issue: issue.id, pr: pr.id });
+    // GitHub shows the new connection with a delay (seen live: the first read-back right after the write was empty).
+    // Read back a few times; the write is never repeated.
+    for (let attempt = 1; !connectedIssues(pr, true).has(issue.id); attempt++) {
+      assert.ok(attempt < 5, `Native link read-back differs: PR #${value} does not close issue #${number}`);
+      sleep(1);
+    }
+  }
+  console.log(`#${number} is natively linked to PR #${value}`);
 }
 
 /** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
@@ -398,8 +439,17 @@ function handoffIssue(issue, viewer) {
   return true;
 }
 
+/**
+ * The driver's handoff comment: a "## Übergabe" heading and a "Head: <SHA>" line in a PR comment by the authenticated
+ * user. The comment names the head it is about, so a new head asks for a new comment however (and whenever) the push
+ * happened, which no timestamp reliably tells. Its content (retro result, findings list) is for the human reviewer and
+ * is not judged here.
+ */
+const hasHandoffComment = (comments, viewer, headRefOid) => comments.some(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
+  && /^## Übergabe\s*$/m.test(comment.body ?? '') && new RegExp(`^Head:\\s*${headRefOid.slice(0, 7)}`, 'im').test(comment.body ?? ''));
+
 /** Read all PR gates and native links, optionally requiring the previously checked head. */
-function handoffPr(issueId, expectedHead) {
+function handoffPr(issueId, viewer, expectedHead) {
   const reasons = [];
   const pr = readPr(Number(value));
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
@@ -418,6 +468,9 @@ function handoffPr(issueId, expectedHead) {
   if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, 'PR head changed during handoff');
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push('resolve review blockers and threads before handoff');
+  }
+  if (!hasHandoffComment(result.comments, viewer, result.pr.headRefOid)) {
+    reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${result.pr.headRefOid.slice(0, 7)}" line, the retro result and the findings list (README: Handoff comment)`);
   }
   if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
     console.log('WAITING\nwaiting: PR mergeability is not determined');
@@ -439,10 +492,10 @@ function handoff() {
   const { viewer } = graphql('query{viewer{login}}');
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
   if (!handoffIssue(issue, viewer)) return;
-  const pr = handoffPr(issue.id);
+  const pr = handoffPr(issue.id, viewer);
   if (!pr) return;
   if (!set('Status', 'Human review', () => {
-    if (!handoffPr(issue.id, pr.headRefOid)) return;
+    if (!handoffPr(issue.id, viewer, pr.headRefOid)) return;
     const current = readIssue();
     assert.equal(current?.id, issue.id, 'Issue identity changed during handoff');
     return handoffIssue(current, viewer) ? current : undefined;
@@ -451,7 +504,65 @@ function handoff() {
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
 }
 
-const stallOption = () => process.argv.includes('--stall') ? Number(process.argv[process.argv.indexOf('--stall') + 1]) : 20;
+const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
+const stallOption = () => numberOption('--stall', 20);
+
+/** Metadata that can still describe the previous push right after it: identity, branch, state, draft, head. */
+const readyQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+  id number state isDraft isCrossRepository headRefOid headRepository{nameWithOwner}}}}`;
+const sleep = seconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
+/**
+ * Polling must end: a few reads, finite pauses, at most half an hour of waiting in total (also keeps seconds * 1000
+ * finite). `ready` waits in two loops (stale head before the write, read-back after it), each sleeping up to
+ * (attempts - 1) times, so both count.
+ */
+function readyOptionsBounded() {
+  const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
+  return Number.isInteger(attempts) && attempts >= 1 && attempts <= 100 && Number.isFinite(interval) && interval >= 0
+    && 2 * attempts * interval <= 1800;
+}
+
+/** Mark a Draft PR ready only for the explicitly expected pushed commit; stale metadata is waited out, never trusted. */
+function ready() {
+  const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
+  const read = () => {
+    const pr = graphql(readyQuery, { owner, name, number }).repository.pullRequest;
+    assert.ok(pr?.id && pr.number === number, 'The PR is unreadable');
+    assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
+    return pr;
+  };
+  const refuse = (...reasons) => {
+    console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    process.exitCode = 1;
+  };
+  let pr;
+  for (let attempt = 1; ; attempt++) {
+    pr = read();
+    if (pr.state !== 'OPEN') return refuse(`PR #${number} is ${pr.state.toLowerCase()}`);
+    // A fork's or another repository's branch is not ours to mark ready.
+    // GitHub reports the canonical spelling; the configured OWNER/REPO may differ in case.
+    if (pr.isCrossRepository || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) return refuse(`PR #${number} does not come from a branch of ${project.repository}`);
+    if (!pr.isDraft) {
+      if (pr.headRefOid !== value.toLowerCase()) return refuse(`PR #${number} is already ready with head ${pr.headRefOid.slice(0, 7)}, not ${value.slice(0, 7)}`);
+      return console.log(`READY #${number} head ${pr.headRefOid} (already ready)`);
+    }
+    if (pr.headRefOid === value.toLowerCase()) break;
+    if (attempt >= attempts) return refuse(`PR #${number} still reports head ${pr.headRefOid.slice(0, 7)} after ${attempts} reads; expected ${value.slice(0, 7)}`);
+    sleep(interval);
+  }
+  // One more read narrows the window in which a new push could slip between check and mutation.
+  const current = read();
+  if (current.state !== 'OPEN' || !current.isDraft || current.headRefOid !== pr.headRefOid) return refuse('the PR changed after the check; read it again');
+  graphql('mutation($pr:ID!){markPullRequestReadyForReview(input:{pullRequestId:$pr}){pullRequest{number}}}', { pr: pr.id });
+  // A write only counts once the read-back shows the expected head ready.
+  for (let attempt = 1; ; attempt++) {
+    const done = read();
+    if (done.state === 'OPEN' && !done.isDraft && done.headRefOid === pr.headRefOid) break;
+    assert.ok(attempt < attempts, `Ready read-back differs: draft ${done.isDraft}, head ${done.headRefOid.slice(0, 7)}`);
+    sleep(interval);
+  }
+  console.log(`READY #${number} head ${pr.headRefOid}`);
+}
 // Waiting is over either way; FAILED keeps a red head from reading as a finished review.
 const outcome = ({ failed }) => failed ? ['FAILED', 1] : ['DONE', 0];
 
@@ -505,17 +616,20 @@ function block() {
 }
 
 const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait, handoff };
+  reviews: reviewsOnce, wait, handoff, ready, link };
 const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]';
+  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]'
+  + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
+  + ' | link ISSUE PR';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
-  || (command === 'handoff' && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
+  || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
+  || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
@@ -524,7 +638,7 @@ try {
   await commands[command]();
 } catch (error) {
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link'].includes(command)) throw error;
   console.log(`${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${String(error.stderr || error.message).trim()}`);
   process.exitCode = 2;
 }

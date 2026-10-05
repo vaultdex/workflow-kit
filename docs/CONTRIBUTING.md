@@ -123,9 +123,9 @@ delivery never closes an issue; split the undeliverable part first
 ([undeliverable acceptance](#undeliverable-acceptance)). A branch created from the
 issue is a branch connection, not proof of a direct PR connection. After creating
 the PR or changing its body or base, verify the delivered issue in
-`gh pr view PR --json closingIssuesReferences`. On a non-default base, manually
-connect the issue through GitHub's Development sidebar (or the GraphQL
-`addCloseIssueReferences` mutation), then read it back. This connection closes
+`gh pr view PR --json closingIssuesReferences`. On a non-default base, connect
+the issue with `board.mjs link ISSUE PR` (or GitHub's Development sidebar); the
+command reads the connection back. This connection closes
 the issue only when merged into the default branch; keep the project's release
 rules for references and completion.
 
@@ -165,7 +165,9 @@ backlink never closes an issue.
 1. Before the first push, focused checks pass, the diff is reviewed and current
    main is merged if the branch is behind. Push once, then update the same PR.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
-   Then mark it Ready for Review and set Automated review with the PR number and
+   Then mark it Ready for Review with `board.mjs ready PR SHA` (the commit you just
+   pushed: it waits until GitHub reports that head, so CI starts for the right
+   revision) and set Automated review with the PR number and
    all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
 3. Wait for CI and every review with a trace on the current head with `board.mjs
@@ -184,8 +186,8 @@ backlink never closes an issue.
    is not clean. Don't re-request a review that is running or finished for the
    current commit without a concrete reason.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
-   set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review,
-   set Automated review and wait again. Merge main only for conflicts or a real need.
+   set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
+   (`board.mjs ready PR SHA`), set Automated review and wait again. Merge main only for conflicts or a real need.
    After two correction pushes, collect new findings that neither block (P1,
    security, data loss) nor regress against main in one follow-up issue instead of
    another push; every push restarts CI and reviews.
@@ -197,13 +199,15 @@ backlink never closes an issue.
    repository that owns the fix, with evidence from the session. Report findings
    about personal configuration (memory, shell profile, scheduled tasks) to the
    human instead of editing it. List every finding and its disposition, or none,
-   in the handoff.
+   in the [handoff comment](../README.md#handoff-comment).
 6. Run `board.mjs handoff ISSUE PR` for the fully delivered issue only when CI
    passes, every review with a trace on the current head has finished or stalled,
    each finding is fixed or linked to a follow-up, the
    final proof has passed, the retro is recorded and no prerequisite is open. If a
    reviewer is confirmed unavailable (quota, outage) or stalled, record the
-   reviewer, cause and evidence in the PR and hand off with that limitation stated.
+   reviewer, cause and evidence in the PR and hand off with that limitation stated
+   in the handoff comment. Post that [handoff comment](../README.md#handoff-comment)
+   on the PR for the current head (a `Head: <SHA>` line); `board.mjs handoff` refuses without it.
    Otherwise pending or unknown does not count as unavailable. Mergeable is not
    merge-ready: resolve every `blocker:` that `board.mjs reviews` lists (a standing
    change request, conflicts) or name it for the human when only a human may clear

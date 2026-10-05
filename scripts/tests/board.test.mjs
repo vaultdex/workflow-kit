@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\nHead: abcdef1\n\n- Retro: keine Befunde',
+  html_url: 'h', created_at: '2999-01-01T00:00:00Z', updated_at: '2999-01-01T00:00:00Z', ...changes });
+
 /** Isolated checkout with paginated GitHub responses and a record of every mutation. */
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'workflow-board-'));
@@ -18,6 +21,8 @@ function fixture(t) {
   copyFileSync(process.execPath, gh);
   chmodSync(gh, 0o755);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1' }));
+  // By default the driver has posted the handoff comment long after any push; tests about it replace this file.
+  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment()]));
   writeFileSync(join(checkout, 'api'), `const fs = require('node:fs');
 const path = process.argv[2] ?? '';
 if (!path.startsWith('graphql')) {
@@ -47,8 +52,31 @@ if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('
 let data;
 if (query.startsWith('mutation')) {
   fs.appendFileSync('mutations', query + '\\n');
-  fs.writeFileSync('stored', process.argv.find(arg => arg.startsWith('option=')).slice(7));
-  data = {};
+  const option = process.argv.find(arg => arg.startsWith('option='));
+  if (option) fs.writeFileSync('stored', option.slice(7));
+  if (query.includes('addCloseIssueReferences') && !fs.existsSync('link-noop')) {
+    // link-delay: the connection shows only after that many reads, like GitHub's delayed consistency.
+    const delay = fs.existsSync('link-delay') ? Number(fs.readFileSync('link-delay', 'utf8')) : 0;
+    const before = JSON.parse(fs.readFileSync('pr.json'));
+    fs.writeFileSync('pr.json', JSON.stringify(delay ? { ...before, linkPending: delay } : { ...before, linkPages: [['I1']] }));
+  }
+  if (query.includes('markPullRequestReadyForReview') && !fs.existsSync('ready-noop')) {
+    fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), isDraft: false }));
+  }
+  if (query.includes('addProjectV2ItemById')) {
+    // add-exists: the Project's own automation was faster, so GitHub refuses like this and the item is readable now
+    // (unless add-exists-unreadable); add-fails: any other refusal.
+    if (fs.existsSync('add-exists')) {
+      if (!fs.existsSync('add-exists-unreadable')) fs.copyFileSync('issue-with-item.json', 'issue.json');
+      process.stderr.write('gh: Content already exists in this project\\n');
+      process.exit(1);
+    }
+    if (fs.existsSync('add-fails')) {
+      process.stderr.write('gh: Resource not accessible by integration\\n');
+      process.exit(1);
+    }
+    data = { addProjectV2ItemById: { item: { id: 'PI1' } } };
+  } else data = {};
 } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
 else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
   projectItems: { nodes: [{ project: { id: 'P1' }, value: { name: fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8') } }] } } } };
@@ -61,7 +89,11 @@ else if (query.includes('reviewThreads(first:100,after')) {
 }
 else if (query.includes('closingIssuesReferences')) {
   if (fs.existsSync('fail-links')) process.exit(1);
-  const pr = JSON.parse(fs.readFileSync('pr.json'));
+  let pr = JSON.parse(fs.readFileSync('pr.json'));
+  if (pr.linkPending !== undefined) {
+    pr = pr.linkPending > 0 ? { ...pr, linkPending: pr.linkPending - 1 } : { ...pr, linkPending: undefined, linkPages: [['I1']] };
+    fs.writeFileSync('pr.json', JSON.stringify(pr));
+  }
   const pages = pr.linkPages ?? [[]];
   const cursor = process.argv.find(arg => arg.startsWith('after='));
   const index = cursor ? Number(cursor.slice(6)) : 0;
@@ -73,7 +105,16 @@ else if (query.includes('closingIssuesReferences')) {
       pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
       nodes: pages[index].map(id => id === null ? null : { id }) } } } };
 }
-else if (query.includes('pullRequest(number')) data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
+else if (query.includes('pullRequest(number')) {
+  if (fs.existsSync('pr-reads.json')) {
+    // Each read takes the next prepared overlay and the last one stays: metadata that catches up after a push.
+    const reads = JSON.parse(fs.readFileSync('pr-reads.json'));
+    const overlay = reads.length > 1 ? reads.shift() : reads[0];
+    fs.writeFileSync('pr-reads.json', JSON.stringify(reads));
+    fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...overlay }));
+  }
+  data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
+}
 else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
   id: 'F1', name: 'Status', options: ['Ready', 'In progress', 'Automated review', 'Human review'].map(name => ({ id: name, name }))
 }, { id: 'F2', name: 'Priority', options: ['High', 'Low'].map(name => ({ id: name, name })) },
@@ -113,7 +154,8 @@ const handoffPr = changes => ({
   mergeStateStatus: 'CLEAN', reviewDecision: null,
   latestOpinionatedReviews: { totalCount: 0, nodes: [] },
   commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: new Date().toISOString(),
-    checkSuites: { totalCount: 0, nodes: [] }, statusCheckRollup: { contexts: { totalCount: 1, nodes: [
+    checkSuites: { totalCount: 1, nodes: [{ createdAt: new Date().toISOString(), status: 'COMPLETED', conclusion: 'SUCCESS', app: { slug: 'github-actions' }, checkRuns: { totalCount: 1 } }] },
+    statusCheckRollup: { contexts: { totalCount: 1, nodes: [
       { __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' },
     ] } } } }] },
   reviewRequests: { totalCount: 0, nodes: [] }, requestEvents: { totalCount: 0, nodes: [] },
@@ -528,6 +570,21 @@ test('reviews waits only for traces on the current head and never reads failures
   const headReview = { user: codexUser, commit_id: 'abcdef1234', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { comments: [codex('Running', 1)], reviewList: [headReview] }), 0, 'A head review ends a Running summary');
   assert.equal(reviews(pr(), { comments: [{ ...codex('Running', 3), updated_at: minutesAgo(0) }] }), 3, 'A later edit of the summary itself is no result');
+  // Codex reviews code and security side by side: one summary, one row per kind, and a separate security result comment.
+  const summary = (rows, commit = 'abcdef1') => ({ id: ++commentId, user: codexUser, html_url: 'u', created_at: minutesAgo(10), updated_at: minutesAgo(1),
+    body: `| Review | Status | Commit |\n${rows.map(([kind, status, minutes]) =>
+      `| ${kind} | ${status} <relative-time datetime="${minutesAgo(minutes)}"></relative-time> | \`${commit}\` |`).join('\n')}` });
+  const securityResult = minutes => ({ id: ++commentId, user: codexUser, html_url: 's', created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes),
+    body: '### 🛡️ Codex Security Review\n\nSecurity review completed. No security issues were found.' });
+  const both = [['📝 **Code Review**', '⏳ **Running**', 3], ['🔒 **Security Review**', '⏳ **Running**', 3]];
+  assert.equal(reviews(pr(), { comments: [summary(both)] }), 3, 'Both kinds running wait');
+  assert.equal(reviews(pr(), { comments: [summary(both), securityResult(0)] }), 3, 'A security result leaves the running code review waiting');
+  assert.equal(reviews(pr(), { comments: [summary(both), securityResult(0)], reviewList: [headReview] }), 0, 'Both results end both rows');
+  assert.equal(reviews(pr(), { comments: [summary([both[1]]), securityResult(0)] }), 0, 'A security result ends a running security row');
+  assert.equal(reviews(pr(), { comments: [summary(both)], reviewList: [headReview] }), 3, 'A code review leaves the running security review waiting');
+  assert.equal(reviews(pr(), { comments: [summary(both), securityResult(5)] }), 3, 'A security result from before the row started answers nothing');
+  assert.equal(reviews(pr(), { comments: [summary(both)], reactions: [reaction('+1', 0)] }), 0, 'A final reaction ends every kind');
+  assert.equal(reviews(pr(), { comments: [summary(both, 'previous')] }), 0, 'Rows for another commit are not traces on this head');
   const appSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'sonarqubecloud' } };
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 0, 'Idle suites of other apps are no trace');
   const blocked = look({ ...pr(), mergeStateStatus: 'BLOCKED', reviewDecision: 'CHANGES_REQUESTED',
@@ -577,4 +634,189 @@ test('field accepts Unicode and punctuation in names and options', t => {
   writeIssue(issue());
   assert.equal(run('field', '1', 'Größe', 'P0: urgent').status, 1, 'Validation lets the name through to the field lookup');
   assert.equal(run('field', '1', 'Size', '-x').status, 2, 'An option-like value is still rejected');
+});
+
+test('link connects the issue natively to the PR, repeats safely and trusts only the read-back', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue('In progress'));
+  const mutations = () => existsSync(join(checkout, 'mutations')) ? readFileSync(join(checkout, 'mutations'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const prepare = (changes = {}) => {
+    for (const file of ['mutations', 'link-noop', 'fail']) rmSync(join(checkout, file), { force: true });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [[]], ...changes })));
+  };
+
+  prepare();
+  let result = run('link', '1', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(mutations(), 1, 'A Draft PR is connected with one write');
+  assert.match(readFileSync(join(checkout, 'mutations'), 'utf8'), /addCloseIssueReferences\(input:\{issueId:\$issue,pullRequestIds:\[\$pr\]\}\)/);
+
+  result = run('link', '1', '7');
+  assert.equal(result.status, 0, 'A second run finds the link already there');
+  assert.equal(mutations(), 1, 'No second write');
+
+  prepare();
+  writeFileSync(join(checkout, 'link-delay'), '2');
+  result = run('link', '1', '7');
+  assert.equal(result.status, 0, 'A connection GitHub shows only after a delay is read back repeatedly: ' + result.stdout + result.stderr);
+  assert.equal(mutations(), 1, 'The write is not repeated while waiting');
+  rmSync(join(checkout, 'link-delay'));
+
+  prepare({ state: 'CLOSED' });
+  assert.equal(run('link', '1', '7').status, 2, 'A closed PR is never linked');
+  assert.equal(mutations(), 0);
+
+  prepare();
+  writeFileSync(join(checkout, 'link-noop'), '');
+  result = run('link', '1', '7');
+  assert.equal(result.status, 2, 'A write whose read-back lacks the issue is no success');
+  assert.match(result.stdout, /^ERROR$/m);
+  assert.equal(mutations(), 1, 'The write is not repeated blindly');
+
+  prepare();
+  writeFileSync(join(checkout, 'fail'), '');
+  assert.equal(run('link', '1', '7').status, 2, 'An API error is ERROR');
+  assert.equal(mutations(), 0);
+
+  assert.equal(run('link', '1', 'seven').status, 2, 'Only a PR number is accepted');
+});
+
+test('ready marks a Draft PR ready only for the expected pushed commit and never trusts stale metadata', t => {
+  const { checkout, run } = fixture(t);
+  const NEW = 'c0ffee'.repeat(6) + 'abcd', OLD = 'decade'.repeat(6) + 'abcd', OTHER = 'facade'.repeat(6) + 'abcd';
+  const quick = ['--attempts', '3', '--interval', '0.01'];
+  const mutations = () => existsSync(join(checkout, 'mutations')) ? readFileSync(join(checkout, 'mutations'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const prepare = (changes = {}, reads) => {
+    for (const file of ['mutations', 'pr-reads.json', 'ready-noop', 'fail']) rmSync(join(checkout, file), { force: true });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ id: 'PR7', number: 7, state: 'OPEN', isDraft: true, isCrossRepository: false,
+      headRefOid: NEW, headRepository: { nameWithOwner: 'test/example' }, ...changes }));
+    if (reads) writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify(reads));
+  };
+  // The verdict and the write count carry the behavior; the diagnostic wording is free to change.
+  const refused = (changes, reads, label) => {
+    prepare(changes, reads);
+    const result = run('ready', '7', NEW, ...quick);
+    assert.equal(result.status, 1, `${label}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /^FAILED$/m, label);
+    assert.equal(mutations(), 0, `${label}: nothing is written`);
+  };
+
+  prepare();
+  let result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^READY /m);
+  assert.equal(mutations(), 1, 'Exactly one Ready mutation');
+
+  prepare({ headRepository: { nameWithOwner: 'Test/Example' } });
+  assert.equal(run('ready', '7', NEW, ...quick).status, 0, 'Repository names compare case-insensitively');
+  prepare({ headRefOid: OLD }, [{ headRefOid: OLD }]);
+  for (const options of [['--interval', 'Infinity'], ['--interval', '1e308'], ['--interval', '-1'], ['--attempts', '0'], ['--attempts', '1.5'],
+    ['--attempts', '101'], ['--attempts', '100', '--interval', '100'], ['--attempts', '100', '--interval', '18'],
+    ['--attempts', '61', '--interval', '15']]) {
+    assert.equal(run('ready', '7', NEW, ...options).status, 2, `${options.join(' ')} could wait without end and is rejected up front`);
+  }
+  assert.equal(mutations(), 0);
+
+  prepare();
+  assert.equal(run('ready', '7', NEW, '--attempts', '60', '--interval', '15').status, 0, 'Both waits together exactly at the half-hour cap are allowed');
+
+  prepare({ headRefOid: OLD }, [{ headRefOid: OLD }, { headRefOid: NEW }]);
+  result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 0, 'Metadata that catches up after a push is waited for: ' + result.stdout + result.stderr);
+  assert.equal(mutations(), 1);
+
+  refused({ headRefOid: OLD }, [{ headRefOid: OLD }], 'A head that stays old');
+  refused({ isCrossRepository: true }, undefined, 'A fork branch');
+  refused({ headRepository: { nameWithOwner: 'test/other' } }, undefined, 'Another repository');
+  refused({ state: 'CLOSED' }, undefined, 'A closed PR');
+  refused({ isDraft: false, headRefOid: OTHER }, undefined, 'Ready with another head');
+  refused({}, [{ headRefOid: NEW }, { headRefOid: OTHER }], 'A head that changes before the mutation');
+
+  prepare({ isDraft: false });
+  result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 0, 'Already ready for the expected head is a success without a write');
+  assert.equal(mutations(), 0);
+
+  prepare();
+  writeFileSync(join(checkout, 'fail'), '');
+  result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 2, 'An API error is ERROR, never a guess');
+  assert.match(result.stdout, /^ERROR$/m);
+  assert.equal(mutations(), 0);
+
+  prepare();
+  writeFileSync(join(checkout, 'ready-noop'), '');
+  result = run('ready', '7', NEW, ...quick);
+  assert.equal(result.status, 2, 'A write without a matching read-back is no success');
+  assert.equal(mutations(), 1, 'The mutation is not repeated blindly');
+
+  assert.equal(run('ready', '7', 'not-a-sha').status, 2, 'Only a full commit SHA is accepted');
+});
+
+test('a field write succeeds when the Project already added the issue itself, and fails on every other refusal', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const noItem = { ...issue(), projectItems: { nodes: [] } };
+  const mutations = () => existsSync(join(checkout, 'mutations')) ? readFileSync(join(checkout, 'mutations'), 'utf8').split('\n').filter(Boolean) : [];
+  const count = (name, list = mutations()) => list.filter(line => line.includes(name)).length;
+  const prepare = (...flags) => {
+    for (const file of ['mutations', 'stored', 'add-exists', 'add-exists-unreadable', 'add-fails']) rmSync(join(checkout, file), { force: true });
+    writeIssue(noItem);
+    writeFileSync(join(checkout, 'issue-with-item.json'), JSON.stringify(issue()));
+    for (const flag of flags) writeFileSync(join(checkout, flag), '');
+  };
+
+  prepare();
+  let result = run('priority', '1', 'High');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual([count('addProjectV2ItemById'), count('updateProjectV2ItemFieldValue')], [1, 1], 'A missing item is added once, then written');
+
+  prepare('add-exists');
+  result = run('priority', '1', 'High');
+  assert.equal(result.status, 0, 'Already on the Project is no failure: ' + result.stdout + result.stderr);
+  assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'High', 'The value is still written');
+  assert.deepEqual([count('addProjectV2ItemById'), count('updateProjectV2ItemFieldValue')], [1, 1]);
+
+  prepare('add-exists', 'add-exists-unreadable');
+  assert.notEqual(run('priority', '1', 'High').status, 0, 'Already there but no readable item stays a failure');
+  assert.equal(count('updateProjectV2ItemFieldValue'), 0, 'Nothing is written without an item');
+
+  prepare('add-fails');
+  assert.notEqual(run('priority', '1', 'High').status, 0, 'Any other refusal stays a failure');
+  assert.equal(count('updateProjectV2ItemFieldValue'), 0);
+});
+
+test('handoff needs the driver handoff comment that names the current head', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const mutations = join(checkout, 'mutations');
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  const write = comments => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
+  for (const [label, comments] of [
+    ['no comment at all', []],
+    ['another heading', [handoffComment({ body: 'Review ist durch' })]],
+    ['the heading only inside a sentence', [handoffComment({ body: 'siehe ## Übergabe unten' })]],
+    ['another author', [handoffComment({ user: { login: 'someone-else', type: 'User' } })]],
+    ['no head named (the format before this check)', [handoffComment({ body: '## Übergabe\n\n- Retro: keine Befunde' })]],
+    ['another head named, e.g. a comment for the previous push', [handoffComment({ body: '## Übergabe\n\nHead: 1234567\n\n- Retro: keine Befunde' })]],
+    ['the head named only inside a sentence', [handoffComment({ body: '## Übergabe\n\nFür Head: abcdef1 siehe oben (Zeile beginnt anders)' })]],
+  ]) {
+    write(comments);
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 1, `${label}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /^FAILED$/m, label);
+    assert.equal(existsSync(mutations), false, `${label}: the status stays untouched`);
+  }
+  // No timestamp is involved: a head without any check suite (CI reported only as a status) works, and so does a comment
+  // that is older than the head's suite, because it names the head.
+  const base = handoffPr();
+  write([handoffComment({ created_at: '2000-01-01T00:00:00Z', updated_at: '2000-01-01T00:00:00Z' })]);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ commits: { nodes: [{ commit: { ...base.commits.nodes[0].commit, checkSuites: { totalCount: 0, nodes: [] } } }] } })));
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  assert.equal(run('handoff', '1', '7').status, 0, 'Naming the head is enough, with or without a check suite');
+  rmSync(join(checkout, 'stored'));
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(base));
+  write([handoffComment({ user: { login: 'Worker', type: 'User' }, body: '## Übergabe\n\nhead:   ABCDEF1234\n' })]);
+  const result = run('handoff', '1', '7');
+  assert.equal(result.status, 0, 'The authenticated user matches regardless of case: ' + result.stdout + result.stderr);
+  assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
 });

@@ -4,6 +4,7 @@
     "config:recommended"
   ],
   "dependencyDashboard": false,
+  "gitIgnoredAuthors": ["41898282+github-actions[bot]@users.noreply.github.com"],
   "automerge": false,
   "git-submodules": {
     "enabled": true
