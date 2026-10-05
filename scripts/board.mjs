@@ -186,7 +186,8 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
-      ...on CheckRun{name status conclusion title} ...on StatusContext{context state description}}}}}}}
+      ...on CheckRun{name status conclusion title checkSuite{databaseId app{slug} workflowRun{databaseId workflow{id name}}}}
+      ...on StatusContext{context state description}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
     requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}}`;
@@ -280,7 +281,20 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   let failed = false;
   const contexts = commit.statusCheckRollup?.contexts ?? { totalCount: 0, nodes: [] };
   assert.equal(contexts.nodes.length, contexts.totalCount, 'Not every check is readable');
-  for (const check of contexts.nodes) {
+  // The usual Draft-then-Ready sequence starts a second workflow run on the same commit and cancels the first, so the
+  // first run's jobs are superseded. A job (app, workflow id, name) is superseded only by the same job of a NEWER run,
+  // never by another job of its own run: two jobs of one run that share a display name both count, and so does a
+  // newest run that is cancelled. The workflow is told apart by its id (two files can share a display name). A check
+  // without a run or suite id cannot be ordered and stays as it is.
+  const runOf = check => check.checkSuite?.workflowRun?.databaseId ?? check.checkSuite?.databaseId;
+  const jobKey = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id, check.name]);
+  const orderable = check => check.__typename === 'CheckRun' && Number.isSafeInteger(runOf(check));
+  const newestRun = new Map();
+  for (const check of contexts.nodes.filter(orderable)) {
+    newestRun.set(jobKey(check), Math.max(newestRun.get(jobKey(check)) ?? -Infinity, runOf(check)));
+  }
+  const current = contexts.nodes.filter(check => !orderable(check) || runOf(check) === newestRun.get(jobKey(check)));
+  for (const check of current) {
     const label = check.name ?? check.context;
     const pending = check.__typename === 'CheckRun' ? check.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(check.state);
     // CI never stalls: a running check is not success however long it takes.
