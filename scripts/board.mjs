@@ -399,6 +399,39 @@ function connectedIssues(pr, draftAllowed = false) {
   }
 }
 
+/** The changed region of two texts as `-`/`+` lines (common start and end cut off): enough to show a person what differs. */
+function diffText(before, after) {
+  const [old, now] = [before, after].map(text => text.split('\n'));
+  let start = 0;
+  while (start < old.length && start < now.length && old[start] === now[start]) start++;
+  let [endOld, endNow] = [old.length, now.length];
+  while (endOld > start && endNow > start && old[endOld - 1] === now[endNow - 1]) { endOld--; endNow--; }
+  return [...old.slice(start, endOld).map(line => `- ${line}`), ...now.slice(start, endNow).map(line => `+ ${line}`)].join('\n');
+}
+
+/**
+ * Replace an issue body only if it still is the one the change is based on, and prove the write afterwards.
+ * GitHub has no conditional write for issue bodies: the window between the read and the write stays, which the
+ * read-back closes for every overwrite that happens before it. Another session's change is reported, never lost silently.
+ */
+function body() {
+  const lines = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n').trimEnd();
+  const [fresh, base] = [value, process.argv[5]].map(lines);
+  const current = () => String(rest(`repos/${project.repository}/issues/${number}`).body ?? '').replaceAll('\r\n', '\n').trimEnd();
+  const refuse = (reason, diff) => {
+    console.log(['FAILED', `blocker: ${reason}`, diff.trimEnd()].filter(Boolean).join('\n'));
+    process.exitCode = 1;
+  };
+  const before = current();
+  if (before !== base) return refuse(`the body of #${number} changed since you read it (diff: your base, then the current body); read it again, merge, write again`, diffText(base, before));
+  if (before === fresh) return console.log(`BODY #${number} already has this text`);
+  execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}`, '-X', 'PATCH', '-F', `body=@${value}`],
+    { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 });
+  const after = current();
+  if (after !== fresh) return refuse(`the body of #${number} is not what was written: another session overwrote it meanwhile (diff: what you wrote, then the current body); read it, merge, write again`, diffText(fresh, after));
+  console.log(`BODY #${number} written and read back`);
+}
+
 /** Connect the issue natively to the PR (what a closing keyword does only on the default branch) and read it back. */
 function link() {
   const prNumber = Number(value);
@@ -618,12 +651,12 @@ function block() {
 }
 
 const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait, handoff, ready, link };
+  reviews: reviewsOnce, wait, handoff, ready, link, body };
 const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
-  + ' | link ISSUE PR';
+  + ' | link ISSUE PR | body ISSUE FILE BASE_FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
@@ -632,6 +665,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
+  || (command === 'body' && !(value && process.argv[5]))
   || (command === 'block' && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
@@ -640,7 +674,7 @@ try {
   await commands[command]();
 } catch (error) {
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link', 'body'].includes(command)) throw error;
   console.log(`${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${String(error.stderr || error.message).trim()}`);
   process.exitCode = 2;
 }

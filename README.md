@@ -83,6 +83,12 @@ trust; new definitions need personal review and trust. See
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
   and comment backlink on every delivered issue before writing status. Post and
   read back backlinks immediately after PR creation; see [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
+- `body ISSUE FILE BASE_FILE`: replace an issue body with `FILE` only if the current body
+  still equals `BASE_FILE` (the body your change is based on; line endings and trailing
+  whitespace are ignored), then read it back. A body that changed meanwhile is refused with
+  a `-`/`+` diff (exit 1, nothing written); a read-back that differs from `FILE` reports
+  that another session overwrote it (exit 1, the write is not repeated); API and file
+  errors exit 2. See [Changing a body](docs/CONTRIBUTING.md#issues).
 - `link ISSUE PR`: connect the issue natively to the PR (the GraphQL
   `addCloseIssueReferences` mutation behind a closing keyword, which acts only on the
   default branch) and read `closingIssuesReferences` back. A Draft PR works; an existing
