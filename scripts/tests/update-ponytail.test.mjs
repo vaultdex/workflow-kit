@@ -83,3 +83,30 @@ test('conflict state is read, written and deleted only inside the checkout, neve
   assert.deepEqual(loadResolved(root, [FILE], 'other'), {});
   assert.equal(existsSync(join(root, '.workflow-kit/ponytail-resolve')), false);
 });
+
+test('conflict files are never written through a link in the state directory either', t => {
+  const base = mkdtempSync(join(tmpdir(), 'ponytail leaf test '));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, 'kit'), outside = join(base, 'outside');
+  const state = join(root, '.workflow-kit/ponytail-resolve');
+  mkdirSync(join(state, 'hooks'), { recursive: true });
+  mkdirSync(outside);
+  const victim = join(outside, 'victim.txt');
+  writeFileSync(victim, 'keep');
+  // File links need privileges on Windows (the CI runs them); a junction as the target needs none and is no regular file either.
+  const link = (target, leaf, type) => {
+    try { symlinkSync(target, leaf, type); return true; } catch (error) { if (error.code === 'EPERM') return false; throw error; }
+  };
+  let ran = 0;
+  for (const [leaf, target, type] of [[join(state, FILE), victim, 'file'], [join(state, 'TARGET'), victim, 'file'],
+    [join(state, FILE), join(outside, 'not-yet.txt'), 'file'], [join(state, 'TARGET'), outside, 'junction']]) {
+    rmSync(leaf, { force: true, recursive: true });
+    if (!link(target, leaf, type)) continue;
+    ran++;
+    assert.throws(() => saveConflicts(root, { [FILE]: 'marked up' }, 'new'), /linked or non-file/);
+    assert.deepEqual(readdirSync(outside).sort(), ['victim.txt'], 'No file is created outside the checkout');
+    assert.equal(readFileSync(victim, 'utf8'), 'keep', 'The linked file keeps its content');
+    rmSync(leaf, { recursive: true });
+  }
+  assert.ok(ran >= 1, 'At least the junction case ran');
+});

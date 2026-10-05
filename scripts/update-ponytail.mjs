@@ -109,14 +109,23 @@ export function loadResolved(root, files, to) {
     .map(file => [file, lf(readFileSync(regularFile(root, join(dir, file)), 'utf8'))]));
 }
 
+/** A write target must be a new path or a regular file: writing through a link (also a dangling one) would leave the checkout. */
+const writableFile = (root, path) => {
+  checkDirectory(root, dirname(path));
+  let entry;
+  try { entry = lstatSync(path); } catch { /* new path */ }
+  assert.ok(!entry || entry.isFile(), `Refusing linked or non-file path: ${relative(root, path)}`);
+  return path;
+};
+
 export function saveConflicts(root, conflicts, to) {
   const dir = stateDirectory(root);
   for (const [file, text] of Object.entries(conflicts)) {
     checkDirectory(root, dirname(join(dir, file)));
     mkdirSync(dirname(join(dir, file)), { recursive: true });
-    writeFileSync(join(dir, file), text);
+    writeFileSync(writableFile(root, join(dir, file)), text);
   }
-  writeFileSync(join(dir, 'TARGET'), `${to}\n`);
+  writeFileSync(writableFile(root, join(dir, 'TARGET')), `${to}\n`);
   return dir;
 }
 
