@@ -23,12 +23,12 @@ from the hint text. The snapshot is per user, so every checkout, worktree and ha
 on the machine shares it.
 
 The installers run checkout content: the Ponytail one copies the checkout's `.agents`
-hook sources into the snapshot that trusted hooks execute. So run them only from a
-reviewed state: after `git fetch`, `git status --porcelain --ignore-submodules=none`
-prints nothing and `git rev-parse HEAD` equals `git rev-parse origin/<default branch>`.
-On another branch or with local changes, run them in a temporary
+hook sources into the snapshot that trusted hooks execute, and no check of a working
+tree is reliable (branches, ignore settings and index flags can hide changes). So never
+run them in your current checkout. After `git fetch`, create a temporary
 `git worktree add --detach <path> origin/<default branch>` (consumer projects also run
-`git submodule update --init .vendor/workflow-kit` there) and remove it afterwards.
+`git submodule update --init .vendor/workflow-kit` there), run the installer in it, and
+remove the worktree afterwards.
 
 If the hint persists after one run, tell the human instead of repeating it. Never
 write hook trust or personal agent settings; tell the human that trust and a fresh
