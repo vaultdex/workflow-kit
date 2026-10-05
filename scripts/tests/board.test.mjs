@@ -582,6 +582,10 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 0, 'A newer successful suite of the same workflow replaces it');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1, 'SUCCESS', 11), cancelled] })), 0, 'The order of the suites does not matter');
   assert.equal(reviews(pr({ suites: [cancelled, suite('QUEUED', 0, 1, null, 11)] })), 3, 'A newer suite that has not reported yet waits');
+  // The replacing suite answers for the workflow even with runs: the green rollup shows only the jobs reported so far.
+  assert.equal(reviews(pr({ suites: [cancelled, suite('IN_PROGRESS', 1, 1, null, 11)] })), 3, 'A replacing suite with runs that is still running waits');
+  assert.equal(reviews(pr({ pushed: 60, suites: [suite('COMPLETED', 0, 60, 'CANCELLED', 10), suite('IN_PROGRESS', 1, 60, null, 11)] })), 3, 'A running suite with runs never stalls');
+  assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'CANCELLED', 11)] })), 1, 'A replacing suite with runs that ends cancelled is a failure');
   assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 0, 1, 'CANCELLED', 11)] })), 1, 'A newest cancelled suite is a failure');
   assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 0, 1, 'STARTUP_FAILURE', 11)] })), 1, 'A newer suite that fails to start is a failure');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 0, 1, 'STARTUP_FAILURE', 10)] })), 1, 'A startup failure without a replacement is a failure');
