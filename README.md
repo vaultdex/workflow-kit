@@ -80,7 +80,9 @@ node .vendor/workflow-kit/scripts/install-ponytail-hooks.mjs    # Ponytail mode 
 node .vendor/workflow-kit/scripts/install-impeccable-hooks.mjs  # Impeccable UI checks
 ```
 
-Review and trust project hooks in each agent, then start a new session:
+Agents run these installers themselves when the install hint appears, without
+asking ([agent rules](AGENT_RULES.md#hooks)); trust stays personal. Review and trust
+project hooks in each agent, then start a new session:
 `/hooks` in Codex CLI or Claude Code, the hooks view in the Codex app settings,
 Settings → Hooks in Cursor, `.github/hooks` for Copilot. Missing snapshots produce
 a SessionStart install hint. Files and manual runs don't prove agent loading or

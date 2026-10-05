@@ -12,6 +12,16 @@ details only for the current step.
   own, or bypass branch protection, required checks or spending limits.
 - Never expose secrets or commit personal configuration.
 
+## Hooks
+
+A SessionStart hint "Ponytail hooks missing" or "Impeccable hooks missing" means the
+per-user snapshot is absent. Run the installer the hint names from the project root
+at once, without asking: it installs per user for every checkout, worktree and
+harness on the machine, downloads only the pinned engine and verifies its checksum.
+Run only those two kit installers. Never write hook trust or personal agent
+settings; tell the human that trust and a fresh session remain theirs
+([Hooks](README.md#hooks)).
+
 ## Start or resume
 
 First installation without the kit or Project binding uses the bounded
