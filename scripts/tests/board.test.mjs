@@ -551,6 +551,14 @@ test('reviews waits only for traces on the current head and never reads failures
   const reviews = (...args) => look(...args).status;
 
   assert.equal(reviews(pr()), 0, 'Green CI without other traces is done');
+  // Codex starts on "ready for review" and shows its first trace a minute or two later, often after CI is green.
+  const readied = (minutes, changes) => ({ ...pr(), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(minutes) }] }, ...changes });
+  assert.equal(reviews(readied(0.5)), 3, 'Green CI right after Ready still waits for reviewers to start');
+  assert.equal(reviews(readied(5)), 0, 'After the grace a missing trace means no reviewer is coming');
+  assert.equal(reviews(readied(0.5), {}, '--grace', '0'), 0, 'The grace can be turned off');
+  assert.equal(reviews(readied(2)), 0, 'Ready before this head was pushed starts no grace');
+  assert.equal(reviews(readied(0.5, { isDraft: true })), 0, 'A Draft starts no grace');
+  assert.equal(reviews({ ...pr(), isDraft: false, createdAt: minutesAgo(0.5) }), 3, 'A PR opened ready counts from its creation');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'Red CI ends the wait as FAILED, never DONE');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'SKIPPED')] })), 0);
   assert.equal(reviews(pr({ contexts: [check('IN_PROGRESS')] })), 3);
