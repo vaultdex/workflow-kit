@@ -194,6 +194,14 @@ backlink never closes an issue.
 
 1. Before the first push, focused checks pass, the diff is reviewed and current
    main is merged if the branch is behind. Push once, then update the same PR.
+   For every changed rule, state transition or background flow, write the cases
+   before that push and keep them in the PR body section **Randfälle**, complete
+   before Ready for Review: one line per case with the expected behavior and the
+   test or the reason none is needed. Cover four classes: concurrency and timing;
+   missing, stale, partial, deleted (retention) or unrelated data; interruption and
+   cancellation; error paths and error classification. Settle open cases with the
+   human; add cases that review uncovers. Pure text or configuration changes need
+   no section.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
    Then mark it Ready for Review with `board.mjs ready PR SHA` (the commit you just
    pushed: it waits until GitHub reports that head, so CI starts for the right
