@@ -2,7 +2,7 @@
 // Nutzen: Jeder Clone und Worktree nutzt die Hooks seines Branches; fremde Hooks gehen nie verloren.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -83,6 +83,12 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   i.run();
   assert.equal(i.value('--local'), '.githooks');
   assert.equal(i.value('--includes', '--file', i.linkedConfig), join(i.repo, '.githooks').replaceAll('\\', '/'));
+
+  // A foreign entry repeated before an own one in the same file is not lost.
+  const m = fixture(t), mixed = `[core]\n\thooksPath = .husky\n\thooksPath = ${join(m.repo, '.githooks').replaceAll('\\', '/')}\n`;
+  writeFileSync(m.linkedConfig, mixed);
+  m.run();
+  assert.equal(readFileSync(m.linkedConfig, 'utf8'), mixed);
 
   const none = fixture(t, { hooks: false });
   none.run();

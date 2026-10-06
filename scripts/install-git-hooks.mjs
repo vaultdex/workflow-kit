@@ -33,50 +33,59 @@ const fold = path => {
   try { canonical = realpathSync.native(canonical); } catch { /* missing or inaccessible: keep as written */ }
   return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
 };
-/** core.hooksPath in the given config source as { value, file }, or null when unset (git config exits 1).
- * A selected source skips include/includeIf unless --includes is given; file is where the value is defined,
- * the only place this script may change it. */
-const get = (...source) => {
-  // --null prints the origin unquoted; Git quotes paths with backslashes or special characters otherwise.
-  const result = run('config', ...source, '--includes', '--show-origin', '--null', '--get', 'core.hooksPath');
-  assert.ok(result.status <= 1, result.stderr);
-  if (result.status === 1) return null;
-  const [origin, value] = result.stdout.split('\0');
-  return { value, file: origin.startsWith('file:') ? fold(resolve(root, origin.slice(5))) : origin };
-};
 const tops = out('worktree', 'list', '--porcelain').split(/\r?\n/)
   .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
 const ours = new Set(tops.map(top => fold(join(top, '.githooks'))));
 const isOurs = value => ours.has(fold(resolve(root, value)));
+
+/** Every core.hooksPath entry of one config source as { value, origin }, including include/includeIf
+ * files (a selected source skips them without --includes). --null keeps origins unquoted. */
+const entries = (...source) => {
+  const result = run('config', ...source, '--includes', '--show-origin', '--null', '--get-all', 'core.hooksPath');
+  assert.ok(result.status <= 1, result.stderr);
+  const fields = result.status === 0 ? result.stdout.split('\0').slice(0, -1) : [];
+  const list = [];
+  for (let i = 0; i < fields.length; i += 2) {
+    const origin = fields[i];
+    list.push({ value: fields[i + 1], origin: origin.startsWith('file:') ? fold(resolve(root, origin.slice(5))) : origin });
+  }
+  return list;
+};
+/** A file is changed only when every entry it yields is ours and written in the file itself;
+ * foreign, repeated foreign and included entries stay untouched and are reported. */
+const owned = (file, list) => list.every(entry => isOurs(entry.value) && entry.origin === fold(file));
+const describe = list => list.map(entry => `${entry.value} (${entry.origin})`).join(', ');
+
 const common = resolve(root, out('rev-parse', '--git-common-dir'));
+const localFile = join(common, 'config');
 const worktreeFiles = [join(common, 'config.worktree'),
   ...(existsSync(join(common, 'worktrees')) ? readdirSync(join(common, 'worktrees')) : [])
     .map(name => join(common, 'worktrees', name, 'config.worktree'))].filter(existsSync);
 
 // Local config wins over global and system; an unset local must not shadow someone's global hooks.
-const local = get('--local');
-const current = local ?? get('--global') ?? get('--system');
+const local = entries('--file', localFile);
+const inherited = local.length ? [] : [...entries('--global'), ...entries('--system')];
 let relative = false;
-if (current && !isOurs(current.value)) {
-  report(`kept foreign ${current.value}; integrate .githooks there by hand`);
-} else if (local?.value === '.githooks') {
+if (inherited.some(entry => !isOurs(entry.value))) {
+  report(`kept foreign ${describe(inherited)}; integrate .githooks there by hand`);
+} else if (local.length && local.every(entry => entry.value === '.githooks')) {
   relative = true;
   report('.githooks');
-} else if (local && local.file !== fold(join(common, 'config'))) {
-  report(`kept ${local.value} from included ${local.file}; change it there by hand`);
+} else if (local.length && !owned(localFile, local)) {
+  report(`kept ${describe(local)}; integrate .githooks there by hand`);
 } else {
-  if (!check) out('config', '--local', 'core.hooksPath', '.githooks');
+  if (!check) out('config', '--file', localFile, '--replace-all', 'core.hooksPath', '.githooks');
   relative = true;
-  report(`${check ? 'would set' : 'set'} .githooks${local ? ` (was ${local.value})` : ''}`);
+  report(`${check ? 'would set' : 'set'} .githooks${local.length ? ` (was ${describe(local)})` : ''}`);
 }
-// Own overrides go only once the local path is relative; included ones stay where they are defined.
+// Own overrides go only once the local path is relative.
 for (const file of worktreeFiles) {
-  const entry = get('--file', file);
-  if (!entry) continue;
-  if (relative && isOurs(entry.value) && entry.file === fold(file)) {
+  const list = entries('--file', file);
+  if (!list.length) continue;
+  if (relative && owned(file, list)) {
     if (!check) out('config', '--file', file, '--unset-all', 'core.hooksPath');
-    report(`${check ? 'would remove' : 'removed'} worktree override ${entry.value} in ${file}`);
+    report(`${check ? 'would remove' : 'removed'} worktree override ${describe(list)}`);
   } else {
-    report(`kept worktree override ${entry.value} from ${entry.file}`);
+    report(`kept worktree override ${describe(list)}`);
   }
 }
