@@ -134,7 +134,7 @@ function next() {
   const held = ready.filter(issue => issue.reasons.length);
   const startable = ready.filter(issue => !issue.reasons.length);
   for (const issue of startable) console.log(line(issue));
-  console.log(startable.length ? 'Run board.mjs check ISSUE before claiming one.' : 'No Ready issue whose blockers are all completed.');
+  console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
   if (held.length) console.log('\nReady but not startable:');
   for (const issue of held) console.log([line(issue), ...issue.reasons.map(reason => `  - ${reason}`)].join('\n'));
 }

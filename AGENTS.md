@@ -1,7 +1,7 @@
 # Workflow Kit contributors
 
 Follow [AGENT_RULES.md](AGENT_RULES.md); here the kit itself is the project, so
-kit paths drop the `.vendor/workflow-kit/` prefix (`node scripts/board.mjs check 123`).
+kit paths drop the `.vendor/workflow-kit/` prefix (`node scripts/board.mjs check 123 --session ID`).
 
 - Skills use pinned submodules, reviewed `scripts/` patches and the canonical
   `.agents/skills/find-skills` snapshot. Update its source notice with its upstream
