@@ -154,7 +154,10 @@ yourself. Without `.githooks/` it does nothing.
   quality gate judges new-code conditions only) and prints a `blocker:` line for any; `handoff`
   then exits 1. The read needs `SONAR_TOKEN` in the environment (the anonymous API
   reports 0 for private projects); without it, or on a refused read, the command
-  ends `ERROR` (exit 2), never green. Security hotspots stay a manual read.
+  ends `ERROR` (exit 2), never green. Security hotspots stay a manual read. A workflow
+  whose `pull_request` jobs for the head were all skipped before the Ready event (Draft
+  guard), with no executed run and no run since, waits (exit 3): the skip proves nothing
+  about the Ready head. Start a Ready run (convert to Draft and back, or push).
 - `handoff ISSUE PR`: verifies a fully delivered issue's native PR connection,
   assigned/startable task, open non-draft PR, finished checks/reviews and resolved
   threads/conflicts before writing and reading back Human review (exit 0 verified,

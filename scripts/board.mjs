@@ -220,7 +220,7 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
-      ...on CheckRun{name status conclusion title detailsUrl checkSuite{databaseId app{slug} workflowRun{databaseId workflow{id name}}}}
+      ...on CheckRun{name status conclusion title detailsUrl checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
       ...on StatusContext{context state description}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
@@ -357,6 +357,21 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   const decisiveRun = check => newestExecuted.get(jobKey(check)) ?? newestSkipped.get(jobKey(check));
   const current = contexts.nodes.filter(check => !orderable(check) || runOf(check) === decisiveRun(check));
+  // A pull_request run skipped while the PR was still Draft (the usual `!draft` job guard) executed nothing, so it says
+  // nothing about the Ready head. Ready normally starts a fresh run; until the workflow has an executed run for this head
+  // or a run created after Ready, its path is missing, not green. A skip after Ready and any skip of a workflow that
+  // executed (an optional job, a path condition) stay optional. Whether GitHub marks the check required is no basis:
+  // the flag is false on release branches for checks the project demands.
+  const readyEvent = Date.parse(pr.readyEvents?.nodes?.[0]?.createdAt);
+  const flowOf = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id]);
+  const executedFlows = new Set(contexts.nodes.filter(check => orderable(check) && check.conclusion !== 'SKIPPED').map(flowOf));
+  const draftSkip = check => {
+    if (pr.isDraft || !Number.isFinite(readyEvent) || check.conclusion !== 'SKIPPED' || executedFlows.has(flowOf(check))) return false;
+    if (!['pull_request', 'pull_request_target'].includes(check.checkSuite?.workflowRun?.event)) return false;
+    const created = Date.parse(check.checkSuite.createdAt);
+    assert.ok(Number.isFinite(created), `The run of skipped check ${check.name} has no readable start time`);
+    return created < readyEvent;
+  };
   for (const check of current.filter(check => orderable(check) && newestSkipped.get(jobKey(check)) > runOf(check))) {
     lines.push(`note: ${check.name} was SKIPPED in a newer run, which proves nothing; run ${runOf(check)} decides`);
   }
@@ -366,6 +381,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // CI never stalls: a running check is not success however long it takes.
     if (pending) { waiting.push({ text: `check ${label}`, since: Infinity }); continue; }
     const result = check.conclusion ?? check.state;
+    if (draftSkip(check)) waiting.push({ text: `check ${label} was skipped while Draft; no run since Ready`, since: Infinity });
     if (!passed.has(result)) failed = true;
     // Descriptions carry results such as "Review rate limited" behind a green state.
     lines.push(`check ${label}: ${result}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);

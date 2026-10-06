@@ -644,6 +644,25 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr({ contexts: [skipped(1), job(2, 'COMPLETED', 'SUCCESS', 'Lint')] })), 0, 'A skipped optional job next to a real success passes');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), job(2, 'COMPLETED', 'SKIPPED', 'Backend', 'Frontend')] })), 1,
     'A skipped run of another workflow does not stand in for it');
+  // Ready since 5 minutes: a pull_request run created before that was a Draft run, and its skipped job guard proves nothing.
+  const draftRun = (run, conclusion = 'SKIPPED', { minutes = 10, event = 'pull_request', time, ...names } = {}) => {
+    const base = job(run, 'COMPLETED', conclusion, names.name, names.workflow);
+    return { ...base, checkSuite: { ...base.checkSuite, createdAt: time ?? minutesAgo(minutes), workflowRun: { ...base.checkSuite.workflowRun, event } } };
+  };
+  const readyHead = contexts => ({ ...pr({ contexts }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] } });
+  const oldTraces = { comments: [codex('Completed', 0)] };
+  assert.equal(reviews(readyHead([draftRun(1)]), oldTraces), 3, 'A Ready head whose only runs were skipped while Draft is not proof');
+  assert.equal(reviews(readyHead([draftRun(1), draftRun(2, 'SKIPPED', { name: 'Lint', workflow: 'Lint' }), job(3, 'COMPLETED', 'SUCCESS', 'Backend', 'Frontend')]), oldTraces), 3,
+    'A green other workflow does not cover the missing path');
+  assert.equal(reviews(readyHead([draftRun(1), job(2, 'IN_PROGRESS')]), oldTraces), 3, 'A running Ready run waits');
+  assert.equal(reviews(readyHead([draftRun(1), job(2, 'COMPLETED', 'FAILURE')]), oldTraces), 1, 'A failed Ready run is FAILED');
+  assert.equal(reviews(readyHead([draftRun(1), job(2, 'COMPLETED')]), oldTraces), 0, 'An executed Ready run is the proof');
+  assert.equal(reviews(readyHead([draftRun(1), draftRun(2, 'SKIPPED', { minutes: 2 })]), oldTraces), 0, 'A skip after Ready is a real optional skip');
+  assert.equal(reviews(readyHead([draftRun(1), draftRun(2, 'SUCCESS', { name: 'Lint' })]), oldTraces), 0, 'A skipped job of a workflow that executed stays optional');
+  assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: 'push' })]), oldTraces), 0, 'Only pull_request runs carry a Draft guard');
+  assert.equal(reviews({ ...readyHead([draftRun(1)]), isDraft: true }, oldTraces), 0, 'A Draft head has nothing to wait for yet');
+  assert.equal(reviews({ ...readyHead([draftRun(1)]), readyEvents: { nodes: [] } }, oldTraces), 0, 'A PR that was never Draft has no Draft runs');
+  assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { time: 'unreadable' })]), oldTraces), 2, 'An unreadable run time is an error, never proof');
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'A later read failure keeps the known CI verdict');
   rmSync(join(checkout, 'fail-rest'));
