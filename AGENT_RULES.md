@@ -133,5 +133,5 @@ Run [board commands](README.md#board-commands) in the project with authenticated
 | Write or change an issue | [Issues](docs/CONTRIBUTING.md#issues) |
 | Branch, PR and review loop | [Delivery](docs/CONTRIBUTING.md#delivery) |
 | Blocked, failed or out-of-scope work | [Blockers and scope](docs/CONTRIBUTING.md#blockers-and-scope) |
-| Mehrere Driver gleichzeitig | [Parallele Driver](docs/parallel-drivers.md) |
+| Several drivers at once | [Parallel drivers](docs/parallel-drivers.md) |
 | Set up or update the kit, hooks | [README](README.md), [SETUP](SETUP.md) |
