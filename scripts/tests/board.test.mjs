@@ -600,6 +600,8 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(readied(0.5)), 3, 'Green CI right after Ready still waits for reviewers to start');
   assert.equal(reviews(readied(5)), 0, 'After the grace a missing trace means no reviewer is coming');
   assert.equal(reviews(readied(0.5), {}, '--grace', '0'), 0, 'The grace can be turned off');
+  assert.equal(reviews(readied(-0.5)), 3, 'Precondition: a Ready after now still waits with the default grace');
+  assert.equal(reviews(readied(-0.5), {}, '--grace', '0'), 0, 'Ready during the query (after now) does not revive a disabled grace');
   // Commit dates come from client clocks: one ahead of GitHub must not cut the grace short.
   const committed = minutes => ({ commits: { nodes: [{ commit: { ...pr().commits.nodes[0].commit, committedDate: minutesAgo(minutes) } }] } });
   assert.equal(reviews(readied(0.5, committed(-10))), 3, 'A commit date in the future does not cut the grace short');
@@ -1063,4 +1065,41 @@ test('body writes an issue body only on top of the one it is based on and proves
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(run('body', '1', change, base).status, 2);
   assert.equal(patches(), 0);
+});
+
+test('board check blocks a newer claim of another session of the same login unless handed over', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue());
+  const comment = (body, changes) => ({ id: 1, user: { login: 'worker', type: 'User' }, body, html_url: 'https://example.test/c1',
+    created_at: '2026-10-06T10:00:00Z', ...changes });
+  const claim = (agent, session, changes) => comment(`Claim\n\nAgent: ${agent}, Session: ${session}`, changes);
+  const check = (comments, ...args) => {
+    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
+    return run('check', '1', ...args);
+  };
+
+  const foreign = check([claim('claude', 'S1'), claim('codex', 'S2', { created_at: '2026-10-06T10:09:00Z' })], '--session', 'S1');
+  assert.equal(foreign.status, 1, foreign.stdout + foreign.stderr);
+  assert.match(foreign.stdout, /Agent codex, Session S2, 2026-10-06T10:09:00Z, https:\/\/example\.test\/c1/);
+  assert.equal(check([claim('claude', 'S1')], '--session', 'S1').status, 0, 'own claim');
+  assert.equal(check([claim('claude', 'S1'), claim('codex', 'S2')], '--session', 'S2').status, 0, 'equal times: the later comment wins');
+  assert.equal(check([claim('claude', 'S1'), comment('Handover: S2')], '--session', 'S2').status, 0, 'handover');
+  assert.equal(check([claim('claude', 'S1'), comment('Handover: S2')], '--session', 'S1').status, 1, 'the earlier session lost the claim');
+  assert.equal(check([claim('claude', 'S1', { user: { login: 'someone-else' } })], '--session', 'S2').status, 0, 'other authors are ignored');
+
+  const old = check([comment('Claim: Driver, Branch x')], '--session', 'S2');
+  assert.equal(old.status, 0, old.stdout);
+  assert.match(old.stdout, /note: claim without Agent\/Session field/);
+  const stray = check([claim('claude', 'S1'), comment('Claim: released')], '--session', 'S2');
+  assert.equal(stray.status, 1, 'a newer claim without the field never lifts a known holder');
+  assert.match(stray.stdout, /note: claim without Agent\/Session field/);
+  assert.equal(check([comment('Agent: codex, Session: S1, Branch: x')], '--session', 'S2').status, 1, 'text after the session id is allowed');
+  assert.equal(check([comment('Agent: reviewer, Session: S1')], '--session', 'S2').status, 0, 'only claude and codex name a claim');
+  assert.equal(check([claim('claude', 'S1')], '--sesion', 'S2').status, 2, 'a misspelled flag is a usage error, not a silent skip');
+  const unnamed = check([claim('claude', 'S1')]);
+  assert.equal(unnamed.status, 0, 'without --session the verdict stays as before');
+  assert.match(unnamed.stdout, /note: newest claim: Agent claude, Session S1/);
+
+  writeFileSync(join(checkout, 'fail-rest'), '');
+  assert.equal(run('check', '1', '--session', 'S1').status, 2, 'unreadable comments are unknown');
 });

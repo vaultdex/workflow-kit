@@ -1,7 +1,7 @@
 # Workflow Kit contributors
 
 Follow [AGENT_RULES.md](AGENT_RULES.md); here the kit itself is the project, so
-kit paths drop the `.vendor/workflow-kit/` prefix (`node scripts/board.mjs check 123`).
+kit paths drop the `.vendor/workflow-kit/` prefix (`node scripts/board.mjs check 123 --session ID`).
 
 - Skills use pinned submodules, reviewed `scripts/` patches and the canonical
   `.agents/skills/find-skills` snapshot. Update its source notice with its upstream
@@ -13,3 +13,5 @@ kit paths drop the `.vendor/workflow-kit/` prefix (`node scripts/board.mjs check
 - Add no npm dependencies, installers that run without an agent or human invoking
   them, secrets or private product content. The [hook rule](AGENT_RULES.md#hooks)
   authorizes agents to invoke the two existing installers; no hook or script may.
+  The one command a hook runs itself is `git submodule update --init .vendor/workflow-kit`
+  for a missing kit.
