@@ -130,7 +130,8 @@ Run [board commands](README.md#board-commands) in the project with authenticated
 
 - Tokens and Actions minutes are budgets. Read only what the step needs, reuse
   evidence whose inputs are unchanged, and wait for CI and reviews with
-  `board.mjs wait PR` in the background instead of hand-written polling loops.
+  `board.mjs wait PR` in the background (a driver subagent runs it in the foreground, see
+  [parallel drivers](docs/parallel-drivers.md#driver-regeln) rule 4) instead of hand-written polling loops.
 - Every push restarts CI and reviews: finish fixes and formatting before pushing.
 - No routine setup reruns, broad audits, or new CI jobs and triggers without an
   estimate of the added usage; get approval when the budget is unknown.
