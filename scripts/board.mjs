@@ -19,7 +19,7 @@ function graphql(query, variables = {}) {
 }
 
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
-  id number title state assignees(first:10){nodes{login}}
+  id number title state body assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
   blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
@@ -43,6 +43,37 @@ function predecessorReasons({ totalCount, nodes }) {
   return { blocked, unknown };
 }
 
+/**
+ * Zeilen `Wartet bis: <Tag | JJJJ-MM-TTThh:mmZ>` im Abschnitt "Abhängigkeiten und Wiederaufnahme": ein fehlender Tag oder
+ * ein künftiger UTC-Zeitpunkt hält das Issue wie ein nativer Blocker; was nicht lesbar ist, zählt als unbekannt, nie als frei.
+ */
+function waitReasons(body) {
+  const blocked = [], unknown = [];
+  const lines = String(body ?? '').split(/\r?\n/);
+  const start = lines.findIndex(line => /^#{1,6}\s*Abhängigkeiten und Wiederaufnahme\s*$/.test(line));
+  if (start < 0) return { blocked, unknown };
+  const end = lines.findIndex((line, index) => index > start && /^#{1,6}\s/.test(line));
+  for (const line of lines.slice(start + 1, end < 0 ? undefined : end)) {
+    const wanted = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line)?.[1].trim();
+    if (wanted === undefined) continue;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(wanted)) {
+      const at = Date.parse(wanted);
+      // Ein Datum wie 2026-02-30 rollt über; nur der unveränderte Wert zählt.
+      if (!Number.isFinite(at) || `${new Date(at).toISOString().slice(0, 16)}Z` !== wanted) unknown.push(`invalid "Wartet bis: ${wanted}": no such UTC time`);
+      else if (Date.now() < at) blocked.push(`waits until ${wanted} (UTC)`);
+    } else if (/^v?\d+(\.\d+)+([-+][\w.]+)?$/.test(wanted)) {
+      try {
+        // matching-refs liefert Präfix-Treffer (v0.1.1 findet v0.1.10); nur der genaue Tag zählt.
+        const tags = rest(`repos/${project.repository}/git/matching-refs/tags/${wanted}`);
+        if (!tags.some(tag => tag.ref === `refs/tags/${wanted}`)) blocked.push(`waits for tag ${wanted} (not found)`);
+      } catch (error) {
+        unknown.push(`cannot read tag ${wanted}: ${String(error.stderr || error.message).trim()}`);
+      }
+    } else unknown.push(`invalid "Wartet bis: ${wanted}": use a tag such as v1.2.3 or a UTC time such as 2026-10-12T18:51Z`);
+  }
+  return { blocked, unknown };
+}
+
 function check(issue = readIssue()) {
   const status = projectItem(issue)?.status?.name;
   const blocked = [], unknown = [];
@@ -54,6 +85,9 @@ function check(issue = readIssue()) {
   const predecessors = predecessorReasons(issue.blockedBy);
   blocked.push(...predecessors.blocked);
   unknown.push(...predecessors.unknown);
+  const waits = waitReasons(issue.body);
+  blocked.push(...waits.blocked);
+  unknown.push(...waits.unknown);
   let verdict = 'STARTABLE';
   if (unknown.length) verdict = 'UNKNOWN';
   if (blocked.length) verdict = 'BLOCKED';
@@ -70,7 +104,7 @@ function next() {
   const nodes = [];
   for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
-      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title assignees(first:10){nodes{login}}
+      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body assignees(first:10){nodes{login}}
       blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
@@ -91,8 +125,8 @@ function next() {
   const ready = nodes.map(issue => ({ ...issue, item: projectItem(issue) }))
     .filter(issue => issue.item?.status?.name === 'Ready')
     .map(issue => {
-      const { blocked, unknown } = predecessorReasons(issue.blockedBy);
-      return { ...issue, reasons: [...blocked, ...unknown], priority: issue.item.priority?.name
+      const predecessors = predecessorReasons(issue.blockedBy), waits = waitReasons(issue.body);
+      return { ...issue, reasons: [...predecessors.blocked, ...waits.blocked, ...predecessors.unknown, ...waits.unknown], priority: issue.item.priority?.name
         ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name };
     })
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);

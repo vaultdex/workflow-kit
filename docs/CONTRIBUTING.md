@@ -52,6 +52,15 @@ request or Ready placement does not qualify. The guarded command still rejects a
 failed check: keep the current status and verdict, verify ownership and claim
 fields, then work only within the documented exception. It is never STARTABLE.
 
+**Wartet bis.** Eine Zeile `Wartet bis: <Wert>` im Abschnitt **Abhängigkeiten und
+Wiederaufnahme** macht eine Wartebedingung maschinenlesbar. Der Wert ist entweder ein
+Release-Tag des Projekt-Repositorys (`Wartet bis: v0.1.1`) oder ein UTC-Zeitpunkt
+`JJJJ-MM-TTThh:mmZ` (`Wartet bis: 2026-10-12T18:51Z`); mehrere Zeilen gelten alle.
+`check` und `next` melden BLOCKED mit der Bedingung, solange der Tag fehlt oder der
+Zeitpunkt in der Zukunft liegt. Ein ungültiger Wert oder ein fehlschlagender Tag-Lookup
+ist UNKNOWN, nie „kein Blocker“. Das ersetzt keine nativen Blocker und verschiebt
+nichts nach Ready; Zeitzonen außer UTC gibt es nicht.
+
 **Claiming.** Complete and verify every step in [Start or resume](../AGENT_RULES.md#start-or-resume).
 
 **Delegation.** The driver owns integration, decisions, proof and delivery.

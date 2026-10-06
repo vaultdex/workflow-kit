@@ -91,6 +91,24 @@ akzeptierten Vertrags im Haupttext beantworten und Entscheidung verlinken.
 Fehlt die Produktentscheidung, konkrete Frage mit Empfehlung offen lassen,
 statt das Implementierungsmodell raten zu lassen.
 
+## Wartebedingung: erst nach einem Release oder Zeitpunkt
+
+Eine Aufgabe, die erst nach dem Tag `v0.1.1` oder ab einem UTC-Zeitpunkt starten
+darf, trägt die Bedingung maschinenlesbar im Abschnitt „Abhängigkeiten und
+Wiederaufnahme“ (eine Zeile je Bedingung, nur der Wert, keine Zusätze):
+
+> ### Abhängigkeiten und Wiederaufnahme
+>
+> Wartet bis: v0.1.1
+>
+> Wartet bis: 2026-10-12T18:51Z
+>
+> Die Migration setzt das Release voraus; die zweite Zeile hält den Start bis nach
+> dem Wartungsfenster zurück.
+
+`board.mjs next` und `check` melden die Aufgabe BLOCKED, bis der Tag existiert und
+der Zeitpunkt erreicht ist; eine ungültige Zeile gilt als UNKNOWN.
+
 ## PR zur kleinen Beispielaufgabe
 
 ### Was wurde geändert und warum?
