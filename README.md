@@ -120,7 +120,10 @@ yourself. Without `.githooks/` it does nothing.
 - `next`, `check ISSUE [--session ID]`, `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
-- `field ISSUE NAME VALUE`: any single-select field, read back after writing.
+- `field ISSUE NAME VALUE [NAME VALUE ...]`: any single-select fields, all read back together after writing.
+  Every pair is checked against the field definitions before the first write: one invalid pair writes
+  nothing and names the valid options. `field`, `status` and `priority` report failures as one
+  `ERROR - reason` line (exit 2), not a stack trace. `check` and issue read errors name `OWNER/REPO#N`.
 - `status ISSUE "Automated review" PR [OTHER_ISSUE...]` (or `field ISSUE Status
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
   and comment backlink on every delivered issue before writing status. Post and

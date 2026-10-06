@@ -71,6 +71,12 @@ if (query.startsWith('mutation')) {
   fs.appendFileSync('mutations', query + '\\n');
   const option = process.argv.find(arg => arg.startsWith('option='));
   if (option) fs.writeFileSync('stored', option.slice(7));
+  // Per field, so a call that sets several fields can be read back field by field.
+  const fieldId = process.argv.find(arg => arg.startsWith('field='));
+  if (option && fieldId) {
+    const values = fs.existsSync('stored-values.json') ? JSON.parse(fs.readFileSync('stored-values.json')) : {};
+    fs.writeFileSync('stored-values.json', JSON.stringify({ ...values, [fieldId.slice(6)]: option.slice(7) }));
+  }
   if (query.includes('addCloseIssueReferences') && !fs.existsSync('link-noop')) {
     // link-delay: the connection shows only after that many reads, like GitHub's delayed consistency.
     const delay = fs.existsSync('link-delay') ? Number(fs.readFileSync('link-delay', 'utf8')) : 0;
@@ -99,8 +105,14 @@ if (query.startsWith('mutation')) {
     data = { addProjectV2ItemById: { item: { id: 'PI1' } } };
   } else data = {};
 } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
-else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
-  projectItems: { nodes: [{ project: { id: 'P1' }, value: { name: fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8') } }] } } } };
+else if (query.includes('fieldValues(first:100)')) {
+  const names = { F1: 'Status', F2: 'Priority', F3: 'Size' };
+  const values = JSON.parse(fs.readFileSync('stored-values.json'));
+  // lost: the API accepted the writes but every field reads back as this value.
+  const lost = fs.existsSync('lost') && fs.readFileSync('lost', 'utf8');
+  data = { repository: { issue: { issueFieldValues: { nodes: [] },
+    projectItems: { nodes: [{ project: { id: 'P1' }, fieldValues: { nodes: Object.entries(values).map(([id, name]) => ({ name: lost || name, field: { name: names[id] } })) } }] } } } };
+}
 else if (query.includes('reviewThreads(first:100,after')) {
   const pages = JSON.parse(fs.readFileSync('pr.json')).threadPages ?? [[]];
   const cursor = process.argv.find(arg => arg.startsWith('after='));
@@ -826,8 +838,49 @@ test('reviews waits only for traces on the current head and never reads failures
 test('field accepts Unicode and punctuation in names and options', t => {
   const { run, writeIssue } = fixture(t);
   writeIssue(issue());
-  assert.equal(run('field', '1', 'Größe', 'P0: urgent').status, 1, 'Validation lets the name through to the field lookup');
-  assert.equal(run('field', '1', 'Size', '-x').status, 2, 'An option-like value is still rejected');
+  const result = run('field', '1', 'Größe', 'P0: urgent');
+  assert.match(result.stdout, /^ERROR - .*Größe/, 'Validation lets the name through to the field lookup: ' + result.stderr);
+  assert.equal(run('field', '1', 'Size', '-x').stdout, '', 'An option-like value is still rejected as usage');
+  assert.equal(run('field', '1', 'Size', '-x').status, 2);
+});
+
+test('field sets several fields in one call: every pair is validated first, then all are written and read back', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue());
+  const mutations = join(checkout, 'mutations');
+  let result = run('field', '1', 'Size', 'xs', 'Priority', 'low');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 2);
+  assert.deepEqual(JSON.parse(readFileSync(join(checkout, 'stored-values.json'), 'utf8')), { F3: 'XS', F2: 'Low' });
+
+  rmSync(mutations);
+  for (const args of [['Size', 'XS', 'Priority', 'Urgent'], ['Size', 'XS', 'Colour', 'Red'], ['Size', 'XS', 'Priority'], ['Size', 'XS', 'size', 'S']]) {
+    result = run('field', '1', ...args);
+    assert.match(result.stdout, /^ERROR - /m, result.stdout + result.stderr);
+    assert.equal(result.stderr, '', 'No stack trace');
+    assert.equal(result.status, 2);
+    assert.equal(existsSync(mutations), false, 'One invalid pair writes nothing: ' + args.join(' '));
+  }
+  assert.match(run('field', '1', 'Size', 'XS', 'Priority', 'Urgent').stdout, /Priority: "Urgent" is not an option; use one of: High, Low/);
+
+  writeFileSync(join(checkout, 'lost'), 'S');
+  assert.notEqual(run('field', '1', 'Size', 'XS', 'Priority', 'Low').status, 0, 'A read-back that differs for any field is a failure');
+});
+
+test('field, status and priority report failures as one ERROR line, and issue failures name the repository', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue());
+  for (const args of [['field', '1', 'Colour', 'Red'], ['priority', '1', 'Urgent'], ['status', '1', 'Done']]) {
+    const result = run(...args);
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stdout, /^ERROR - /);
+    assert.equal(result.stderr, '', 'No stack trace');
+  }
+  // GitHub refuses an unknown issue number: the message says which repository was meant.
+  writeFileSync(join(checkout, 'fail'), '');
+  for (const args of [['check', '1'], ['priority', '1', 'High']]) {
+    assert.match(run(...args).stdout, /test\/example#1/, args[0]);
+  }
 });
 
 test('link connects the issue natively to the PR, repeats safely and trusts only the read-back', t => {

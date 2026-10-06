@@ -114,7 +114,7 @@ remains, because GitHub has no conditional write; the read-back catches every ov
 **Metadata.** Every issue, including Backlog items and follow-ups, gets one
 repository milestone, a Project Priority and area/type labels when it is created,
 and keeps them after closing. Set the real fields (`gh issue create --milestone …
---label …`, then `board.mjs priority` and `board.mjs field` for other
+--label …`, then `board.mjs priority` and `board.mjs field` (several NAME VALUE pairs per call) for other
 single-select fields), not text in the body. Priority reflects
 impact and urgency (Urgent, High, Medium, Low). If unsure, give a provisional one
 and state its basis. Don't reprioritize others' active work. Confirmed production,
