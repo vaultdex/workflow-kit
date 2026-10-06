@@ -37,35 +37,39 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
     let count = 0;
     const clone = () => { const dir = join(temp, 'clone' + count++); git(temp, 'clone', '--quiet', origin, dir); return dir; };
 
-    for (const [file, key] of variants) for (const command of new Set(handlers(file, key))) {
-      const trial = (cwd) => run(kind, [...args, command], cwd, local);
-      const [first, second] = [clone(), clone()];
-      assert.ok(!existsSync(join(first, '.vendor/workflow-kit/AGENT_RULES.md')), 'fresh clone starts without the kit');
+    for (const [file, key] of variants) {
+      const commands = new Set(handlers(file, key));
+      assert.ok(commands.size, `${file} carries the kit init handler`);
+      for (const command of commands) {
+        const trial = (cwd) => run(kind, [...args, command], cwd, local);
+        const [first, second] = [clone(), clone()];
+        assert.ok(!existsSync(join(first, '.vendor/workflow-kit/AGENT_RULES.md')), 'fresh clone starts without the kit');
 
-      let result = trial(first);
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(result.stdout, '', 'a successful init prints nothing');
-      assert.ok(existsSync(join(first, '.vendor/workflow-kit/AGENT_RULES.md')), `${file} initializes the kit`);
+        let result = trial(first);
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stdout, '', 'a successful init prints nothing');
+        assert.ok(existsSync(join(first, '.vendor/workflow-kit/AGENT_RULES.md')), `${file} initializes the kit`);
 
-      const rules = join(first, '.vendor/workflow-kit/AGENT_RULES.md');
-      rmSync(rules);
-      result = trial(first);
-      assert.match(result.stdout, /AGENT_RULES.md/, 'a kit whose rules file is missing despite the update is reported');
-      git(join(first, '.vendor/workflow-kit'), 'checkout', '--', 'AGENT_RULES.md');
+        const rules = join(first, '.vendor/workflow-kit/AGENT_RULES.md');
+        rmSync(rules);
+        result = trial(first);
+        assert.match(result.stdout, /AGENT_RULES.md/, 'a kit whose rules file is missing despite the update is reported');
+        git(join(first, '.vendor/workflow-kit'), 'checkout', '--', 'AGENT_RULES.md');
 
-      renameSync(kit, `${kit}-gone`);
-      result = trial(first);
-      assert.deepEqual([result.status, result.stdout, result.stderr], [0, '', ''], 'an initialized kit is not touched, not even to reach the source');
+        renameSync(kit, `${kit}-gone`);
+        result = trial(first);
+        assert.deepEqual([result.status, result.stdout, result.stderr], [0, '', ''], 'an initialized kit is not touched, not even to reach the source');
 
-      result = trial(second);
-      assert.equal(result.status, 0, 'a failed init must not abort the session');
-      assert.match(result.stdout, /git submodule update --init \.vendor\/workflow-kit/, 'a failed init prints the manual command');
-      assert.ok(!existsSync(join(second, '.vendor/workflow-kit/AGENT_RULES.md')));
-      renameSync(`${kit}-gone`, kit);
+        result = trial(second);
+        assert.equal(result.status, 0, 'a failed init must not abort the session');
+        assert.match(result.stdout, /git submodule update --init \.vendor\/workflow-kit/, 'a failed init prints the manual command');
+        assert.ok(!existsSync(join(second, '.vendor/workflow-kit/AGENT_RULES.md')));
+        renameSync(`${kit}-gone`, kit);
 
-      result = trial(plain);
-      assert.deepEqual([result.status, result.stdout], [0, ''], 'a project without a kit gitlink is left alone');
-      assert.ok(!existsSync(join(plain, '.vendor')));
+        result = trial(plain);
+        assert.deepEqual([result.status, result.stdout], [0, ''], 'a project without a kit gitlink is left alone');
+        assert.ok(!existsSync(join(plain, '.vendor')));
+      }
     }
   });
 }
