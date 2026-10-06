@@ -1,8 +1,10 @@
 # Parallele Driver
 
 Beobachtungen und Verweise für mehrere Agent-Driver, die gleichzeitig auf einem
-Rechner arbeiten (zuerst am 06.10.2026 in vaultdex/Vaultdex). Das Kit führt hier
-keine neuen Regeln ein; verbindlich bleibt [AGENT_RULES.md](../AGENT_RULES.md).
+Rechner arbeiten (zuerst am 06.10.2026 in vaultdex/Vaultdex). Verbindlich bleibt
+[AGENT_RULES.md](../AGENT_RULES.md); die [Driver-Regeln](#driver-regeln) am Ende
+legen sie für Driver-Subagenten aus. Ein Briefing verweist darauf und nennt nur die
+Besonderheiten des Issues.
 
 **Ein Driver je Issue.** Jeder Driver arbeitet in einem eigenen Worktree auf der
 eigenen Issue-Branch. Nur der Driver claimt und ändert den Status; Subagents
@@ -33,6 +35,42 @@ je Issue in einem eigenen Verzeichnis, zum Beispiel im Session-Scratchpad oder n
 dem Klon in `<issue>-scratch/`, nie unter gemeinsamen Dateinamen.
 
 **Worktree-Schutzprüfung von Claude Code.** Sie lehnt zusammengesetzte Shell-Befehle
-ab: `$(…)` in Pipes, Schleifen mit `git` oder `gh` und Inline-`node` oder
-`python`. Stattdessen einfache Einzelbefehle oder eine Skriptdatei im eigenen
-Scratch-Verzeichnis verwenden, statt mehrfach zu probieren.
+ab, auch im Bypass-Modus: `$(…)` in Pipes, Schleifen mit `git` oder `gh`,
+Inline-`node` oder `python`, Heredocs und Umleitungen auf Pfade außerhalb des
+Worktrees, `cd … && git` sowie Variablen in `gh`-Pfaden. Stattdessen einfache
+Einzelbefehle oder eine Skriptdatei im eigenen Scratch-Verzeichnis verwenden, statt
+mehrfach zu probieren. Dateien, Kommentartexte und PR-Bodies mit dem Write-Werkzeug
+schreiben und per `--body-file` übergeben, nicht per Heredoc.
+
+## Driver-Regeln
+
+Allgemeine Regeln für jeden Driver-Subagenten. Projektspezifische Regeln und die
+Modellwahl stehen hier nicht.
+
+1. **Ein Issue bis „Human review“ treiben.** Früher enden nur bei einem menschlichen
+   Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung) oder bei einem Blocker
+   (`board.mjs check` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
+   [Blockers and scope](CONTRIBUTING.md#blockers-and-scope)): erst im Issue
+   kommentieren, dann berichten.
+2. **Regeln vom Ziel-Release-Branch lesen.** AGENTS.md und Kit-Regeln stammen vom
+   Release-Branch, auf den die PR zielt, nicht nur von `main`; eine Regel kann nur
+   dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume) mit
+   `Agent: …, Session: …`. Den Issue-Branch zweigt der Driver vom Ziel-Release-Branch
+   ab (`--base` im `gh issue develop` der [Delivery](CONTRIBUTING.md#delivery)-Regel
+   ist dann dieser Branch, nicht `main`).
+3. **Fremde Branches in Ruhe lassen.** `codex/*`-Branches und Branches anderer
+   Driver nicht anfassen, auch wenn der eigene Branch `codex/*` heißt; nur der eigene
+   Issue-Branch gehört dem Driver. Überschneidungen melden.
+4. **Warten ohne Handarbeit.** Abweichend von [AGENT_RULES.md](../AGENT_RULES.md#economy)
+   und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
+   `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
+   Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht auf einen Reviewer
+   ohne Spur pollen (ein Review, das nie startet). Freitext-Ankündigungen anderer Bots
+   erkennt `wait` nicht ([README](../README.md#board-commands)); eine angekündigte
+   Review verfolgt der Driver von Hand bis zum Ergebnis oder Stall und führt
+   `handoff` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;
+   `tasks/*.output` nicht pollen, die Datei bleibt leer.
+5. **Shell.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus, mit
+   literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
+6. **Abschlussbericht** mit höchstens 12 Zeilen: PR, zurückgelesener Status,
+   Folge-Issues, Überschneidungen, Reibung.
