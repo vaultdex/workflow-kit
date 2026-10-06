@@ -52,16 +52,23 @@ const validTagName = tag => tag !== '' && !/[\p{Cc} ~^:?*[\\]|\.\.|@\{|\/\/|^\/|
  * ein künftiger UTC-Zeitpunkt hält das Issue wie ein nativer Blocker; was nicht lesbar ist, zählt als unbekannt, nie als frei.
  */
 function waitReasons(body) {
-  const blocked = [], unknown = [];
-  const lines = String(body ?? '').split(/\r?\n/);
-  const start = lines.findIndex(line => /^#{1,6}\s*Abhängigkeiten und Wiederaufnahme\s*$/.test(line));
-  if (start < 0) return { blocked, unknown };
+  const blocked = [], unknown = [], values = [];
   // Untergliederungen gehören zum Abschnitt: er endet erst an einer Überschrift gleicher oder höherer Ebene.
-  const level = lines[start].match(/^#+/)[0].length;
-  const end = lines.findIndex((line, index) => index > start && /^#{1,6}\s/.test(line) && line.match(/^#+/)[0].length <= level);
-  for (const line of lines.slice(start + 1, end < 0 ? undefined : end)) {
-    const wanted = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line)?.[1].trim();
-    if (wanted === undefined) continue;
+  // Zeilen in Code-Blöcken sind weder Überschrift noch Bedingung.
+  // ponytail: ein Zaun schaltet um, ohne Zeichen und Länge des öffnenden zu vergleichen; ersetzen, wenn verschachtelte Zäune vorkommen.
+  let level = 0, fenced = false;
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    if (/^ {0,3}(`{3,}|~{3,})/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    const heading = /^ {0,3}(#{1,6})\s+(.*?)\s*$/.exec(line);
+    if (heading?.[2] === 'Abhängigkeiten und Wiederaufnahme') level = heading[1].length;
+    else if (heading && heading[1].length <= level) level = 0;
+    else if (level) {
+      const value = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line)?.[1].trim();
+      if (value !== undefined) values.push(value);
+    }
+  }
+  for (const wanted of values) {
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(wanted)) {
       const at = Date.parse(wanted);
       // Ein Datum wie 2026-02-30 rollt über; nur der unveränderte Wert zählt.

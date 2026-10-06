@@ -384,6 +384,10 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
   assert.equal(check('Wartet bis: release@2026').status, 0, 'Any tag Git accepts is looked up, URL-encoded');
   writeIssue({ ...issue(), body: '### Abhängigkeiten und Wiederaufnahme\n\n#### Release\n\nWartet bis: 2999-01-01T00:00Z\n' });
   assert.equal(run('check', '1').status, 1, 'A nested heading stays inside the section');
+  writeIssue({ ...issue(), body: '## Abhängigkeiten und Wiederaufnahme\n\n```sh\n## setup evidence\nWartet bis: v9.9.9\n```\n\nWartet bis: 2999-01-01T00:00Z\n' });
+  const fenced = run('check', '1');
+  assert.equal(fenced.status, 1, 'A fenced line is no heading');
+  assert.doesNotMatch(fenced.stdout, /v9\.9\.9/, 'A fenced line is no condition');
   for (const invalid of ['Wartet bis: bald nach dem Release', 'Wartet bis: release.', 'Wartet bis: foo.lock', 'Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
     assert.equal(check(invalid).status, 2, `${invalid} is unknown, never "no blocker"`);
   }
