@@ -32,9 +32,9 @@ does not replace it.
 
 | Verdict | Meaning |
 | --- | --- |
-| STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed. |
-| BLOCKED | An open predecessor, a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, or status Backlog or Done. |
-| UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, an unset or unknown status, or the issue is missing from the Project. Retry the read; never read it as "no blockers". |
+| STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed, every `Wartet bis` condition met. |
+| BLOCKED | An open predecessor, a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, or an unmet `Wartet bis` condition. |
+| UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, an unset or unknown status, the issue is missing from the Project, or an unreadable `Wartet bis` line. Retry the read; never read it as "no blockers". |
 
 **Claims.** `check ISSUE --session ID` also reads the issue comments of the authenticated login
 (other authors are ignored). A claim carries the line `Agent: claude|codex, Session: ID`; a comment
@@ -59,6 +59,18 @@ record its source, allowed work and remaining gates first. "Continue", a review
 request or Ready placement does not qualify. The guarded command still rejects a
 failed check: keep the current status and verdict, verify ownership and claim
 fields, then work only within the documented exception. It is never STARTABLE.
+
+**Wartet bis.** Eine Zeile `Wartet bis: <Wert>` (üblich im Abschnitt **Abhängigkeiten
+und Wiederaufnahme**) macht eine Wartebedingung maschinenlesbar. Der Wert ist entweder
+ein Tag des Projekt-Repositorys (`Wartet bis: v0.1.1`) oder ein UTC-Zeitpunkt
+`JJJJ-MM-TTThh:mmZ` (`Wartet bis: 2026-10-12T18:51Z`); mehrere Zeilen gelten alle.
+Die Zeile zählt, wo immer sie im Issue-Text steht, auch in einem Code-Block: so wird
+keine Bedingung durch Markdown-Besonderheiten still überlesen. Ein Beispiel im Text
+steht deshalb im Satz oder in Anführungszeichen, nicht als eigene Zeile.
+`check` und `next` melden BLOCKED mit der Bedingung, solange der Tag fehlt oder der
+Zeitpunkt in der Zukunft liegt. Ein ungültiger Wert oder ein fehlschlagender Tag-Lookup
+ist UNKNOWN, nie „kein Blocker“. Das ersetzt keine nativen Blocker und verschiebt
+nichts nach Ready; Zeitzonen außer UTC gibt es nicht.
 
 **Claiming.** Complete and verify every step in [Start or resume](../AGENT_RULES.md#start-or-resume).
 
