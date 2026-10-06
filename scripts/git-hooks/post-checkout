@@ -1,0 +1,18 @@
+#!/bin/sh
+# Workflow Kit: after a branch checkout, bring .vendor/workflow-kit to the gitlink of the new branch.
+# Installed by install-git-hooks.mjs. Runs only git itself; never fails the checkout.
+[ "$3" = 1 ] || exit 0
+# Git may export the repository of the hook's caller; every command below selects its own.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+case "$(git -C "$root" ls-files -s -- .vendor/workflow-kit 2>/dev/null)" in 160000*) ;; *) exit 0 ;; esac
+kit="$root/.vendor/workflow-kit"
+# An empty directory has no .git of its own; git would then report the project, not the kit.
+if [ -e "$kit/.git" ] && [ -n "$(git -C "$kit" status --porcelain 2>/dev/null)" ]; then
+  echo "Workflow Kit has local changes and was not updated; commit or discard them, then run: git submodule update --init .vendor/workflow-kit" >&2
+  exit 0
+fi
+GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true git -C "$root" -c credential.interactive=false \
+  submodule update --init --checkout .vendor/workflow-kit >/dev/null 2>&1 \
+  || echo "Workflow Kit not updated; run: git submodule update --init .vendor/workflow-kit" >&2
+exit 0

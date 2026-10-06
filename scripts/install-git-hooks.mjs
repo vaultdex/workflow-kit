@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { externalTool, projectRoot } from './checkout-root.mjs';
 
-// Explicit setup: points Git at the project's versioned .githooks, per clone. Automatic hooks never run this file.
-// The relative path lets every worktree run the hooks of its own branch. --check only reports.
+// Explicit setup: points Git at the project's versioned .githooks, per clone, and adds its post-checkout kit sync.
+// Automatic hooks never run this file. The relative path lets every worktree run the hooks of its own branch. --check only reports.
 const root = projectRoot();
 const check = process.argv.includes('--check');
 const git = externalTool('git', root);
@@ -27,6 +27,19 @@ const report = message => console.log(`core.hooksPath: ${message}`);
 if (!statSync(join(root, '.githooks'), { throwIfNoEntry: false })?.isDirectory()) {
   report('no .githooks directory, nothing to do');
   process.exit(0);
+}
+
+// The project versions its own post-checkout (kit sync). A differing existing file is the project's: kept.
+const hookSource = readFileSync(new URL('./git-hooks/post-checkout', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+const hookFile = join(root, '.githooks', 'post-checkout');
+const existingHook = lstatSync(hookFile, { throwIfNoEntry: false });
+if (!existingHook) {
+  if (!check) writeFileSync(hookFile, hookSource, { flag: 'wx', mode: 0o755 });
+  console.log(`post-checkout: ${check ? 'would create' : 'created'} .githooks/post-checkout (kit sync after branch checkout); commit it with: git add --chmod=+x .githooks/post-checkout`);
+} else if (existingHook.isFile() && readFileSync(hookFile, 'utf8').replaceAll('\r\n', '\n') === hookSource) {
+  console.log('post-checkout: .githooks/post-checkout is current');
+} else {
+  console.log('post-checkout: kept existing .githooks/post-checkout; integrate scripts/git-hooks/post-checkout there by hand');
 }
 
 // Every worktree's .githooks counts as ours, so an absolute path into another worktree is migrated too.

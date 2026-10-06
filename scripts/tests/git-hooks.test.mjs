@@ -141,3 +141,68 @@ test('an own worktree path with a newline is still migrated', { skip: process.pl
   f.run();
   assert.equal(f.value('--local'), '.githooks');
 });
+
+/** A consumer with the kit as submodule: main pins kit commit one, `other` pins commit two. The installer ran in it. */
+function kitFixture(t) {
+  const base = mkdtempSync(join(tmpdir(), 'kit post checkout '));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const global = join(base, 'global.gitconfig');
+  // The submodule is a local path; Git blocks that transport for submodules unless allowed.
+  writeFileSync(global, '[protocol "file"]\n\tallow = always\n[user]\n\tname = t\n\temail = t@t\n');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+  const sh = (cwd, ...args) => {
+    const result = spawnSync('git', args, { cwd, env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result;
+  };
+  const kit = join(base, 'kit'), repo = join(base, 'repo');
+  for (const dir of [kit, repo]) { mkdirSync(dir); sh(dir, 'init', '-q', '-b', 'main'); }
+  const pin = (n) => { writeFileSync(join(kit, 'AGENT_RULES.md'), `rules ${n}\n`); sh(kit, 'commit', '-q', '-am', `kit ${n}`); return sh(kit, 'rev-parse', 'HEAD').stdout.trim(); };
+  writeFileSync(join(kit, 'AGENT_RULES.md'), 'rules 0\n');
+  sh(kit, 'add', '.');
+  const [one, two] = [pin(1), pin(2)];
+  mkdirSync(join(repo, '.githooks'));
+  writeFileSync(join(repo, '.githooks/pre-push'), '#!/bin/sh\n');
+  const installed = spawnSync(process.execPath, [script], { cwd: repo, env, encoding: 'utf8' });
+  assert.equal(installed.status, 0, installed.stderr);
+  sh(repo, 'submodule', '-q', 'add', kit.replaceAll('\\', '/'), '.vendor/workflow-kit');
+  sh(repo, '-C', '.vendor/workflow-kit', 'checkout', '-q', one);
+  sh(repo, 'add', '--chmod=+x', '.githooks/post-checkout');
+  sh(repo, 'add', '.');
+  sh(repo, 'commit', '-q', '-m', 'pin one');
+  sh(repo, 'switch', '-q', '-c', 'other');
+  sh(repo, '-C', '.vendor/workflow-kit', 'checkout', '-q', two);
+  sh(repo, 'commit', '-q', '-am', 'pin two');
+  sh(repo, 'switch', '-q', 'main');
+  sh(repo, 'submodule', '-q', 'update', '--init');
+  const rules = join(repo, '.vendor/workflow-kit/AGENT_RULES.md');
+  return { repo, sh, rules, status: () => sh(repo, 'status', '--porcelain').stdout, switchTo: branch => spawnSync('git', ['switch', '-q', branch], { cwd: repo, env, encoding: 'utf8' }) };
+}
+
+test('switching branches with another kit gitlink leaves no modified submodule', t => {
+  const f = kitFixture(t);
+  assert.equal(f.status(), '');
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 1\n');
+  assert.equal(f.switchTo('other').status, 0);
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 2\n');
+  assert.equal(f.status(), '');
+  assert.equal(f.switchTo('main').status, 0);
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 1\n');
+  assert.equal(f.status(), '');
+});
+
+test('a kit with local changes keeps them, prints a hint and does not fail the switch', t => {
+  const f = kitFixture(t);
+  writeFileSync(f.rules, 'my edit\n');
+  const result = f.switchTo('other');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /local changes/);
+  assert.equal(readFileSync(f.rules, 'utf8'), 'my edit\n');
+});
+
+test('an existing, different post-checkout hook of the project is kept', t => {
+  const f = fixture(t);
+  writeFileSync(join(f.repo, '.githooks/post-checkout'), '#!/bin/sh\necho mine\n');
+  f.run();
+  assert.equal(readFileSync(join(f.repo, '.githooks/post-checkout'), 'utf8'), '#!/bin/sh\necho mine\n');
+});
