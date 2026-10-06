@@ -57,7 +57,8 @@ function waitReasons(body) {
   const blocked = [], unknown = [], values = [];
   for (const line of String(body ?? '').split(/\r?\n/)) {
     const strict = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line);
-    if (strict) values.push(strict[1].trim());
+    // Nur ASCII-Trenner weg: trim() würde ein gültiges Unicode-Leerzeichen am Tagnamen entfernen.
+    if (strict) values.push(strict[1].replace(/^[ \t]+|[ \t]+$/g, ''));
     // Formatierte Varianten (**Wartet bis:**, > …, 1. …, - [ ] …) sind keine lesbare Bedingung, aber auch kein Freibrief.
     else if (/^[\s>*_+\-[\]xX\d.#|`~=()]*wartet\s+bis\b/i.test(line)) unknown.push(`unreadable line "${line.trim()}": write it as "Wartet bis: <tag or UTC time>"`);
   }

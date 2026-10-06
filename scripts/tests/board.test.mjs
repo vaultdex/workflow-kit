@@ -382,6 +382,8 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
   assert.equal(check('Wartet bis: release/2027').status, 1);
   writeFileSync(join(checkout, 'matching-refs-release%402026.json'), JSON.stringify([{ ref: 'refs/tags/release@2026' }]));
   assert.equal(check('Wartet bis: release@2026').status, 0, 'Any tag Git accepts is looked up, URL-encoded');
+  writeFileSync(join(checkout, 'matching-refs-%C2%A0release.json'), JSON.stringify([{ ref: 'refs/tags/ release' }]));
+  assert.equal(check('Wartet bis:  release').status, 0, 'Only ASCII separators are stripped from the value');
   // No Markdown section logic: a condition is never silently overlooked, wherever the line sits.
   for (const body of ['### Abhängigkeiten und Wiederaufnahme ###\n\n#### Release\n\nWartet bis: 2999-01-01T00:00Z\n',
     '## Weiteres\n\n- Wartet bis: 2999-01-01T00:00Z\n', 'Wartet bis: 2999-01-01T00:00Z\r\n\r\n```sh\n## x\n```\n']) {
