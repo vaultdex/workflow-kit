@@ -170,7 +170,11 @@ yourself. Without `.githooks/` it does nothing.
   1 blocked, 2 unreadable or changed state, 3 waiting). Native links are read on
   every page, including manual links on release branches; text and branch links
   alone do not count. It also requires the [handoff comment](#handoff-comment) on the
-  PR for the current head (exit 1 otherwise, status untouched). Session ownership, final
+  PR for the current head and rejects an issue body that still has an open task-list item
+  (`- [ ]`) without an issue reference (`#N` or `OWNER/REPO#N`; exit 1 otherwise, status
+  untouched, every such item is printed). It reads the body as GitHub renders it: checked-off
+  items, items with a reference GitHub links, and code blocks do not count (a `#N` in a code
+  span or glued to letters is no reference). Session ownership, final
   proof and the content of the findings remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and

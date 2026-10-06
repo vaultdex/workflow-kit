@@ -209,7 +209,8 @@ backlink never closes an issue.
    all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
 3. Wait for CI and every review with a trace on the current head with `board.mjs
-   wait PR` in the background, not hand-written polling. Review bots run unreliably,
+   wait PR` in the background (a driver subagent: foreground, see
+   [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
    status or review on the head commit, or, created after the head was pushed, a
    review comment, an open review request, an announced review or a bot's reaction
@@ -262,6 +263,9 @@ backlink never closes an issue.
    status untouched. An unsuccessful status read-back is an error, not a delivery;
    inspect the actual status before retrying. Plain `status` writes maintain
    metadata and do not prove these delivery gates.
+   Check off every fulfilled acceptance box in the issue body (`board.mjs body`) before the handoff; a part
+   moved to a follow-up stays unchecked and links that issue (`- [ ] … → #12`). `board.mjs handoff`
+   refuses while an open `- [ ]` line has no issue reference.
 7. After the human merges, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
 
@@ -299,7 +303,7 @@ data-loss or availability risks at once, without exposing secrets.
 If part of the acceptance can't be delivered, for example because access is
 missing, get explicit human authorization before opening the PR. Then move that
 part into a follow-up issue: Backlog, full metadata, native `blocked by` the
-original issue (`board.mjs block FOLLOW-UP ORIGINAL`). Record the split in the original issue; the PR then closes the
+original issue (`board.mjs block FOLLOW-UP ORIGINAL`). Record the split in the original issue: leave that acceptance line unchecked and add the link to the follow-up (`- [ ] … → #12`), which `handoff` accepts as moved; the PR then closes the
 reduced scope. Without authorization it stays a blocker. A split never waives
 security or required checks.
 
