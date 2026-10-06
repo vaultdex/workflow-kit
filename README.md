@@ -118,8 +118,12 @@ missing, unless the project already has a different one, which stays; commit it 
 `git add --chmod=+x .githooks/post-checkout`. After a branch checkout (third argument `1`) the hook runs
 `git submodule update --init --checkout .vendor/workflow-kit`, so the kit follows the gitlink of the
 new branch instead of showing `M .vendor/workflow-kit`. It touches only the kit, not other submodules
-or `submodule.recurse`. A kit with local changes is not touched: the hook prints a hint and the checkout
-continues; any failure only prints the command. Without a kit gitlink, as in this repository, it does nothing.
+or `submodule.recurse`. A kit with local changes, ignored or untracked files, or commits no remote has
+(a clean, published kit behind or ahead of the old pin still follows) is not touched: the hook prints a hint
+and the checkout continues; any failure only prints the command. Without a kit gitlink, as in this repository,
+it does nothing. The hook is versioned with each branch (Git resolves `.githooks` in the new worktree after
+the switch), so a branch created before the hook was committed has none and does not sync until it merges
+the default branch.
 
 ## Board commands
 
