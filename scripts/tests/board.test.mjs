@@ -634,6 +634,22 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(readied(0.5, { isDraft: true })), 0, 'A Draft starts no grace');
   // A PR opened ready gets its first CI suite from the "opened" event, after its creation.
   assert.equal(reviews({ ...pr({ pushed: 0.2 }), isDraft: false, createdAt: minutesAgo(0.5) }), 3, 'A PR opened ready counts from its creation');
+  // Correction pushes: heads pushed after the first Ready; the head that set Ready does not count, a repeated head counts once.
+  const corrections = (pushes, changes) => {
+    writeFileSync(join(checkout, 'activity.json'), JSON.stringify(pushes.map(([after, minutes]) => ({ after, timestamp: minutesAgo(minutes) }))));
+    return look({ ...readied(30, {}, 5), firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] }, ...changes }).stdout;
+  };
+  const cap = /^cap reached: collect non-blocking findings in one follow-up issue$/m;
+  const twoPushes = corrections([['abcdef1234', 5], ['bbbbbbb', 15], ['aaaaaaa', 25]]);
+  assert.match(twoPushes, /^correction pushes after ready: 2$/m);
+  assert.match(twoPushes, cap);
+  const onePush = corrections([['abcdef1234', 15], ['aaaaaaa', 25]]);
+  assert.match(onePush, /^correction pushes after ready: 1$/m);
+  assert.doesNotMatch(onePush, cap);
+  assert.doesNotMatch(corrections([['abcdef1234', 5], ['abcdef1234', 10], ['aaaaaaa', 25]]), cap, 'A repeated head is one push');
+  assert.match(corrections([['abcdef1234', 25]]), /^correction pushes after ready: 0$/m);
+  assert.doesNotMatch(look({ ...pr(), firstReadyEvents: { nodes: [] } }).stdout, /correction pushes/, 'A PR that never was ready has no count');
+  rmSync(join(checkout, 'activity.json'));
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'Red CI ends the wait as FAILED, never DONE');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'SKIPPED')] })), 0);
   assert.equal(reviews(pr({ contexts: [check('IN_PROGRESS')] })), 3);

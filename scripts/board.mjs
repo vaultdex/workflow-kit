@@ -258,6 +258,7 @@ function setField() {
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
   number state isDraft createdAt headRefName headRefOid mergeStateStatus reviewDecision
   readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
+  firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
@@ -362,10 +363,24 @@ function sonarIssues(detailsUrl, prNumber) {
   return total;
 }
 
-/** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
-function headSetAt(pr) {
+function pushLog(pr) {
   const log = rest(`repos/${project.repository}/activity?ref=${encodeURIComponent(`refs/heads/${pr.headRefName}`)}&per_page=100`);
   assert.ok(Array.isArray(log), 'Push log is unreadable');
+  return log;
+}
+
+/** Distinct heads pushed after the PR first became ready; the head that set Ready is no correction, a force-push counts as one push. Null while there was no Ready.
+ * ponytail: the log is the newest 100 pushes and a PR opened ready that was converted to Draft and readied again counts from its second Ready; replace when the timeline lists pushes. */
+function correctionPushes(pr, pushes) {
+  const first = pr.firstReadyEvents?.nodes?.[0]?.createdAt ?? (pr.isDraft ? undefined : pr.createdAt);
+  if (!first) return null;
+  const since = Date.parse(first);
+  assert.ok(Number.isFinite(since), 'The first Ready time is unreadable');
+  return new Set(pushes().filter(entry => Date.parse(entry.timestamp) > since && !/^0+$/.test(entry.after)).map(entry => entry.after)).size;
+}
+
+/** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
+function headSetAt(pr, log = pushLog(pr)) {
   // The same commit can be pushed twice (X, Y, X again); the latest push counts, whatever the order.
   const pushes = log.filter(entry => entry.after === pr.headRefOid);
   assert.ok(pushes.length, 'Push time of the head is not readable; retry the read');
@@ -547,9 +562,11 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // Bots that start on "ready for review" (Codex) or on new commits leave their first trace a minute or two
   // later, often after CI is green. Until the grace has passed since the PR became ready or the head was
   // pushed, whichever is later, a missing trace is no answer yet.
+  let log;
+  const pushes = () => log ??= pushLog(pr);
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
   if (!pr.isDraft && graceMinutes > 0) {
-    const graceFrom = Math.max(readyAt, pushed, headSetAt(pr));
+    const graceFrom = Math.max(readyAt, pushed, headSetAt(pr, pushes()));
     if (now - graceFrom < graceMinutes * 60_000) {
       waiting.push({ text: `reviewers may still start until ${new Date(graceFrom + graceMinutes * 60_000).toISOString()}`, since: Infinity });
     }
@@ -559,6 +576,12 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const comment of inline.filter(comment => after(comment.updated_at))) lines.push(`inline ${login(comment.user)} ${comment.html_url}`);
   const threads = unresolvedThreads(pr.number);
   lines.push(`unresolved threads: ${threads.length}`, ...threads.map(link => `thread ${link}`));
+  // The review loop stops pushing after two corrections (docs/CONTRIBUTING.md#review-loop); nothing enforces it, so say where the PR stands.
+  const corrections = correctionPushes(pr, pushes);
+  if (corrections !== null) {
+    lines.push(`correction pushes after ready: ${corrections}`);
+    if (corrections >= 2) lines.push('cap reached: collect non-blocking findings in one follow-up issue');
+  }
   // Mergeable is not merge-ready: a standing change request, a ruleset or conflicts still block the human.
   lines.push(`merge: ${pr.mergeStateStatus}, review decision: ${pr.reviewDecision ?? 'none'}`);
   assert.equal(pr.latestOpinionatedReviews.nodes.length, pr.latestOpinionatedReviews.totalCount, 'Not every review decision is readable');
