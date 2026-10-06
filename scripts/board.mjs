@@ -862,7 +862,7 @@ function sub() {
   const childNumber = Number(value.slice(value.lastIndexOf('#') + 1));
   const read = () => graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id parent{number repository{nameWithOwner}}}}}`,
     { owner: childOwner, name: childName, number: childNumber }).repository.issue;
-  const underParent = ({ parent }) => parent?.number === number && parent.repository.nameWithOwner === project.repository;
+  const underParent = ({ parent }) => parent?.number === number && parent.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase();
   const child = read();
   // Without replaceParent GitHub refuses a child that already has another parent; that error is left to surface.
   if (!underParent(child)) graphql(`mutation($issue:ID!,$sub:ID!){addSubIssue(input:{issueId:$issue,subIssueId:$sub}){issue{number}}}`,

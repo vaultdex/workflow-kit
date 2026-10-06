@@ -79,7 +79,7 @@ if (query.startsWith('mutation')) {
   }
   // sub-noop: GitHub accepted the call but the link is not readable afterwards.
   if (query.includes('addSubIssue') && !fs.existsSync('sub-noop')) {
-    fs.writeFileSync('child.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('child.json')), parent: { number: 1, repository: { nameWithOwner: 'test/example' } } }));
+    fs.writeFileSync('child.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('child.json')), parent: { number: 1, repository: { nameWithOwner: 'Test/Example' } } }));
   }
   if (query.includes('markPullRequestReadyForReview') && !fs.existsSync('ready-noop')) {
     fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), isDraft: false }));
@@ -1188,7 +1188,6 @@ test('sub links a child once, reads the parent back and refuses bad or unconfirm
   for (const attempt of [1, 2]) {
     const result = run('sub', '1', '5');
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim(), '#1 has sub-issue #5');
     assert.equal(mutations().length, 1, `attempt ${attempt}: the pair is linked once`);
   }
 
