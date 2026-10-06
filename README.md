@@ -125,7 +125,12 @@ trust; new definitions need personal review and trust. See
   An already ready PR with that head succeeds without a write.
 - `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
   It also prints the merge state and `blocker:` lines (standing change requests,
-  conflicts), because mergeable is not merge-ready.
+  conflicts), because mergeable is not merge-ready. When the PR has a finished
+  SonarCloud check it also counts the head's OPEN and CONFIRMED Sonar issues (the
+  quality gate judges new-code conditions only) and prints a `blocker:` line for any; `handoff`
+  then exits 1. The read needs `SONAR_TOKEN` in the environment (the anonymous API
+  reports 0 for private projects); without it, or on a refused read, the command
+  ends `ERROR` (exit 2), never green. Security hotspots stay a manual read.
 - `handoff ISSUE PR`: verifies a fully delivered issue's native PR connection,
   assigned/startable task, open non-draft PR, finished checks/reviews and resolved
   threads/conflicts before writing and reading back Human review (exit 0 verified,
