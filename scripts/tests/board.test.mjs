@@ -300,6 +300,7 @@ test('handoff rechecks issue prerequisites after review and link reads, before m
     { ...ready, projectItems: issue('In progress').projectItems },
     { ...ready, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } },
     { ...ready, blockedBy: { totalCount: 1, nodes: [] } },
+    { ...ready, body: '- [ ] added while waiting' },
   ];
   for (const changed of changes) {
     writeIssue(ready);
@@ -308,6 +309,28 @@ test('handoff rechecks issue prerequisites after review and link reads, before m
     assert.ok([1, 2].includes(result.status), result.stdout + result.stderr);
     assert.equal(existsSync(join(checkout, 'mutations')), false, 'A newer issue state must not be overwritten');
     assert.doesNotMatch(result.stdout, /HANDOFF #1/);
+  }
+});
+
+test('handoff rejects open acceptance without an issue reference and names each line', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  const open = ['- [ ] first', '* [ ] second', '1. [ ] third #', '  - [ ] nested', '- [ ] ref in other word abc#12', '```\n- [ ] in code\n```\n- [ ] after code'];
+  for (const body of open) {
+    writeIssue({ ...ready, body: 'Intro\n' + body });
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 1, body + result.stdout + result.stderr);
+    assert.ok(result.stdout.includes(body.split('\n').at(-1).trim()), 'The output names the open line: ' + result.stdout);
+    assert.doesNotMatch(result.stdout, /in code/);
+    assert.equal(existsSync(join(checkout, 'mutations')), false, 'Rejected handoff never mutates status');
+  }
+  const done = ['', 'no list', '- [x] done', '- [X] done', '- [ ] moved to #12', '- [ ] moved to test/other#12', '- [ ] a #3\n- [x] b', '```\n- [ ] example\n```', '~~~\n- [ ] example\n~~~', '````\n```\n- [ ] example\n```\n````'];
+  for (const body of done) {
+    writeIssue({ ...ready, body });
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 0, body + result.stdout + result.stderr);
   }
 });
 

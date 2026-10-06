@@ -660,6 +660,26 @@ function link() {
   console.log(`#${number} is natively linked to PR #${value}`);
 }
 
+/**
+ * Open task-list lines ("- [ ]") of an issue body that name no issue ("#N" or "OWNER/REPO#N"): acceptance that is neither
+ * done nor moved to a follow-up. Fenced code blocks are examples, not acceptance.
+ */
+function openAcceptance(body) {
+  const open = [];
+  let fence;
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = undefined;
+    } else if (mark) {
+      fence = mark;
+    } else if (/^\s*(?:[-*+]|\d+[.)])\s+\[ \]/.test(line) && !/(?<![\w&])(?:[\w.-]+\/[\w.-]+)?#\d+/.test(line)) {
+      open.push(line.trim());
+    }
+  }
+  return open;
+}
+
 /** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
 function handoffIssue(issue, viewer) {
   if (check(issue) !== 'STARTABLE') return false;
@@ -670,6 +690,7 @@ function handoffIssue(issue, viewer) {
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
     reasons.push('the issue is not assigned to the authenticated driver');
   }
+  for (const line of openAcceptance(issue.body)) reasons.push(`open acceptance without an issue reference (check it off, or move it to a follow-up and link that issue): ${line}`);
   if (reasons.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     process.exitCode = 1;
