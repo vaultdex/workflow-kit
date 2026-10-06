@@ -476,8 +476,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
       if (corrections >= 2) lines.push('cap reached: collect non-blocking findings in one follow-up issue');
     }
   } catch (error) {
-    // A known CI failure is the verdict; an unreadable count must not turn it into ERROR (the count is information only).
-    if (!failed) throw error;
+    // The count is information only: an unreadable one never changes the verdict (neither red into ERROR nor green into ERROR).
     lines.push(`note: correction pushes unreadable (${error.message})`);
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.

@@ -162,7 +162,7 @@ yourself. Without `.githooks/` it does nothing.
   after the PR's first Ready event (a PR opened non-draft counts from its creation; the head that set Ready does not count,
   a force-push is one push, a PR that never was ready prints no line). From `N >= 2` it adds
   `cap reached: collect non-blocking findings in one follow-up issue` ([review loop](docs/CONTRIBUTING.md#review-loop)).
-  It is information only: no exit code changes, and blocking findings are still corrected. `wait` prints it with the final result.
+  It is information only: no exit code changes (an unreadable push log prints a note instead), and blocking findings are still corrected. `wait` prints it with the final result.
 - `handoff ISSUE PR`: verifies a fully delivered issue's native PR connection,
   assigned/startable task, open non-draft PR, finished checks/reviews and resolved
   threads/conflicts before writing and reading back Human review (exit 0 verified,

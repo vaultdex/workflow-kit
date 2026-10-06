@@ -658,6 +658,8 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(look({ ...readied(30, {}, 5), ...red, firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] } }).status, 1);
   writeFileSync(join(checkout, 'activity.json'), 'unreadable');
   assert.equal(look({ ...readied(30, {}, 5), ...red, firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] } }).status, 1, 'An unreadable push log keeps the red verdict');
+  // Without the grace nothing else reads the log, so an unreadable one must not turn green into ERROR either.
+  assert.equal(look({ ...readied(30, {}, 5), firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] } }, undefined, '--grace', '0').status, 0, 'An unreadable push log keeps the green verdict');
   rmSync(join(checkout, 'activity.json'));
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'Red CI ends the wait as FAILED, never DONE');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'SKIPPED')] })), 0);
