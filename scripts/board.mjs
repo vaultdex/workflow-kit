@@ -213,7 +213,8 @@ function setField() {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state isDraft headRefOid mergeStateStatus reviewDecision
+  number state isDraft createdAt headRefOid mergeStateStatus reviewDecision
+  readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
@@ -318,7 +319,7 @@ function sonarIssues(detailsUrl, prNumber) {
 }
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
-function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber)) {
+function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption()) {
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
   if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', lines, pr };
@@ -449,6 +450,14 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // Without its request time a new request would read as stalled; fail closed instead.
     assert.ok(requested.length || pr.requestEvents.nodes.length === pr.requestEvents.totalCount, 'Review request history is incomplete');
     waiting.push({ text: `review requested from ${reviewerName(reviewer) ?? 'an unreadable reviewer'}`, since: Math.max(pushed, ...requested) });
+  }
+  // Bots that start on "ready for review" (Codex) leave their first trace a minute or two later, often after
+  // CI is green. Until the grace has passed since the PR became ready, a missing trace is no answer yet.
+  // No push boundary: suite times can follow "opened"/"ready" and commit dates are client clocks, while an
+  // older Ready ends by time anyway; at worst a push right after Ready waits the grace once more.
+  const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
+  if (!pr.isDraft && now - readyAt < graceMinutes * 60_000) {
+    waiting.push({ text: `reviewers may still start until ${new Date(readyAt + graceMinutes * 60_000).toISOString()}`, since: Infinity });
   }
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
@@ -641,6 +650,7 @@ function handoff() {
 
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
 const stallOption = () => numberOption('--stall', 20);
+const graceOption = () => numberOption('--grace', 3);
 const sessionOption = () => process.argv.includes('--session') ? process.argv[process.argv.indexOf('--session') + 1] : undefined;
 
 /** Metadata that can still describe the previous push right after it: identity, branch, state, draft, head. */
@@ -755,7 +765,8 @@ const commands = { next, check: () => check(undefined, { session: sessionOption(
   reviews: reviewsOnce, wait, handoff, ready, link, body };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]'
+  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
+  + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
@@ -765,7 +776,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   // A misspelled flag must not silently turn the session check off.
   || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^[\w.-]+$/.test(process.argv[5])))
-  || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
+  || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
