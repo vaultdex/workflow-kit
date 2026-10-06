@@ -44,7 +44,7 @@ update proves nothing about the new kit; check the status line first.
 
 The kit owns hook handlers pointing into `~/.ponytail/vaultdex/` or
 `~/.impeccable/vaultdex/` and the kit init handler (`git ls-files -s -- .vendor/workflow-kit` followed by
-`git submodule update --init`; keep personal hooks elsewhere), and upstream skills, agents and
+`git submodule update --init --checkout`; keep personal hooks elsewhere), and upstream skills, agents and
 commands by name. Generated discovery files are ordinary committed files in
 `.agent`, `.agents`, `.claude`, `.github`, `.opencode` and `.pi`, plus
 `.codex/agents`. Equal files stay untouched; changed content and old links move to

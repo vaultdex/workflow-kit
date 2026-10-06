@@ -20,7 +20,7 @@ const present = p => lstatSync(p, { throwIfNoEntry: false });
 // Kit handlers call the personal snapshots under ~/.ponytail/vaultdex or ~/.impeccable/vaultdex; older ones
 // built that path with path.join('.ponytail','vaultdex',…) or only printed the installer hint;
 // the kit init handler is recognized by its gitlink check followed by the submodule init.
-const ours = handler => /\.(?:ponytail|impeccable)(?:[\\/]+|',\s*')vaultdex(?:[\\/]|')|install-(?:ponytail|impeccable)-hooks\.mjs|ls-files -s -- \.vendor\/workflow-kit[\s\S]*submodule update --init \.vendor\/workflow-kit/
+const ours = handler => /\.(?:ponytail|impeccable)(?:[\\/]+|',\s*')vaultdex(?:[\\/]|')|install-(?:ponytail|impeccable)-hooks\.mjs|ls-files -s -- \.vendor\/workflow-kit[\s\S]*submodule update --init --checkout \.vendor\/workflow-kit/
   .test(JSON.stringify(handler));
 const isHooks = name => /^(?:\.(?:codex|cursor)\/hooks\.json|\.claude\/settings\.json|\.github\/hooks\/[\w.-]+\.json)$/.test(name);
 
