@@ -360,6 +360,48 @@ test('board check exits 0 only for startable issues: 1 blocked, 2 unknown', t =>
   assert.equal(check('Ready', []), 2, 'A failed read is never "no blockers"');
 });
 
+test('"Wartet bis" holds an issue until its tag exists or its UTC time has passed; unreadable values are unknown', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const waiting = line => ({ ...issue(), body: `## Was\n\nKein Blocker hier, Wartet bis: kommt später.\n\n## Abhängigkeiten und Wiederaufnahme\n\n${line}\n` });
+  const check = line => { writeIssue(waiting(line)); return run('check', '1'); };
+  const tag = (name, ...refs) => writeFileSync(join(checkout, `matching-refs-${name}.json`), JSON.stringify(refs.map(ref => ({ ref: `refs/tags/${ref}` }))));
+
+  const missing = check('Wartet bis: v1.2.3');
+  assert.equal(missing.status, 1, missing.stdout);
+  assert.ok(missing.stdout.includes('v1.2.3'), 'The unmet condition is named');
+  tag('v1.2.3', 'v1.2.30'); // A prefix match is no match.
+  assert.equal(check('Wartet bis: v1.2.3').status, 1);
+  tag('v1.2.3', 'v1.2.3');
+  assert.equal(check('Wartet bis: v1.2.3').status, 0);
+  const future = check('Wartet bis: 2999-01-01T00:00Z');
+  assert.equal(future.status, 1, future.stdout);
+  assert.ok(future.stdout.includes('2999-01-01T00:00Z'), 'The unmet condition is named');
+  assert.equal(check('Wartet bis: 2000-01-01T00:00Z').status, 0);
+  writeFileSync(join(checkout, 'tags-2026.json'), JSON.stringify([{ ref: 'refs/tags/release/2026' }])); // Der Mock benennt die Datei nach den Pfadteilen -3 und -1.
+  assert.equal(check('Wartet bis: release/2026').status, 0, 'Tags need not look like versions');
+  assert.equal(check('Wartet bis: release/2027').status, 1);
+  writeFileSync(join(checkout, 'matching-refs-release%402026.json'), JSON.stringify([{ ref: 'refs/tags/release@2026' }]));
+  assert.equal(check('Wartet bis: release@2026').status, 0, 'Any tag Git accepts is looked up, URL-encoded');
+  writeFileSync(join(checkout, 'matching-refs-%C2%A0release.json'), JSON.stringify([{ ref: 'refs/tags/ release' }]));
+  assert.equal(check('Wartet bis:  release').status, 0, 'Only ASCII separators are stripped from the value');
+  // No Markdown section logic: a condition is never silently overlooked, wherever the line sits.
+  for (const body of ['### Abhängigkeiten und Wiederaufnahme ###\n\n#### Release\n\nWartet bis: 2999-01-01T00:00Z\n',
+    '## Weiteres\n\n- Wartet bis: 2999-01-01T00:00Z\n', 'Wartet bis: 2999-01-01T00:00Z\r\n\r\n```sh\n## x\n```\n']) {
+    writeIssue({ ...issue(), body });
+    assert.equal(run('check', '1').status, 1, body);
+  }
+  for (const variant of ['**Wartet bis:** v1.2.3', '> Wartet bis: v1.2.3', '1. Wartet bis: v1.2.3', '- [ ] Wartet bis: v1.2.3', '## Wartet bis: v1.2.3', '| Wartet bis: v1.2.3 |', '`Wartet bis: v1.2.3`','Wartet bis v1.2.3']) {
+    assert.equal(check(variant).status, 2, `${variant} is unknown, never overlooked`);
+  }
+  for (const invalid of ['Wartet bis: bald nach dem Release', 'Wartet bis: release.', 'Wartet bis: foo.lock', 'Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
+    assert.equal(check(invalid).status, 2, `${invalid} is unknown, never "no blocker"`);
+  }
+  writeFileSync(join(checkout, 'fail-rest'), '');
+  assert.equal(check('Wartet bis: v1.2.3').status, 2, 'A failed tag lookup is unknown');
+  rmSync(join(checkout, 'fail-rest'));
+  assert.equal(check('Keine Wartebedingung.').status, 0);
+});
+
 test('In progress requires a startable issue assigned to the authenticated user before any mutation', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const mutations = join(checkout, 'mutations');
@@ -408,13 +450,15 @@ test('next lists blocked and unreadable Ready issues apart from startable ones',
     ready(3, [predecessor('CLOSED', 'NOT_PLANNED')]),
     ready(4, [], 1),
     { ...ready(5, []), projectItems: issue('Backlog').projectItems },
+    { ...ready(6, []), body: '## Abhängigkeiten und Wiederaufnahme\n\nWartet bis: 2999-01-01T00:00Z' },
   ]));
   const result = run('next');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const [startable, held] = result.stdout.split('\n\n');
   assert.deepEqual(startable.match(/^#\d+/gm), ['#1']);
-  assert.deepEqual(held.match(/^#\d+/gm), ['#2', '#3', '#4'], 'Every Ready issue appears; Backlog does not');
-  assert.equal(held.match(/^ {2}- /gm).length, 3, 'Each held issue names its reason');
+  assert.deepEqual(held.match(/^#\d+/gm), ['#2', '#3', '#4', '#6'], 'Every Ready issue appears; Backlog does not');
+  assert.equal(held.match(/^ {2}- /gm).length, 4, 'Each held issue names its reason');
+  assert.ok(held.includes('2999-01-01T00:00Z'), 'The unmet condition is named');
   writeFileSync(join(checkout, 'truncate'), '');
   assert.notEqual(run('next').status, 0, 'A capped search is never reported as the complete Ready set');
 });

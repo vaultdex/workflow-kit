@@ -19,7 +19,7 @@ function graphql(query, variables = {}) {
 }
 
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
-  id number title state assignees(first:10){nodes{login}}
+  id number title state body assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
   blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
@@ -39,6 +39,44 @@ function predecessorReasons({ totalCount, nodes }) {
       const reason = predecessor.stateReason.toLowerCase().replace('_', ' ');
       blocked.push(`blocked by ${label} (closed as ${reason}; record a decision)`);
     }
+  }
+  return { blocked, unknown };
+}
+
+/** Git's Regeln für Ref-Namen (git check-ref-format): jeder gültige Tag wird nachgeschlagen, kein ungültiger. */
+const validTagName = tag => tag !== '' && !/[\x00-\x1f\x7f ~^:?*[\\]|\.\.|@\{|\/\/|^\/|\/$|\.$/u.test(tag)
+  && tag.split('/').every(part => !part.startsWith('.') && !part.endsWith('.lock'));
+
+/**
+ * Zeilen `Wartet bis: <Tag | JJJJ-MM-TTThh:mmZ>` im Issue-Text (üblich unter "Abhängigkeiten und Wiederaufnahme"): ein
+ * fehlender Tag oder ein künftiger UTC-Zeitpunkt hält das Issue wie ein nativer Blocker; was nicht lesbar ist, zählt als
+ * unbekannt, nie als frei. Bewusst ohne Markdown-Abschnittslogik: jede solche Zeile zählt, auch in Code oder unter anderer
+ * Überschrift. Ein Fehlgriff blockiert sichtbar (mit Grund), statt eine Bedingung still zu überlesen.
+ */
+function waitReasons(body) {
+  const blocked = [], unknown = [], values = [];
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    const strict = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line);
+    // Nur ASCII-Trenner weg: trim() würde ein gültiges Unicode-Leerzeichen am Tagnamen entfernen.
+    if (strict) values.push(strict[1].replace(/^[ \t]+|[ \t]+$/g, ''));
+    // Formatierte Varianten (**Wartet bis:**, > …, 1. …, - [ ] …) sind keine lesbare Bedingung, aber auch kein Freibrief.
+    else if (/^[\s>*_+\-[\]xX\d.#|`~=()]*wartet\s+bis\b/i.test(line)) unknown.push(`unreadable line "${line.trim()}": write it as "Wartet bis: <tag or UTC time>"`);
+  }
+  for (const wanted of values) {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(wanted)) {
+      const at = Date.parse(wanted);
+      // Ein Datum wie 2026-02-30 rollt über; nur der unveränderte Wert zählt.
+      if (!Number.isFinite(at) || `${new Date(at).toISOString().slice(0, 16)}Z` !== wanted) unknown.push(`invalid "Wartet bis: ${wanted}": no such UTC time`);
+      else if (Date.now() < at) blocked.push(`waits until ${wanted} (UTC)`);
+    } else if (validTagName(wanted)) {
+      try {
+        // matching-refs liefert Präfix-Treffer (v0.1.1 findet v0.1.10); nur der genaue Tag zählt.
+        const tags = rest(`repos/${project.repository}/git/matching-refs/tags/${wanted.split('/').map(encodeURIComponent).join('/')}`);
+        if (!tags.some(tag => tag.ref === `refs/tags/${wanted}`)) blocked.push(`waits for tag ${wanted} (not found)`);
+      } catch (error) {
+        unknown.push(`cannot read tag ${wanted}: ${String(error.stderr || error.message).trim()}`);
+      }
+    } else unknown.push(`invalid "Wartet bis: ${wanted}": use a tag name or a UTC time such as 2026-10-12T18:51Z`);
   }
   return { blocked, unknown };
 }
@@ -80,6 +118,9 @@ function check(issue = readIssue(), claims) {
   const predecessors = predecessorReasons(issue.blockedBy);
   blocked.push(...predecessors.blocked);
   unknown.push(...predecessors.unknown);
+  const waits = waitReasons(issue.body);
+  blocked.push(...waits.blocked);
+  unknown.push(...waits.unknown);
   const notes = [];
   if (claims) try {
     const found = claimReasons(issue, claims.session);
@@ -103,7 +144,7 @@ function next() {
   const nodes = [];
   for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
-      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title assignees(first:10){nodes{login}}
+      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body assignees(first:10){nodes{login}}
       blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
@@ -124,8 +165,8 @@ function next() {
   const ready = nodes.map(issue => ({ ...issue, item: projectItem(issue) }))
     .filter(issue => issue.item?.status?.name === 'Ready')
     .map(issue => {
-      const { blocked, unknown } = predecessorReasons(issue.blockedBy);
-      return { ...issue, reasons: [...blocked, ...unknown], priority: issue.item.priority?.name
+      const predecessors = predecessorReasons(issue.blockedBy), waits = waitReasons(issue.body);
+      return { ...issue, reasons: [...predecessors.blocked, ...waits.blocked, ...predecessors.unknown, ...waits.unknown], priority: issue.item.priority?.name
         ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name };
     })
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);
