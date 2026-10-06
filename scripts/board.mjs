@@ -52,7 +52,9 @@ function waitReasons(body) {
   const lines = String(body ?? '').split(/\r?\n/);
   const start = lines.findIndex(line => /^#{1,6}\s*Abhängigkeiten und Wiederaufnahme\s*$/.test(line));
   if (start < 0) return { blocked, unknown };
-  const end = lines.findIndex((line, index) => index > start && /^#{1,6}\s/.test(line));
+  // Untergliederungen gehören zum Abschnitt: er endet erst an einer Überschrift gleicher oder höherer Ebene.
+  const level = lines[start].match(/^#+/)[0].length;
+  const end = lines.findIndex((line, index) => index > start && /^#{1,6}\s/.test(line) && line.match(/^#+/)[0].length <= level);
   for (const line of lines.slice(start + 1, end < 0 ? undefined : end)) {
     const wanted = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line)?.[1].trim();
     if (wanted === undefined) continue;
@@ -61,7 +63,7 @@ function waitReasons(body) {
       // Ein Datum wie 2026-02-30 rollt über; nur der unveränderte Wert zählt.
       if (!Number.isFinite(at) || `${new Date(at).toISOString().slice(0, 16)}Z` !== wanted) unknown.push(`invalid "Wartet bis: ${wanted}": no such UTC time`);
       else if (Date.now() < at) blocked.push(`waits until ${wanted} (UTC)`);
-    } else if (/^v?\d+(\.\d+)+([-+][\w.]+)?$/.test(wanted)) {
+    } else if (/^(?!.*\.\.)[\w+-][\w.+-]*(?:\/[\w+-][\w.+-]*)*$/.test(wanted)) { // Tagname wie in Git, auch release/2026
       try {
         // matching-refs liefert Präfix-Treffer (v0.1.1 findet v0.1.10); nur der genaue Tag zählt.
         const tags = rest(`repos/${project.repository}/git/matching-refs/tags/${wanted}`);
@@ -69,7 +71,7 @@ function waitReasons(body) {
       } catch (error) {
         unknown.push(`cannot read tag ${wanted}: ${String(error.stderr || error.message).trim()}`);
       }
-    } else unknown.push(`invalid "Wartet bis: ${wanted}": use a tag such as v1.2.3 or a UTC time such as 2026-10-12T18:51Z`);
+    } else unknown.push(`invalid "Wartet bis: ${wanted}": use a tag name or a UTC time such as 2026-10-12T18:51Z`);
   }
   return { blocked, unknown };
 }

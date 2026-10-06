@@ -362,7 +362,7 @@ test('board check exits 0 only for startable issues: 1 blocked, 2 unknown', t =>
 
 test('"Wartet bis" holds an issue until its tag exists or its UTC time has passed; unreadable values are unknown', t => {
   const { checkout, run, writeIssue } = fixture(t);
-  const waiting = line => ({ ...issue(), body: `## Was\n\nWartet bis: kein Blocker hier\n\n## Abhängigkeiten und Wiederaufnahme\n\n${line}\n\n## Weiteres\n` });
+  const waiting = line => ({ ...issue(), body: `## Was\n\nWartet bis: kein Blocker hier\n\n## Abhängigkeiten und Wiederaufnahme\n\n${line}\n\n## Weiteres\n\nWartet bis: v9.9.9\n` });
   const check = line => { writeIssue(waiting(line)); return run('check', '1'); };
   const tag = (name, ...refs) => writeFileSync(join(checkout, `matching-refs-${name}.json`), JSON.stringify(refs.map(ref => ({ ref: `refs/tags/${ref}` }))));
 
@@ -377,7 +377,12 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
   assert.equal(future.status, 1, future.stdout);
   assert.match(future.stdout, /waits until 2999-01-01T00:00Z/);
   assert.equal(check('Wartet bis: 2000-01-01T00:00Z').status, 0);
-  for (const invalid of ['Wartet bis: bald', 'Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
+  writeFileSync(join(checkout, 'tags-2026.json'), JSON.stringify([{ ref: 'refs/tags/release/2026' }])); // Der Mock benennt die Datei nach den Pfadteilen -3 und -1.
+  assert.equal(check('Wartet bis: release/2026').status, 0, 'Tags need not look like versions');
+  assert.equal(check('Wartet bis: release/2027').status, 1);
+  writeIssue({ ...issue(), body: '### Abhängigkeiten und Wiederaufnahme\n\n#### Release\n\nWartet bis: 2999-01-01T00:00Z\n' });
+  assert.equal(run('check', '1').status, 1, 'A nested heading stays inside the section');
+  for (const invalid of ['Wartet bis: bald nach dem Release','Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
     assert.equal(check(invalid).status, 2, `${invalid} is unknown, never "no blocker"`);
   }
   writeFileSync(join(checkout, 'fail-rest'), '');
