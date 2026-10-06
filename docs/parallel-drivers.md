@@ -48,21 +48,25 @@ Allgemeine Regeln für jeden Driver-Subagenten. Projektspezifische Regeln und di
 Modellwahl stehen hier nicht.
 
 1. **Ein Issue bis „Human review“ treiben.** Früher enden nur bei einem menschlichen
-   Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung): erst im Issue
+   Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung) oder bei einem Blocker
+   (`board.mjs check` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
+   [Blockers and scope](CONTRIBUTING.md#blockers-and-scope)): erst im Issue
    kommentieren, dann berichten.
 2. **Regeln vom Ziel-Release-Branch lesen.** AGENTS.md und Kit-Regeln stammen vom
    Release-Branch, auf den die PR zielt, nicht nur von `main`; eine Regel kann nur
    dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume) mit
    `Agent: …, Session: …`.
 3. **Fremde Branches in Ruhe lassen.** `codex/*`-Branches und Branches anderer
-   Driver nicht anfassen; Überschneidungen melden.
+   Driver nicht anfassen, auch wenn der eigene Branch `codex/*` heißt; nur der eigene
+   Issue-Branch gehört dem Driver. Überschneidungen melden.
 4. **Warten ohne Handarbeit.** Abweichend von [AGENT_RULES.md](../AGENT_RULES.md#economy)
    und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
    `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
    Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht auf einen Reviewer
    ohne Spur pollen (ein Review, das nie startet). Freitext-Ankündigungen anderer Bots
-   erkennt `wait` nicht ([README](../README.md#board-commands)); diese Reviewer prüft
-   der Driver einmal von Hand. Review-Subagenten ebenfalls im Vordergrund starten;
+   erkennt `wait` nicht ([README](../README.md#board-commands)); eine angekündigte
+   Review verfolgt der Driver von Hand bis zum Ergebnis oder Stall und führt
+   `handoff` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;
    `tasks/*.output` nicht pollen, die Datei bleibt leer.
 5. **Shell.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus, mit
    literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
