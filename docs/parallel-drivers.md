@@ -59,8 +59,10 @@ Modellwahl stehen hier nicht.
 4. **Warten ohne Handarbeit.** Abweichend von [AGENT_RULES.md](../AGENT_RULES.md#economy)
    und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
    `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
-   Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht von Hand auf weitere
-   Reviewer warten. Review-Subagenten ebenfalls im Vordergrund starten;
+   Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht auf einen Reviewer
+   ohne Spur pollen (ein Review, das nie startet). Freitext-Ankündigungen anderer Bots
+   erkennt `wait` nicht ([README](../README.md#board-commands)); diese Reviewer prüft
+   der Driver einmal von Hand. Review-Subagenten ebenfalls im Vordergrund starten;
    `tasks/*.output` nicht pollen, die Datei bleibt leer.
 5. **Shell.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus, mit
    literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
