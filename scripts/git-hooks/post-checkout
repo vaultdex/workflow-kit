@@ -19,11 +19,8 @@ if [ -e "$kit/.git" ]; then
     exit 0
   fi
 fi
-# No prompts, not even from the default ssh (it asks on the terminal), and none of the hooks of the kit's
-# own clone: the update runs only git. A configured ssh (PuTTY, own options) stays as the user set it.
-if [ -z "${GIT_SSH:-}${GIT_SSH_COMMAND:-}$(git -C "$root" config core.sshCommand 2>/dev/null)" ]; then
-  export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
-fi
+# Same prompt-free update as the SessionStart hook, minus the hooks of the kit's own clone.
+# ssh may still ask on the terminal; filters and the user's git config apply as for any checkout.
 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true git -C "$root" -c credential.interactive=false -c core.hooksPath=/dev/null \
   submodule update --init --checkout .vendor/workflow-kit >/dev/null 2>&1 \
   || echo "Workflow Kit not updated; run: git submodule update --init .vendor/workflow-kit" >&2

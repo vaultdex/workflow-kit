@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -251,26 +251,6 @@ test('the kit update runs no hooks of the kit clone', t => {
   assert.equal(f.switchTo('other').status, 0);
   assert.equal(readFileSync(f.rules, 'utf8'), 'rules 2\n', 'the kit was updated');
   assert.equal(existsSync(marker), false);
-});
-
-test('the kit update keeps the default ssh noninteractive and a configured one as set', t => {
-  // No clone and an ssh source: the update goes through ssh, here a fake on PATH that only records its arguments.
-  const record = env => {
-    const f = kitFixture(t), bin = join(f.repo, '../bin'), log = join(f.repo, '../ssh-args').replaceAll('\\', '/');
-    mkdirSync(bin);
-    writeFileSync(join(bin, 'ssh'), '#!/bin/sh\necho "$@" >> "' + log + '"\nexit 1\n', { mode: 0o755 });
-    rmSync(join(f.repo, '.vendor/workflow-kit'), { recursive: true, force: true });
-    rmSync(join(f.repo, '.git/modules'), { recursive: true, force: true });
-    mkdirSync(join(f.repo, '.vendor/workflow-kit'));
-    f.sh(f.repo, 'config', 'submodule..vendor/workflow-kit.url', 'ssh://example.invalid/kit');
-    const result = f.switchTo('other', { ...env, PATH: bin + delimiter + process.env.PATH });
-    assert.equal(result.status, 0, result.stderr);
-    return readFileSync(join(f.repo, '../ssh-args'), 'utf8');
-  };
-  assert.match(record({}), /BatchMode=yes/);
-  const custom = record({ GIT_SSH_COMMAND: 'ssh -o Custom=1' });
-  assert.match(custom, /Custom=1/);
-  assert.doesNotMatch(custom, /BatchMode/);
 });
 
 test('an installed hook without the executable bit is repaired', { skip: process.platform === 'win32' }, t => {

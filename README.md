@@ -118,7 +118,7 @@ missing, unless the project already has a different one, which stays; commit it 
 `git add --chmod=+x .githooks/post-checkout`. After a branch checkout (third argument `1`) the hook runs
 `git submodule update --init --checkout .vendor/workflow-kit`, so the kit follows the gitlink of the
 new branch instead of showing `M .vendor/workflow-kit`. It touches only the kit, not other submodules
-or `submodule.recurse`, asks nothing (the default ssh runs with `BatchMode`; a configured one stays as set) and runs none of the kit clone's own hooks.
+or `submodule.recurse`, disables Git's own prompts like the SessionStart hook (ssh may still ask on the terminal) and runs none of the kit clone's own hooks. Like any checkout it applies the user's Git configuration, including filters.
 A rerun of the installer repairs a missing executable bit and reports a hook tracked without it
 (`git update-index --chmod=+x`). A kit with local changes, ignored or untracked files, or commits no remote has
 (a clean, published kit behind or ahead of the old pin still follows) is not touched: the hook prints a hint
