@@ -364,8 +364,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
-  // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final.
-  for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED')) {
+  // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final; a skipped check ran no analysis.
+  for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
     const open = sonarIssues(check.detailsUrl, pr.number);
     lines.push(`sonar: ${open} open issue${open === 1 ? '' : 's'}`);
     if (open) lines.push(`blocker: ${open} open Sonar issue${open === 1 ? '' : 's'} on this head; fix them or justify each as a false positive`);

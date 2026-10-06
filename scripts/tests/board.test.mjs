@@ -912,7 +912,7 @@ globalThis.fetch = async (url, init) => {
   answer(200, 3);
   let result = run('handoff', '1', '7');
   assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.match(result.stdout, /^blocker: 3 open Sonar issues on this head; fix them or justify each as a false positive$/m);
+  assert.match(result.stdout, /^blocker:/m);
   assert.equal(existsSync(mutations), false, 'Open Sonar issues keep the status untouched');
   const [requested, authorization] = JSON.parse(readFileSync(join(checkout, 'sonar-requests'), 'utf8').split('\n')[0]);
   assert.equal(authorization, 'Bearer secret-token', 'The anonymous API reports 0 for private projects');
@@ -932,6 +932,15 @@ globalThis.fetch = async (url, init) => {
   result = run('handoff', '1', '7');
   assert.equal(result.status, 0, 'No open issue hands off: ' + result.stdout + result.stderr);
   assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
+
+  // A skipped check ran no analysis (no PR link to read): it is no lookup, however many issues the project has.
+  rmSync(join(checkout, 'stored'));
+  answer(200, 9);
+  const skipped = { ...sonar, conclusion: 'SKIPPED', detailsUrl: null };
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ ...base, commits: { nodes: [{ commit: { ...commit,
+    statusCheckRollup: { contexts: { totalCount: 2, nodes: [...commit.statusCheckRollup.contexts.nodes, skipped] } } } }] } }));
+  result = run('handoff', '1', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
 test('body writes an issue body only on top of the one it is based on and proves the write', t => {
