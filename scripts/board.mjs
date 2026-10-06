@@ -187,10 +187,11 @@ function next() {
 
 /** A single-select Project field with its options in configured order. */
 function selectField(fieldName) {
-  const field = graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:100){nodes{...on ProjectV2SingleSelectField{
+  const fields = graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:100){nodes{...on ProjectV2SingleSelectField{
     id name options{id name} issueField{...on IssueFieldSingleSelect{id options{id name}}}}}}}}}`, { id: project.id })
-    .node.fields.nodes.find(candidate => candidate.name === fieldName);
-  assert.ok(field, `${project.url} has no single-select ${fieldName} field`);
+    .node.fields.nodes.filter(candidate => candidate.name && candidate.options);
+  const field = fields.find(candidate => candidate.name === fieldName);
+  assert.ok(field, `${project.url} has no single-select ${fieldName} field; use one of: ${fields.map(candidate => candidate.name).join(', ')}`);
   // An empty Project option list means the field mirrors an organization issue field.
   const linked = !field.options.length && field.issueField;
   return { field, linked, choices: linked ? linked.options : field.options };
@@ -218,11 +219,12 @@ function resolveOption(issue, fieldName, optionName) {
   const option = choices.find(choice => choice.name.toLowerCase() === String(optionName).toLowerCase());
   assert.ok(option, `${fieldName}: "${optionName}" is not an option; use one of: ${choices.map(choice => choice.name).join(', ')}`);
   if (fieldName === 'Status' && option.name === 'In progress') {
-    if (check(issue) !== 'STARTABLE') return;
+    // Assignment first: a refusal is then one ERROR line, not the check's verdict block followed by an error.
     const { viewer } = graphql('query{viewer{login}}');
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     assert.ok(issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase()),
       `Assign yourself first: gh issue edit ${number} --repo ${project.repository} --add-assignee "@me". Verify session ownership before assigning.`);
+    if (check(issue) !== 'STARTABLE') return;
   }
   if (fieldName === 'Status' && option.name === 'Automated review') verifyBacklinks();
   return { fieldName, field, linked, option };

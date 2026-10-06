@@ -447,12 +447,15 @@ test('In progress requires a startable issue assigned to the authenticated user 
     assert.notEqual(result.status, 0, result.stdout + result.stderr);
     assert.equal(existsSync(mutations), false, 'Rejected starts must not mutate or add a Project item');
   }
+  // Not assigned: one ERROR line, not the check's verdict block in front of it.
+  writeIssue(issue());
+  assert.match(run('status', '1', 'In progress').stdout, /^ERROR - [^\n]*\n$/);
   writeIssue(assigned());
   for (const failure of ['fail', 'fail-viewer']) {
     writeFileSync(join(checkout, failure), '');
     const result = run('status', '1', 'In progress');
     assert.notEqual(result.status, 0);
-    if (failure === 'fail-viewer') assert.match(result.stdout, /STARTABLE/);
+    if (failure === 'fail-viewer') assert.match(result.stdout, /^ERROR - /);
     assert.equal(existsSync(mutations), false, 'API failure must not mutate status');
     rmSync(join(checkout, failure));
   }
@@ -861,7 +864,9 @@ test('field sets several fields in one call: every pair is validated first, then
     assert.equal(result.status, 2);
     assert.equal(existsSync(mutations), false, 'One invalid pair writes nothing: ' + args.join(' '));
   }
-  assert.match(run('field', '1', 'Size', 'XS', 'Priority', 'Urgent').stdout, /Priority: "Urgent" is not an option; use one of: High, Low/);
+  // The valid choices are named, for an unknown option and for an unknown field alike.
+  assert.match(run('field', '1', 'Size', 'XS', 'Priority', 'Urgent').stdout, /High.*Low/);
+  assert.match(run('field', '1', 'Size', 'XS', 'Colour', 'Red').stdout, /Priority.*Size/);
 
   writeFileSync(join(checkout, 'lost'), 'S');
   assert.notEqual(run('field', '1', 'Size', 'XS', 'Priority', 'Low').status, 0, 'A read-back that differs for any field is a failure');
