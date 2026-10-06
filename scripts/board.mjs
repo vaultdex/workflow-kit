@@ -246,7 +246,7 @@ function writeOption(issue, { fieldName, field, linked, option }) {
       itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
     { project: project.id, item, field: field.id, option: option.id });
   }
-  console.log(`${project.repository}#${issue.number} ${fieldName}: ${option.name}`);
+  return `${project.repository}#${issue.number} ${fieldName}: ${option.name}`;
 }
 
 /** Write a selected field option; guarded delivery can reject the fresh issue before mutation. */
@@ -259,7 +259,7 @@ function set(fieldName, optionName = value, beforeWrite) {
     issue = beforeWrite();
     if (!issue) return;
   }
-  writeOption(issue, plan);
+  console.log(writeOption(issue, plan));
   return plan.option.name;
 }
 
@@ -278,7 +278,8 @@ function setField() {
   const issue = readIssue();
   const plans = fieldPairs().map(([fieldName, optionName]) => resolveOption(issue, fieldName, optionName));
   if (plans.includes(undefined)) return;
-  for (const plan of plans) writeOption(issue, plan);
+  // Confirmation lines come after the read-back, so a failed call never shows a write as confirmed.
+  const written = plans.map(plan => writeOption(issue, plan));
   const { repository } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     issue(number:$number){projectItems(first:100){nodes{project{id} fieldValues(first:100){nodes{
       ...on ProjectV2ItemFieldSingleSelectValue{name field{...on ProjectV2FieldCommon{name}}}}}}}
@@ -289,6 +290,7 @@ function setField() {
     const stored = values.find(entry => entry?.field?.name === fieldName)?.name;
     assert.equal(stored, option.name, `Read-back of ${fieldName} shows ${stored ?? 'no value'}`);
   }
+  console.log(written.join('\n'));
 }
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
@@ -953,6 +955,6 @@ try {
   if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link', 'body', 'field', 'status', 'priority'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
   // field, status and priority report one "ERROR - reason" line; the others keep ERROR with "- reason" below it.
-  console.log(['field', 'status', 'priority'].includes(command) ? `ERROR - ${message}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
+  console.log(['field', 'status', 'priority'].includes(command) ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;
 }

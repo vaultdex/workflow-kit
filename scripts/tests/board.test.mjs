@@ -907,7 +907,9 @@ test('field sets several fields in one call: every pair is validated first, then
   assert.match(run('field', '1', 'Size', 'XS', 'Colour', 'Red').stdout, /Priority.*Size/);
 
   writeFileSync(join(checkout, 'lost'), 'S');
-  assert.notEqual(run('field', '1', 'Size', 'XS', 'Priority', 'Low').status, 0, 'A read-back that differs for any field is a failure');
+  const lost = run('field', '1', 'Size', 'XS', 'Priority', 'Low');
+  assert.notEqual(lost.status, 0, 'A read-back that differs for any field is a failure');
+  assert.match(lost.stdout, /^ERROR - [^\n]*\n$/, 'A failed call shows no write as confirmed and stays one line');
 });
 
 test('field, status and priority report failures as one ERROR line, and issue failures name the repository', t => {
