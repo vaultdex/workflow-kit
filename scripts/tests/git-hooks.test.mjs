@@ -76,6 +76,14 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   g.run();
   assert.equal(g.value('--local'), '');
 
+  // An own path that a worktree only includes stays in the included file; the run still completes.
+  const i = fixture(t), own = join(i.global, '../own.gitconfig');
+  writeFileSync(own, `[core]\n\thooksPath = ${join(i.repo, '.githooks').replaceAll('\\', '/')}\n`);
+  writeFileSync(i.linkedConfig, `[include]\n\tpath = ${own.replaceAll('\\', '/')}\n`);
+  i.run();
+  assert.equal(i.value('--local'), '.githooks');
+  assert.equal(i.value('--includes', '--file', i.linkedConfig), join(i.repo, '.githooks').replaceAll('\\', '/'));
+
   const none = fixture(t, { hooks: false });
   none.run();
   assert.equal(none.value('--local'), '');
