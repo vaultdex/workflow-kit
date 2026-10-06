@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -145,10 +145,11 @@ else {
   data = { repository: { issue } };
 }
 process.stdout.write(JSON.stringify({ data }));`);
+  const env = {};
   return {
-    checkout,
+    checkout, env,
     run: (...args) => spawnSync(process.execPath, [fileURLToPath(new URL('../board.mjs', import.meta.url)), ...args],
-      { cwd: checkout, encoding: 'utf8', env: { ...process.env, PATH: bin } }),
+      { cwd: checkout, encoding: 'utf8', env: { ...process.env, PATH: bin, ...env } }),
     writeIssue: issue => writeFileSync(join(checkout, 'issue.json'), JSON.stringify(issue)),
   };
 }
@@ -885,6 +886,61 @@ test('handoff needs the driver handoff comment that names the current head', t =
   const result = run('handoff', '1', '7');
   assert.equal(result.status, 0, 'The authenticated user matches regardless of case: ' + result.stdout + result.stderr);
   assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
+});
+
+test('handoff blocks on open Sonar issues behind a passed quality gate and never reads an unreadable count as clean', t => {
+  const { checkout, run, writeIssue, env } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  const base = handoffPr(), commit = base.commits.nodes[0].commit;
+  const sonar = { __typename: 'CheckRun', name: 'SonarCloud Code Analysis', status: 'COMPLETED', conclusion: 'SUCCESS',
+    detailsUrl: 'https://sonarcloud.io/dashboard?id=test_example&pullRequest=7', checkSuite: { app: { slug: 'sonarqubecloud' } } };
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ ...base, commits: { nodes: [{ commit: { ...commit,
+    statusCheckRollup: { contexts: { totalCount: 2, nodes: [...commit.statusCheckRollup.contexts.nodes, sonar] } } } }] } }));
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  // Stands in for the Sonar API in every node process of the run, the board's request child included.
+  writeFileSync(join(checkout, 'sonar-mock.cjs'), `const fs = require('node:fs');
+globalThis.fetch = async (url, init) => {
+  fs.appendFileSync('sonar-requests', JSON.stringify([String(url), init.headers.Authorization]) + '\\n');
+  const { status, total } = JSON.parse(fs.readFileSync('sonar.json', 'utf8'));
+  return { ok: status === 200, status, text: async () => JSON.stringify({ total }) };
+};`);
+  env.NODE_OPTIONS = `--require "${join(checkout, 'sonar-mock.cjs').replaceAll(sep, '/')}"`;
+  env.SONAR_TOKEN = 'secret-token';
+  const answer = (status, total) => writeFileSync(join(checkout, 'sonar.json'), JSON.stringify({ status, total }));
+  const mutations = join(checkout, 'mutations');
+
+  answer(200, 3);
+  let result = run('handoff', '1', '7');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^blocker:/m);
+  assert.equal(existsSync(mutations), false, 'Open Sonar issues keep the status untouched');
+  const [requested, authorization] = JSON.parse(readFileSync(join(checkout, 'sonar-requests'), 'utf8').split('\n')[0]);
+  assert.equal(authorization, 'Bearer secret-token', 'The anonymous API reports 0 for private projects');
+  const query = new URL(requested).searchParams;
+  assert.deepEqual([query.get('componentKeys'), query.get('pullRequest'), query.get('issueStatuses')], ['test_example', '7', 'OPEN,CONFIRMED']);
+
+  answer(401, 0);
+  result = run('handoff', '1', '7');
+  assert.equal(result.status, 2, 'A refused read is UNKNOWN, not green: ' + result.stdout + result.stderr);
+  env.SONAR_TOKEN = ''; // overrides a token of the developer's own environment
+  answer(200, 0);
+  result = run('handoff', '1', '7');
+  assert.equal(result.status, 2, 'Without a token the count is unreadable: ' + result.stdout + result.stderr);
+  assert.equal(existsSync(mutations), false);
+
+  env.SONAR_TOKEN = 'secret-token';
+  result = run('handoff', '1', '7');
+  assert.equal(result.status, 0, 'No open issue hands off: ' + result.stdout + result.stderr);
+  assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
+
+  // A skipped check ran no analysis (no PR link to read): it is no lookup, however many issues the project has.
+  rmSync(join(checkout, 'stored'));
+  answer(200, 9);
+  const skipped = { ...sonar, conclusion: 'SKIPPED', detailsUrl: null };
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ ...base, commits: { nodes: [{ commit: { ...commit,
+    statusCheckRollup: { contexts: { totalCount: 2, nodes: [...commit.statusCheckRollup.contexts.nodes, skipped] } } } }] } }));
+  result = run('handoff', '1', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
 test('body writes an issue body only on top of the one it is based on and proves the write', t => {

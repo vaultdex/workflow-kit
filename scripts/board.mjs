@@ -186,7 +186,7 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
-      ...on CheckRun{name status conclusion title checkSuite{databaseId app{slug} workflowRun{databaseId workflow{id name}}}}
+      ...on CheckRun{name status conclusion title detailsUrl checkSuite{databaseId app{slug} workflowRun{databaseId workflow{id name}}}}
       ...on StatusContext{context state description}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
@@ -262,6 +262,30 @@ const isBot = user => user?.type === 'Bot';
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 const readPr = prNumber => graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
+// The token goes only to these hosts, whatever URL a check run names.
+const sonarHosts = ['https://sonarcloud.io', 'https://sonarqube.us'];
+/**
+ * OPEN and CONFIRMED issues of the pull request analysis a SonarCloud check run points at. The anonymous API reports 0
+ * for private projects, so a missing token or a failed read throws (never "clean"). Sync like the other reads: the
+ * request runs in a child process.
+ */
+function sonarIssues(detailsUrl, prNumber) {
+  const target = new URL(detailsUrl ?? 'invalid:');
+  const key = target.searchParams.get('id');
+  assert.ok(sonarHosts.includes(target.origin) && key && target.searchParams.get('pullRequest') === String(prNumber),
+    `The SonarCloud check does not link PR #${prNumber}'s analysis (${detailsUrl}); open issues are unreadable`);
+  assert.ok(process.env.SONAR_TOKEN, 'Set SONAR_TOKEN: without it the Sonar API reports 0 issues for private projects, so open issues are unreadable');
+  const api = new URL('/api/issues/search', target.origin);
+  api.search = new URLSearchParams({ componentKeys: key, pullRequest: String(prNumber), issueStatuses: 'OPEN,CONFIRMED', ps: '1' });
+  const body = execFileSync(process.execPath, ['--input-type=module', '-e',
+    `const r = await fetch(process.argv[1], { headers: { Authorization: 'Bearer ' + process.env.SONAR_TOKEN } });
+     if (!r.ok) throw new Error('Sonar API answered ' + r.status);
+     process.stdout.write(await r.text());`, api.href], { encoding: 'utf8', maxBuffer: 16 << 20 });
+  const { total } = JSON.parse(body);
+  assert.ok(Number.isSafeInteger(total) && total >= 0, 'Sonar issue count is unreadable');
+  return total;
+}
+
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
 function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber)) {
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
@@ -340,6 +364,12 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
+  // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final; a skipped check ran no analysis.
+  for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
+    const open = sonarIssues(check.detailsUrl, pr.number);
+    lines.push(`sonar: ${open} open issue${open === 1 ? '' : 's'}`);
+    if (open) lines.push(`blocker: ${open} open Sonar issue${open === 1 ? '' : 's'} on this head; fix them or justify each as a false positive`);
+  }
   const comments = restAll(`repos/${project.repository}/issues/${pr.number}/comments`);
   const reviewList = restAll(`repos/${project.repository}/pulls/${pr.number}/reviews`);
   // Bots acknowledge "@bot review" comments with a reaction on that comment, not on the PR.
