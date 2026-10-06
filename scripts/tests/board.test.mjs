@@ -362,7 +362,7 @@ test('board check exits 0 only for startable issues: 1 blocked, 2 unknown', t =>
 
 test('"Wartet bis" holds an issue until its tag exists or its UTC time has passed; unreadable values are unknown', t => {
   const { checkout, run, writeIssue } = fixture(t);
-  const waiting = line => ({ ...issue(), body: `## Was\n\nWartet bis: kein Blocker hier\n\n## Abhängigkeiten und Wiederaufnahme\n\n${line}\n\n## Weiteres\n\nWartet bis: v9.9.9\n` });
+  const waiting = line => ({ ...issue(), body: `## Was\n\nKein Blocker hier, Wartet bis: kommt später.\n\n## Abhängigkeiten und Wiederaufnahme\n\n${line}\n` });
   const check = line => { writeIssue(waiting(line)); return run('check', '1'); };
   const tag = (name, ...refs) => writeFileSync(join(checkout, `matching-refs-${name}.json`), JSON.stringify(refs.map(ref => ({ ref: `refs/tags/${ref}` }))));
 
@@ -382,16 +382,12 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
   assert.equal(check('Wartet bis: release/2027').status, 1);
   writeFileSync(join(checkout, 'matching-refs-release%402026.json'), JSON.stringify([{ ref: 'refs/tags/release@2026' }]));
   assert.equal(check('Wartet bis: release@2026').status, 0, 'Any tag Git accepts is looked up, URL-encoded');
-  writeIssue({ ...issue(), body: '### Abhängigkeiten und Wiederaufnahme\n\n#### Release\n\nWartet bis: 2999-01-01T00:00Z\n' });
-  assert.equal(run('check', '1').status, 1, 'A nested heading stays inside the section');
-  writeIssue({ ...issue(), body: '## Abhängigkeiten und Wiederaufnahme\n\n```sh\n## setup evidence\nWartet bis: v9.9.9\n```\n\nWartet bis: 2999-01-01T00:00Z\n' });
-  const fenced = run('check', '1');
-  assert.equal(fenced.status, 1, 'A fenced line is no heading');
-  assert.doesNotMatch(fenced.stdout, /v9\.9\.9/, 'A fenced line is no condition');
-  writeIssue({ ...issue(), body: '## Abhängigkeiten und Wiederaufnahme\n\n    Wartet bis: v9.9.9\n\n<!--\n## Kommentar\nWartet bis: v9.9.9\n-->\n\nWartet bis: 2999-01-01T00:00Z\n' });
-  const hidden = run('check', '1');
-  assert.equal(hidden.status, 1, hidden.stdout);
-  assert.doesNotMatch(hidden.stdout, /v9\.9\.9/, 'Indented code and HTML comments are no conditions');
+  // No Markdown section logic: a condition is never silently overlooked, wherever the line sits.
+  for (const body of ['### Abhängigkeiten und Wiederaufnahme ###\n\n#### Release\n\nWartet bis: 2999-01-01T00:00Z\n',
+    '## Weiteres\n\n- Wartet bis: 2999-01-01T00:00Z\n', 'Wartet bis: 2999-01-01T00:00Z\r\n\r\n```sh\n## x\n```\n']) {
+    writeIssue({ ...issue(), body });
+    assert.equal(run('check', '1').status, 1, body);
+  }
   for (const invalid of ['Wartet bis: bald nach dem Release', 'Wartet bis: release.', 'Wartet bis: foo.lock', 'Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
     assert.equal(check(invalid).status, 2, `${invalid} is unknown, never "no blocker"`);
   }
@@ -399,8 +395,6 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
   assert.equal(check('Wartet bis: v1.2.3').status, 2, 'A failed tag lookup is unknown');
   rmSync(join(checkout, 'fail-rest'));
   assert.equal(check('Keine Wartebedingung.').status, 0);
-  writeIssue({ ...issue(), body: 'Wartet bis: v9.9.9' });
-  assert.equal(run('check', '1').status, 0, 'Only the section "Abhängigkeiten und Wiederaufnahme" counts');
 });
 
 test('In progress requires a startable issue assigned to the authenticated user before any mutation', t => {

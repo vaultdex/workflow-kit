@@ -52,10 +52,13 @@ request or Ready placement does not qualify. The guarded command still rejects a
 failed check: keep the current status and verdict, verify ownership and claim
 fields, then work only within the documented exception. It is never STARTABLE.
 
-**Wartet bis.** Eine Zeile `Wartet bis: <Wert>` im Abschnitt **Abhängigkeiten und
-Wiederaufnahme** macht eine Wartebedingung maschinenlesbar. Der Wert ist entweder ein
-Release-Tag des Projekt-Repositorys (`Wartet bis: v0.1.1`) oder ein UTC-Zeitpunkt
+**Wartet bis.** Eine Zeile `Wartet bis: <Wert>` (üblich im Abschnitt **Abhängigkeiten
+und Wiederaufnahme**) macht eine Wartebedingung maschinenlesbar. Der Wert ist entweder
+ein Tag des Projekt-Repositorys (`Wartet bis: v0.1.1`) oder ein UTC-Zeitpunkt
 `JJJJ-MM-TTThh:mmZ` (`Wartet bis: 2026-10-12T18:51Z`); mehrere Zeilen gelten alle.
+Die Zeile zählt, wo immer sie im Issue-Text steht, auch in einem Code-Block: so wird
+keine Bedingung durch Markdown-Besonderheiten still überlesen. Ein Beispiel im Text
+steht deshalb im Satz oder in Anführungszeichen, nicht als eigene Zeile.
 `check` und `next` melden BLOCKED mit der Bedingung, solange der Tag fehlt oder der
 Zeitpunkt in der Zukunft liegt. Ein ungültiger Wert oder ein fehlschlagender Tag-Lookup
 ist UNKNOWN, nie „kein Blocker“. Das ersetzt keine nativen Blocker und verschiebt
