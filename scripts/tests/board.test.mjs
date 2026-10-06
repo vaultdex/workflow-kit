@@ -415,7 +415,7 @@ test('board check exits 0 only for startable issues: 1 blocked, 2 unknown', t =>
 
 test('an issue held only by open predecessors is STACKABLE on the one open, ready PR that delivers them all, else BLOCKED', t => {
   const { checkout, run, writeIssue } = fixture(t);
-  const pr = (number, changes) => ({ number, state: 'OPEN', isDraft: false, isCrossRepository: false, baseRefName: 'release/0.1.1', headRefName: `claude/${number}-base`, ...changes });
+  const pr = (number, changes) => ({ number, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'release/0.1.1', headRefName: `claude/${number}-base`, ...changes });
   const open = (number, prs, changes) => predecessor('OPEN', null, prs, { number, repository: { nameWithOwner: 'test/example' }, ...changes });
   const check = (...predecessors) => { writeIssue(issue('Ready', predecessors)); return run('check', '1'); };
 
@@ -430,6 +430,7 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
     ['only a Draft PR', open(2, [pr(5, { isDraft: true })])],
     ['a PR from a fork', open(2, [pr(5, { isCrossRepository: true })])],
     ['a closed PR', open(2, [pr(5, { state: 'CLOSED' })])],
+    ['a PR of another repository that closes the issue', open(2, [pr(5, { repository: { nameWithOwner: 'test/elsewhere' } })])],
     ['two PRs for one predecessor', open(2, [pr(5), pr(6)])],
     ['a predecessor in another repository', open(2, [pr(5)], { repository: { nameWithOwner: 'test/other' } })],
   ];
@@ -441,6 +442,7 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   const partial = open(2, [pr(5)]);
   partial.closedByPullRequestsReferences.totalCount = 2;
   assert.equal(check(partial).status, 2, 'Incomplete PR data is unknown, not "no PR"');
+  assert.equal(check(partial, open(3, [])).status, 1, 'A definitive refusal stays BLOCKED next to unreadable PR data');
   writeIssue({ ...issue('Backlog', [open(2, [pr(5)])]) });
   assert.equal(run('check', '1').status, 1, 'Another blocker is not lifted by a stack');
   writeIssue({ ...issue('Ready', [open(2, [pr(5)])]), body: 'Wartet bis: 2999-01-01T00:00Z' });
@@ -464,7 +466,14 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   const onRelease = run('handoff', '1', '7');
   assert.equal(onRelease.status, 1, onRelease.stdout);
   assert.match(onRelease.stdout, /not merged: PR #7 must target its branch claude\/5-base/);
-  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'claude/5-base' })));
+  const upper = { baseRefName: 'claude/5-base', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
+  for (const fork of [{ isCrossRepository: true, headRepository: { nameWithOwner: 'someone/example' } }, { headRepository: { nameWithOwner: 'someone/example' } }, { isCrossRepository: undefined }]) {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ ...upper, ...fork })));
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /fork or another repository/);
+  }
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(upper)));
   const handed = run('handoff', '1', '7');
   assert.equal(handed.status, 0, handed.stdout + handed.stderr);
   assert.match(handed.stdout, /HANDOFF #1 PR #7/);
@@ -472,7 +481,7 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
 
 test('next lists stackable Ready issues with their base PR apart from blocked ones', t => {
   const { checkout, run } = fixture(t);
-  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, baseRefName: 'main', headRefName: 'claude/5-base' };
+  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base' };
   const ready = (number, nodes) => ({ ...issue('Ready', nodes), number, issueFieldValues: { nodes: [] } });
   const open = prs => predecessor('OPEN', null, prs, { repository: { nameWithOwner: 'test/example' } });
   writeFileSync(join(checkout, 'search.json'), JSON.stringify([ready(1, [open([pr])]), ready(2, [open([])]), ready(3, [predecessor('CLOSED', 'COMPLETED')])]));

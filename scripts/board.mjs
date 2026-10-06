@@ -20,7 +20,7 @@ function graphql(query, variables = {}) {
 
 // A predecessor with its open PRs: the base of a stack is found through the native closing links (manual ones included).
 const predecessorFields = `number state stateReason repository{nameWithOwner}
-  closedByPullRequestsReferences(first:10,includeClosedPrs:false){totalCount nodes{number state isDraft isCrossRepository baseRefName headRefName}}`;
+  closedByPullRequestsReferences(first:10,includeClosedPrs:false){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName}}`;
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
   id number title state body bodyHTML assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
@@ -61,7 +61,11 @@ function stackBase(open) {
     else {
       const delivering = links.nodes.filter(pr => pr.state === 'OPEN');
       if (!delivering.length) refused.push(`${label} has no open PR`);
-      for (const pr of delivering) prs.set(pr.number, pr);
+      // A closing keyword can also come from a PR of another repository, which is no local branch to stack on.
+      for (const pr of delivering) {
+        if (pr.repository?.nameWithOwner?.toLowerCase() === project.repository.toLowerCase()) prs.set(pr.number, pr);
+        else refused.push(`PR #${pr.number} of ${label} belongs to ${pr.repository?.nameWithOwner ?? 'an unreadable repository'}`);
+      }
     }
   }
   if (!refused.length && !unknown.length && prs.size > 1) refused.push(`the predecessors are delivered by ${prs.size} open PRs (#${[...prs.keys()].join(', #')}), not one`);
@@ -179,10 +183,11 @@ function check(issue = readIssue(), claims) {
       stackedOn = stack.pr;
       notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
       blocked.length = 0;
-    } else if (stack.unknown.length) {
+    } else if (stack.unknown.length && !stack.refused.length) {
       unknown.push(...stack.unknown);
       blocked.length = 0;
-    } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`));
+    // A definitive refusal stays BLOCKED, whatever else is unreadable: a retry cannot lift it.
+    } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
   }
   let verdict = stackedOn ? 'STACKABLE' : 'STARTABLE';
   if (unknown.length) verdict = 'UNKNOWN';
@@ -747,7 +752,8 @@ function handoffIssue(issue, viewer) {
   // An upper layer may be handed off before the base is merged, but only as a layer on that base.
   if (stackedOn) {
     const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-      pullRequest(number:$number){baseRefName}}}`, { owner, name, number: Number(value) }).repository;
+      pullRequest(number:$number){baseRefName isCrossRepository headRepository{nameWithOwner}}}}`, { owner, name, number: Number(value) }).repository;
+    if (pr?.isCrossRepository !== false || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) reasons.push(`PR #${value} comes from a fork or another repository: stacks stay inside ${project.repository}`);
     if (pr?.baseRefName !== stackedOn.headRefName) reasons.push(`the open predecessor PR #${stackedOn.number} is not merged: PR #${value} must target its branch ${stackedOn.headRefName}, not ${pr?.baseRefName}`);
   }
   if (!['Automated review', 'Human review'].includes(status)) reasons.push('finish implementation and Automated review first');
