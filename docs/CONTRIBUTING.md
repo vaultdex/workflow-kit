@@ -208,7 +208,9 @@ backlink never closes an issue.
    is not coming. A traced review finishes when it posts its result: a review, a
    completed summary or a final status. If no result arrives within the time the
    reviewer's last completed review on this PR took (otherwise its usual duration),
-   it is stalled. Pending, cancelled or missing expected CI checks are not success.
+   it is stalled. Pending, cancelled or missing expected CI checks are not success; a
+   workflow whose only runs for the head were skipped before the PR became ready (Draft
+   guard) has no run for the Ready head yet and keeps `wait` waiting.
    Read all findings and every review, comment and thread from bots and humans,
    including every page of analyzer results such as Sonar issues and hotspots. A
    green quality gate does not mean zero findings, and a missing or stale analysis
