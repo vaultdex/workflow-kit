@@ -1020,3 +1020,40 @@ test('body writes an issue body only on top of the one it is based on and proves
   assert.equal(run('body', '1', change, base).status, 2);
   assert.equal(patches(), 0);
 });
+
+test('board check blocks a newer claim of another session of the same login unless handed over', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue());
+  const comment = (body, changes) => ({ id: 1, user: { login: 'worker', type: 'User' }, body, html_url: 'https://example.test/c1',
+    created_at: '2026-10-06T10:00:00Z', ...changes });
+  const claim = (agent, session, changes) => comment(`Claim\n\nAgent: ${agent}, Session: ${session}`, changes);
+  const check = (comments, ...args) => {
+    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
+    return run('check', '1', ...args);
+  };
+
+  const foreign = check([claim('claude', 'S1'), claim('codex', 'S2', { created_at: '2026-10-06T10:09:00Z' })], '--session', 'S1');
+  assert.equal(foreign.status, 1, foreign.stdout + foreign.stderr);
+  assert.match(foreign.stdout, /Agent codex, Session S2, 2026-10-06T10:09:00Z, https:\/\/example\.test\/c1/);
+  assert.equal(check([claim('claude', 'S1')], '--session', 'S1').status, 0, 'own claim');
+  assert.equal(check([claim('claude', 'S1'), claim('codex', 'S2')], '--session', 'S2').status, 0, 'equal times: the later comment wins');
+  assert.equal(check([claim('claude', 'S1'), comment('Handover: S2')], '--session', 'S2').status, 0, 'handover');
+  assert.equal(check([claim('claude', 'S1'), comment('Handover: S2')], '--session', 'S1').status, 1, 'the earlier session lost the claim');
+  assert.equal(check([claim('claude', 'S1', { user: { login: 'someone-else' } })], '--session', 'S2').status, 0, 'other authors are ignored');
+
+  const old = check([comment('Claim: Driver, Branch x')], '--session', 'S2');
+  assert.equal(old.status, 0, old.stdout);
+  assert.match(old.stdout, /note: claim without Agent\/Session field/);
+  const stray = check([claim('claude', 'S1'), comment('Claim: released')], '--session', 'S2');
+  assert.equal(stray.status, 1, 'a newer claim without the field never lifts a known holder');
+  assert.match(stray.stdout, /note: claim without Agent\/Session field/);
+  assert.equal(check([comment('Agent: codex, Session: S1, Branch: x')], '--session', 'S2').status, 1, 'text after the session id is allowed');
+  assert.equal(check([comment('Agent: reviewer, Session: S1')], '--session', 'S2').status, 0, 'only claude and codex name a claim');
+  assert.equal(check([claim('claude', 'S1')], '--sesion', 'S2').status, 2, 'a misspelled flag is a usage error, not a silent skip');
+  const unnamed = check([claim('claude', 'S1')]);
+  assert.equal(unnamed.status, 0, 'without --session the verdict stays as before');
+  assert.match(unnamed.stdout, /note: newest claim: Agent claude, Session S1/);
+
+  writeFileSync(join(checkout, 'fail-rest'), '');
+  assert.equal(run('check', '1', '--session', 'S1').status, 2, 'unreadable comments are unknown');
+});
