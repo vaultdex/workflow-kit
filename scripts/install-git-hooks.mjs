@@ -29,14 +29,15 @@ if (!statSync(join(root, '.githooks'), { throwIfNoEntry: false })?.isDirectory()
   process.exit(0);
 }
 
-// The project versions its own post-checkout (kit sync). A differing existing file is the project's: kept.
+// The project versions its own post-checkout (kit sync). A file that differs byte for byte (a CRLF copy cannot run
+// on POSIX) is the project's: kept and reported.
 const hookSource = readFileSync(new URL('./git-hooks/post-checkout', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
 const hookFile = join(root, '.githooks', 'post-checkout');
 const existingHook = lstatSync(hookFile, { throwIfNoEntry: false });
 if (!existingHook) {
   if (!check) writeFileSync(hookFile, hookSource, { flag: 'wx', mode: 0o755 });
   console.log(`post-checkout: ${check ? 'would create' : 'created'} .githooks/post-checkout (kit sync after branch checkout); commit it with: git add --chmod=+x .githooks/post-checkout`);
-} else if (existingHook.isFile() && readFileSync(hookFile, 'utf8').replaceAll('\r\n', '\n') === hookSource) {
+} else if (existingHook.isFile() && readFileSync(hookFile, 'utf8') === hookSource) {
   // Git skips a hook without the executable bit; Windows has none to check, there only the index mode counts.
   const runnable = process.platform === 'win32' || (existingHook.mode & 0o111) !== 0;
   if (!runnable && !check) chmodSync(hookFile, 0o755);

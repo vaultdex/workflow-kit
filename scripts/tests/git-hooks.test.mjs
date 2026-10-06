@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -253,17 +253,24 @@ test('the kit update runs no hooks of the kit clone', t => {
   assert.equal(existsSync(marker), false);
 });
 
-test('the kit update asks ssh to stay noninteractive', t => {
-  const f = kitFixture(t), log = join(f.repo, '../ssh-args').replaceAll('\\', '/'), fake = join(f.repo, '../fake-ssh.mjs').replaceAll('\\', '/');
-  writeFileSync(fake, `import { appendFileSync } from 'node:fs';\nappendFileSync('${log}', process.argv.slice(2).join(' ') + '\\n');\nprocess.exit(1);\n`);
-  // No clone and an ssh source: the update must go through ssh, which here only records its arguments.
-  rmSync(join(f.repo, '.vendor/workflow-kit'), { recursive: true, force: true });
-  rmSync(join(f.repo, '.git/modules'), { recursive: true, force: true });
-  mkdirSync(join(f.repo, '.vendor/workflow-kit'));
-  f.sh(f.repo, 'config', 'submodule..vendor/workflow-kit.url', 'ssh://example.invalid/kit');
-  const result = f.switchTo('other', { GIT_SSH_COMMAND: `node "${fake}"` });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(readFileSync(log, 'utf8'), /BatchMode=yes/);
+test('the kit update keeps the default ssh noninteractive and a configured one as set', t => {
+  // No clone and an ssh source: the update goes through ssh, here a fake on PATH that only records its arguments.
+  const record = env => {
+    const f = kitFixture(t), bin = join(f.repo, '../bin'), log = join(f.repo, '../ssh-args').replaceAll('\\', '/');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'ssh'), '#!/bin/sh\necho "$@" >> "' + log + '"\nexit 1\n', { mode: 0o755 });
+    rmSync(join(f.repo, '.vendor/workflow-kit'), { recursive: true, force: true });
+    rmSync(join(f.repo, '.git/modules'), { recursive: true, force: true });
+    mkdirSync(join(f.repo, '.vendor/workflow-kit'));
+    f.sh(f.repo, 'config', 'submodule..vendor/workflow-kit.url', 'ssh://example.invalid/kit');
+    const result = f.switchTo('other', { ...env, PATH: bin + delimiter + process.env.PATH });
+    assert.equal(result.status, 0, result.stderr);
+    return readFileSync(join(f.repo, '../ssh-args'), 'utf8');
+  };
+  assert.match(record({}), /BatchMode=yes/);
+  const custom = record({ GIT_SSH_COMMAND: 'ssh -o Custom=1' });
+  assert.match(custom, /Custom=1/);
+  assert.doesNotMatch(custom, /BatchMode/);
 });
 
 test('an installed hook without the executable bit is repaired', { skip: process.platform === 'win32' }, t => {

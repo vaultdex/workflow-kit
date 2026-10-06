@@ -118,14 +118,15 @@ missing, unless the project already has a different one, which stays; commit it 
 `git add --chmod=+x .githooks/post-checkout`. After a branch checkout (third argument `1`) the hook runs
 `git submodule update --init --checkout .vendor/workflow-kit`, so the kit follows the gitlink of the
 new branch instead of showing `M .vendor/workflow-kit`. It touches only the kit, not other submodules
-or `submodule.recurse`, asks nothing (ssh runs with `BatchMode`) and runs none of the kit clone's own hooks.
+or `submodule.recurse`, asks nothing (the default ssh runs with `BatchMode`; a configured one stays as set) and runs none of the kit clone's own hooks.
 A rerun of the installer repairs a missing executable bit and reports a hook tracked without it
 (`git update-index --chmod=+x`). A kit with local changes, ignored or untracked files, or commits no remote has
 (a clean, published kit behind or ahead of the old pin still follows) is not touched: the hook prints a hint
 and the checkout continues; any failure only prints the command. Without a kit gitlink, as in this repository,
 it does nothing. The hook is versioned with each branch (Git resolves `.githooks` in the new worktree after
 the switch), so a branch created before the hook was committed has none and does not sync until it merges
-the default branch.
+the default branch. Known limit: where the kit has `core.filemode=false`, a purely local mode change is invisible to
+Git and the update may reset it. A hook copy with CRLF line endings differs from the kit's and is kept, not blessed.
 
 ## Board commands
 
