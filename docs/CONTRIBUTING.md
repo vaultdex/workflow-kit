@@ -209,7 +209,8 @@ backlink never closes an issue.
    all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
 3. Wait for CI and every review with a trace on the current head with `board.mjs
-   wait PR` in the background, not hand-written polling. Review bots run unreliably,
+   wait PR` in the background (a driver subagent: foreground, see
+   [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
    status or review on the head commit, or, created after the head was pushed, a
    review comment, an open review request, an announced review or a bot's reaction
