@@ -85,7 +85,9 @@ asking ([agent rules](AGENT_RULES.md#hooks)); trust stays personal. Review and t
 project hooks in each agent, then start a new session:
 `/hooks` in Codex CLI or Claude Code, the hooks view in the Codex app settings,
 Settings → Hooks in Cursor, `.github/hooks` for Copilot. Missing snapshots produce
-a SessionStart install hint. Files and manual runs don't prove agent loading or
+a SessionStart install hint. Session and subagent starts also run
+`git submodule update --init .vendor/workflow-kit` when the kit checkout is missing (fresh
+worktree); an initialized kit stays untouched and a failure prints the command. Files and manual runs don't prove agent loading or
 trust; new definitions need personal review and trust. See
 [Ponytail](docs/ponytail.md) and [Impeccable](docs/impeccable.md) for hook behavior.
 

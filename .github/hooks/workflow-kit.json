@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "root=$(git rev-parse --show-toplevel 2>/dev/null); case \"$(git -C \"$root\" ls-files -s -- .vendor/workflow-kit 2>/dev/null)\" in 160000*) [ -f \"$root/.vendor/workflow-kit/AGENT_RULES.md\" ] || GIT_TERMINAL_PROMPT=0 git -C \"$root\" submodule update --init .vendor/workflow-kit >/dev/null 2>&1 || printf '%s\\n' '{\"additionalContext\":\"Workflow Kit missing and automatic init failed: run git submodule update --init .vendor/workflow-kit\"}';; esac",
+        "powershell": "$root = git rev-parse --show-toplevel 2>$null; if ($root -and ((git -C $root ls-files -s -- .vendor/workflow-kit) -match '^160000') -and -not (Test-Path -LiteralPath \"$root/.vendor/workflow-kit/AGENT_RULES.md\")) { $env:GIT_TERMINAL_PROMPT = '0'; git -C $root submodule update --init .vendor/workflow-kit *> $null; if ($LASTEXITCODE) { Write-Output '{\"additionalContext\":\"Workflow Kit missing and automatic init failed: run git submodule update --init .vendor/workflow-kit\"}' } }; exit 0",
+        "timeoutSec": 120
+      }
+    ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "bash": "root=$(git rev-parse --show-toplevel 2>/dev/null); case \"$(git -C \"$root\" ls-files -s -- .vendor/workflow-kit 2>/dev/null)\" in 160000*) [ -f \"$root/.vendor/workflow-kit/AGENT_RULES.md\" ] || GIT_TERMINAL_PROMPT=0 git -C \"$root\" submodule update --init .vendor/workflow-kit >/dev/null 2>&1 || printf '%s\\n' '{\"additionalContext\":\"Workflow Kit missing and automatic init failed: run git submodule update --init .vendor/workflow-kit\"}';; esac",
+        "powershell": "$root = git rev-parse --show-toplevel 2>$null; if ($root -and ((git -C $root ls-files -s -- .vendor/workflow-kit) -match '^160000') -and -not (Test-Path -LiteralPath \"$root/.vendor/workflow-kit/AGENT_RULES.md\")) { $env:GIT_TERMINAL_PROMPT = '0'; git -C $root submodule update --init .vendor/workflow-kit *> $null; if ($LASTEXITCODE) { Write-Output '{\"additionalContext\":\"Workflow Kit missing and automatic init failed: run git submodule update --init .vendor/workflow-kit\"}' } }; exit 0",
+        "timeoutSec": 120
+      }
+    ]
+  }
+}

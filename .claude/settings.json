@@ -28,6 +28,16 @@
     ],
     "SessionStart": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "root=$(git rev-parse --show-toplevel 2>/dev/null); case \"$(git -C \"$root\" ls-files -s -- .vendor/workflow-kit 2>/dev/null)\" in 160000*) [ -f \"$root/.vendor/workflow-kit/AGENT_RULES.md\" ] || GIT_TERMINAL_PROMPT=0 git -C \"$root\" submodule update --init .vendor/workflow-kit >/dev/null 2>&1 || printf '%s\\n' 'Workflow Kit missing and automatic init failed: run git submodule update --init .vendor/workflow-kit';; esac",
+            "timeout": 120,
+            "shell": "bash"
+          }
+        ]
+      },
+      {
         "matcher": "startup|clear",
         "hooks": [
           {
@@ -56,6 +66,16 @@
       }
     ],
     "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "root=$(git rev-parse --show-toplevel 2>/dev/null); case \"$(git -C \"$root\" ls-files -s -- .vendor/workflow-kit 2>/dev/null)\" in 160000*) [ -f \"$root/.vendor/workflow-kit/AGENT_RULES.md\" ] || GIT_TERMINAL_PROMPT=0 git -C \"$root\" submodule update --init .vendor/workflow-kit >/dev/null 2>&1 || printf '%s\\n' 'Workflow Kit missing and automatic init failed: run git submodule update --init .vendor/workflow-kit';; esac",
+            "timeout": 120,
+            "shell": "bash"
+          }
+        ]
+      },
       {
         "hooks": [
           {
