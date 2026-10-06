@@ -114,7 +114,7 @@ yourself. Without `.githooks/` it does nothing.
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
 
-- `next`, `check ISSUE`, `status ISSUE "STATUS"`, `priority ISSUE High`,
+- `next`, `check ISSUE [--session ID]`, `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`.
 - `field ISSUE NAME VALUE`: any single-select field, read back after writing.
 - `status ISSUE "Automated review" PR [OTHER_ISSUE...]` (or `field ISSUE Status

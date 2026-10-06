@@ -43,7 +43,31 @@ function predecessorReasons({ totalCount, nodes }) {
   return { blocked, unknown };
 }
 
-function check(issue = readIssue()) {
+// Claim comments of the own login carry "Agent: claude|codex, Session: ID"; "Handover: ID" passes the claim to that session.
+const claimField = /^Agent:\s*([\w-]+)\s*,\s*Session:\s*([\w.-]+)\s*$/im;
+const handoverField = /^Handover:\s*([\w.-]+)\s*$/im;
+// ponytail: sessions are told apart by the id the driver passes, not authenticated; Claude and Codex share one login.
+/** Blocks when the newest claim or handover of the own login belongs to another session; claims without the field only note. */
+function claimReasons(issue, session) {
+  const { viewer } = graphql('query{viewer{login}}');
+  assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
+  let holder, legacy;
+  // GitHub lists comments oldest first, so for equal times the later one in order wins.
+  for (const comment of restAll(`repos/${project.repository}/issues/${issue.number}/comments`)) {
+    if (comment.user?.login?.toLowerCase() !== viewer.login.toLowerCase()) continue;
+    const body = comment.body ?? '', claim = claimField.exec(body), handover = handoverField.exec(body);
+    if (handover || claim) [holder, legacy] = [{ agent: claim?.[1], session: handover?.[1] ?? claim[2], comment }, undefined];
+    else if (/^Claim:/m.test(body)) legacy = comment;
+  }
+  const notes = [], blocked = [];
+  const about = ({ agent, session: id, comment }) => `${agent ? `Agent ${agent}, ` : ''}Session ${id}, ${comment.created_at}, ${comment.html_url}`;
+  if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
+  else if (holder && !session) notes.push(`newest claim: ${about(holder)}; pass --session ID to compare it with yours`);
+  if (legacy) notes.push(`claim without Agent/Session field, session unknown: ${legacy.html_url}`);
+  return { blocked, notes };
+}
+
+function check(issue = readIssue(), claims) {
   const status = projectItem(issue)?.status?.name;
   const blocked = [], unknown = [];
   if (issue.state !== 'OPEN') blocked.push('issue is closed');
@@ -54,12 +78,19 @@ function check(issue = readIssue()) {
   const predecessors = predecessorReasons(issue.blockedBy);
   blocked.push(...predecessors.blocked);
   unknown.push(...predecessors.unknown);
+  const notes = [];
+  if (claims) try {
+    const found = claimReasons(issue, claims.session);
+    blocked.push(...found.blocked);
+    notes.push(...found.notes);
+  } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
   let verdict = 'STARTABLE';
   if (unknown.length) verdict = 'UNKNOWN';
   if (blocked.length) verdict = 'BLOCKED';
   const assignees = issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none';
   console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${assignees}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
+  for (const note of notes) console.log(`note: ${note}`);
   process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2 }[verdict];
   return verdict;
 }
@@ -610,6 +641,7 @@ function handoff() {
 
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
 const stallOption = () => numberOption('--stall', 20);
+const sessionOption = () => process.argv.includes('--session') ? process.argv[process.argv.indexOf('--session') + 1] : undefined;
 
 /** Metadata that can still describe the previous push right after it: identity, branch, state, draft, head. */
 const readyQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
@@ -719,9 +751,9 @@ function block() {
   console.log(`#${number} is blocked by ${value}`);
 }
 
-const commands = { next, check, block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
+const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
   reviews: reviewsOnce, wait, handoff, ready, link, body };
-const usage = 'Usage: board.mjs next | check ISSUE | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
+const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] | wait PR [--stall MINUTES | --merged] | handoff ISSUE PR [--stall MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
@@ -731,6 +763,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
+  || (command === 'check' && process.argv.includes('--session') && !/^[\w.-]+$/.test(sessionOption() ?? ''))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))

@@ -55,14 +55,18 @@ The driver completes these steps before implementation, including review fixes:
 1. Read the issue, comments and [start policy](docs/CONTRIBUTING.md#starting-work).
    Confirm authorization, external prerequisites and ownership. Another session's
    issue, branch or PR needs explicit handover, even under a shared GitHub login.
-2. Run `node .vendor/workflow-kit/scripts/board.mjs check ISSUE` now. BLOCKED or
+2. Run `node .vendor/workflow-kit/scripts/board.mjs check ISSUE` now, with `--session ID` (your session id, as in
+   step 5). BLOCKED or
    UNKNOWN stops dependent edits except for a specifically authorized, documented
    [exception](docs/CONTRIBUTING.md#execution-check).
 3. Create the [issue-linked branch](docs/CONTRIBUTING.md#delivery), or reuse your
    existing branch and PR for this issue. Switch to it in your worktree and verify
    `git branch --show-current` before editing; preserve unrelated work.
 4. Assign yourself: `gh issue edit ISSUE --add-assignee "@me"`.
-5. Record the verdict, your session and branch in the issue. Assignment is not a lock.
+5. Record the verdict, your session and branch in the issue, with the line
+   `Agent: claude|codex, Session: ID` (use the same ID for `--session`). A newer claim of
+   another session blocks `check` unless a `Handover: ID` comment passes it to yours
+   ([Execution check](docs/CONTRIBUTING.md#execution-check)). Assignment is not a lock.
 6. On STARTABLE, run `node .vendor/workflow-kit/scripts/board.mjs status ISSUE "In progress"`.
    Read back the assignee, claim comment and Project status; start edits only when
    all match. The command rechecks native readiness and your assignment, not session
