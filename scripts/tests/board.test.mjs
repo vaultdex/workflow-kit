@@ -921,6 +921,13 @@ test('field, status and priority report failures as one ERROR line, and issue fa
     assert.match(result.stdout, /^ERROR - /);
     assert.equal(result.stderr, '', 'No stack trace');
   }
+  // A passing guard (the readiness check prints) waits until every pair is valid, so the failure stays one line.
+  writeIssue({ ...issue(), assignees: { nodes: [{ login: 'worker' }] } });
+  const late = run('field', '1', 'Status', 'In progress', 'Colour', 'Red');
+  assert.equal(late.status, 2);
+  assert.match(late.stdout, /^ERROR - [^\n]*\n$/);
+  assert.equal(existsSync(join(checkout, 'mutations')), false);
+  writeIssue(issue());
   // GitHub refuses an unknown issue number: the message says which repository was meant.
   writeFileSync(join(checkout, 'fail'), '');
   for (const args of [['check', '1'], ['priority', '1', 'High']]) {

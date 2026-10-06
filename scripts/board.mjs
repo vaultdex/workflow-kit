@@ -213,21 +213,26 @@ function addToProject(issue) {
   }
 }
 
-/** Validate a field option and the guards of its transition; nothing is written. Undefined: a guard refused. */
-function resolveOption(issue, fieldName, optionName) {
+/** Look up a field and option; nothing is printed or written. */
+function resolveOption(fieldName, optionName) {
   const { field, linked, choices } = selectField(fieldName);
   const option = choices.find(choice => choice.name.toLowerCase() === String(optionName).toLowerCase());
   assert.ok(option, `${fieldName}: "${optionName}" is not an option; use one of: ${choices.map(choice => choice.name).join(', ')}`);
+  return { fieldName, field, linked, option };
+}
+
+/** Guards of a transition. They print (check, backlinks), so run them only after every pair is valid. False: a guard refused. */
+function guardOption(issue, { fieldName, option }) {
   if (fieldName === 'Status' && option.name === 'In progress') {
     // Assignment first: a refusal is then one ERROR line, not the check's verdict block followed by an error.
     const { viewer } = graphql('query{viewer{login}}');
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     assert.ok(issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase()),
       `Assign yourself first: gh issue edit ${number} --repo ${project.repository} --add-assignee "@me". Verify session ownership before assigning.`);
-    if (check(issue) !== 'STARTABLE') return;
+    if (check(issue) !== 'STARTABLE') return false;
   }
   if (fieldName === 'Status' && option.name === 'Automated review') verifyBacklinks();
-  return { fieldName, field, linked, option };
+  return true;
 }
 
 function writeOption(issue, { fieldName, field, linked, option }) {
@@ -252,8 +257,8 @@ function writeOption(issue, { fieldName, field, linked, option }) {
 /** Write a selected field option; guarded delivery can reject the fresh issue before mutation. */
 function set(fieldName, optionName = value, beforeWrite) {
   let issue = readIssue();
-  const plan = resolveOption(issue, fieldName, optionName);
-  if (!plan) return;
+  const plan = resolveOption(fieldName, optionName);
+  if (!guardOption(issue, plan)) return;
   // A guarded handoff rechecks current ownership/readiness after the potentially lengthy review reads.
   if (beforeWrite) {
     issue = beforeWrite();
@@ -276,8 +281,8 @@ function fieldPairs() {
 /** Any single-select fields: every pair is validated before the first write, then all are read back together so a silent API no-op cannot pass. */
 function setField() {
   const issue = readIssue();
-  const plans = fieldPairs().map(([fieldName, optionName]) => resolveOption(issue, fieldName, optionName));
-  if (plans.includes(undefined)) return;
+  const plans = fieldPairs().map(([fieldName, optionName]) => resolveOption(fieldName, optionName));
+  if (!plans.every(plan => guardOption(issue, plan))) return;
   // Confirmation lines come after the read-back, so a failed call never shows a write as confirmed.
   const written = plans.map(plan => writeOption(issue, plan));
   const { repository } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
