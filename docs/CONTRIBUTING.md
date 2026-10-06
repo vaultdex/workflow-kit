@@ -231,7 +231,10 @@ backlink never closes an issue.
    (`board.mjs ready PR SHA`), set Automated review and wait again. Merge main only for conflicts or a real need.
    After two correction pushes, collect new findings that neither block (P1,
    security, data loss) nor regress against main in one follow-up issue instead of
-   another push; every push restarts CI and reviews.
+   another push; every push restarts CI and reviews. `board.mjs reviews` and `wait` print
+   `correction pushes after ready: N` (distinct heads pushed after the PR's first Ready,
+   not the head that set it) and from `N >= 2` `cap reached`; nothing is blocked, and
+   blocking findings (P0/P1, security, red required CI) are still corrected.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
    are unchanged. Then run a retro once per PR: apply the retro skill
