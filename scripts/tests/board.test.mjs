@@ -693,6 +693,7 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.doesNotMatch(onePush, cap);
   assert.doesNotMatch(corrections([['abcdef1234', 5], ['abcdef1234', 10], ['aaaaaaa', 25]]), cap, 'A repeated head is one push');
   assert.equal(count(corrections([['abcdef1234', 25]])), '0');
+  assert.equal(count(corrections([['abcdef1234', 5], ['bbbbbbb', 15], ['abcdef1234', 25]])), '1', 'Pushing back to the head that set Ready is no new head');
   assert.equal(count(look({ ...pr(), firstReadyEvents: { nodes: [] } }).stdout), undefined, 'A PR that never was ready has no count');
   // A red head still reports the count, and an unreadable push log never turns the red verdict into ERROR.
   const red = { commits: pr({ pushed: 5, contexts: [check('COMPLETED', 'FAILURE')] }).commits };

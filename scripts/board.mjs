@@ -376,7 +376,10 @@ function correctionPushes(pr, pushes) {
   if (!first) return null;
   const since = Date.parse(first);
   assert.ok(Number.isFinite(since), 'The first Ready time is unreadable');
-  return new Set(pushes().filter(entry => Date.parse(entry.timestamp) > since && !/^0+$/.test(entry.after)).map(entry => entry.after)).size;
+  const log = pushes().filter(entry => !/^0+$/.test(entry.after));
+  // The head that set Ready is the latest push up to the Ready event; pushing back to it later is no new head.
+  const atReady = log.filter(entry => Date.parse(entry.timestamp) <= since).sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0]?.after;
+  return new Set(log.filter(entry => Date.parse(entry.timestamp) > since && entry.after !== atReady).map(entry => entry.after)).size;
 }
 
 /** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
