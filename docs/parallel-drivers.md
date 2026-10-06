@@ -55,7 +55,9 @@ Modellwahl stehen hier nicht.
 2. **Regeln vom Ziel-Release-Branch lesen.** AGENTS.md und Kit-Regeln stammen vom
    Release-Branch, auf den die PR zielt, nicht nur von `main`; eine Regel kann nur
    dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume) mit
-   `Agent: …, Session: …`.
+   `Agent: …, Session: …`. Den Issue-Branch zweigt der Driver vom Ziel-Release-Branch
+   ab (`--base` im `gh issue develop` der [Delivery](CONTRIBUTING.md#delivery)-Regel
+   ist dann dieser Branch, nicht `main`).
 3. **Fremde Branches in Ruhe lassen.** `codex/*`-Branches und Branches anderer
    Driver nicht anfassen, auch wenn der eigene Branch `codex/*` heißt; nur der eigene
    Issue-Branch gehört dem Driver. Überschneidungen melden.
