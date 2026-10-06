@@ -25,7 +25,7 @@ const issueFields = `id number title state body repository{nameWithOwner} assign
 // ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
   ${issueFields} bodyHTML
-  closedByPullRequestsReferences(first:20){nodes{number state}}
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state}}
   subIssues(first:100){totalCount nodes{${issueFields}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
@@ -152,8 +152,11 @@ function check(issue = readIssue(), claims) {
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
   for (const note of notes) console.log(`note: ${note}`);
   if (claim) {
-    const prs = issue.closedByPullRequestsReferences?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => `#${pr.number}`);
-    console.log(`claim: ${ago(Date.now() - Date.parse(claim.comment.created_at))} ago (Session ${claim.session ?? 'unknown'}), open PR: ${prs ? prs.join(', ') || 'none' : 'unknown'}`);
+    const linked = issue.closedByPullRequestsReferences;
+    const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => `#${pr.number}`);
+    // A list cut at 100 is never presented as complete.
+    const cut = linked?.totalCount > linked?.nodes?.length ? ` (first ${linked.nodes.length} of ${linked.totalCount})` : '';
+    console.log(`claim: ${ago(Date.now() - Date.parse(claim.comment.created_at))} ago (Session ${claim.session ?? 'unknown'}), open PR: ${prs ? prs.join(', ') || 'none' : 'unknown'}${cut}`);
   }
   if (claims && issue.subIssues?.nodes?.length) {
     if (issue.subIssues.totalCount > issue.subIssues.nodes.length) console.log(`note: ${issue.subIssues.nodes.length} of ${issue.subIssues.totalCount} sub-issues listed`);

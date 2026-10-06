@@ -1268,6 +1268,8 @@ test('board check shows the age of a claim and whether a linked PR is open', t =
   assert.match(run('check', '1', '--session', 'S2').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: #123$/m, 'Shown to other sessions too');
   claimedAgo(5 * 60_000 + 10_000);
   assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #123$/m);
+  writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: 150, nodes: [{ number: 5, state: 'OPEN' }] } });
+  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #5 \(first 1 of 150\)$/m, 'A cut list says so');
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');
   assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');
 });
