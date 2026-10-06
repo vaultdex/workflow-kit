@@ -388,6 +388,11 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
     writeIssue({ ...issue(), body });
     assert.equal(run('check', '1').status, 1, body);
   }
+  for (const variant of ['**Wartet bis:** v1.2.3', '> Wartet bis: v1.2.3', '1. Wartet bis: v1.2.3', '- [ ] Wartet bis: v1.2.3', 'Wartet bis v1.2.3']) {
+    const result = check(variant);
+    assert.equal(result.status, 2, `${variant} is unknown, never overlooked`);
+    assert.match(result.stdout, /unreadable line/);
+  }
   for (const invalid of ['Wartet bis: bald nach dem Release', 'Wartet bis: release.', 'Wartet bis: foo.lock', 'Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
     assert.equal(check(invalid).status, 2, `${invalid} is unknown, never "no blocker"`);
   }

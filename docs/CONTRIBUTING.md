@@ -32,9 +32,9 @@ does not replace it.
 
 | Verdict | Meaning |
 | --- | --- |
-| STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed. |
-| BLOCKED | An open predecessor, a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, or status Backlog or Done. |
-| UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, an unset or unknown status, or the issue is missing from the Project. Retry the read; never read it as "no blockers". |
+| STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed, every `Wartet bis` condition met. |
+| BLOCKED | An open predecessor, a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, or an unmet `Wartet bis` condition. |
+| UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, an unset or unknown status, the issue is missing from the Project, or an unreadable `Wartet bis` line. Retry the read; never read it as "no blockers". |
 
 STARTABLE covers native prerequisites, not permission or ownership. Also inspect
 **Abhängigkeiten und Wiederaufnahme** for external access, releases and decisions.

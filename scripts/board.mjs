@@ -54,9 +54,13 @@ const validTagName = tag => tag !== '' && !/[\p{Cc} ~^:?*[\\]|\.\.|@\{|\/\/|^\/|
  * Überschrift. Ein Fehlgriff blockiert sichtbar (mit Grund), statt eine Bedingung still zu überlesen.
  */
 function waitReasons(body) {
-  const blocked = [], unknown = [];
-  const values = String(body ?? '').split(/\r?\n/).map(line => /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line)?.[1].trim())
-    .filter(value => value !== undefined);
+  const blocked = [], unknown = [], values = [];
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    const strict = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line);
+    if (strict) values.push(strict[1].trim());
+    // Formatierte Varianten (**Wartet bis:**, > …, 1. …, - [ ] …) sind keine lesbare Bedingung, aber auch kein Freibrief.
+    else if (/^[\s>*_+\-[\]xX\d.]*wartet\s+bis\b/i.test(line)) unknown.push(`unreadable line "${line.trim()}": write it as "Wartet bis: <tag or UTC time>"`);
+  }
   for (const wanted of values) {
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(wanted)) {
       const at = Date.parse(wanted);
