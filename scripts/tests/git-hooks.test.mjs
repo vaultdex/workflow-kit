@@ -29,6 +29,7 @@ function fixture(t, { hooks = true } = {}) {
     writeFileSync(join(repo, '.githooks/pre-push'), '#!/bin/sh\n');
   }
   git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
+  git('config', 'extensions.worktreeConfig', 'true');
   git('worktree', 'add', '-q', '--detach', linked);
   const linkedConfig = join(repo, '.git/worktrees/linked/config.worktree');
   const run = (...args) => {
@@ -38,7 +39,8 @@ function fixture(t, { hooks = true } = {}) {
   };
   const value = (...source) => spawnSync('git', ['config', ...source, '--get', 'core.hooksPath'],
     { cwd: repo, env, encoding: 'utf8' }).stdout.trim();
-  return { repo, linked, global, linkedConfig, git, run, value };
+  const effective = cwd => spawnSync('git', ['config', '--get', 'core.hooksPath'], { cwd, env, encoding: 'utf8' }).stdout.trim();
+  return { repo, linked, global, linkedConfig, git, run, value, effective };
 }
 
 test('unset or own absolute paths become relative .githooks; --check and reruns change nothing', t => {
@@ -59,6 +61,7 @@ test('unset or own absolute paths become relative .githooks; --check and reruns 
   f.run();
   assert.equal(f.value('--local'), '.githooks');
   assert.equal(f.value('--file', f.linkedConfig), '');
+  assert.equal(f.effective(f.linked), '.githooks');
 });
 
 test('foreign hook paths stay, local or global; without .githooks nothing changes', t => {
@@ -89,6 +92,13 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   writeFileSync(m.linkedConfig, mixed);
   m.run();
   assert.equal(readFileSync(m.linkedConfig, 'utf8'), mixed);
+
+  // includeIf applies only on another branch: invisible from here, still kept.
+  const c = fixture(t), branch = join(c.global, '../release.gitconfig');
+  writeFileSync(branch, '[core]\n\thooksPath = /release/hooks\n');
+  writeFileSync(c.global, `[includeIf "onbranch:release"]\n\tpath = ${branch.replaceAll('\\', '/')}\n`);
+  c.run();
+  assert.equal(c.value('--local'), '');
 
   const none = fixture(t, { hooks: false });
   none.run();

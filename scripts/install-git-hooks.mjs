@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { externalTool, projectRoot } from './checkout-root.mjs';
 
 // Explicit setup: points Git at the project's versioned .githooks, per clone. Automatic hooks never run this file.
@@ -61,6 +62,41 @@ const localFile = join(common, 'config');
 const worktreeFiles = [join(common, 'config.worktree'),
   ...(existsSync(join(common, 'worktrees')) ? readdirSync(join(common, 'worktrees')) : [])
     .map(name => join(common, 'worktrees', name, 'config.worktree'))].filter(existsSync);
+
+/** Lines of `git var NAME` (the global or system config files Git reads), none when disabled. */
+const configFiles = name => {
+  const result = run('var', name);
+  assert.ok(result.status <= 1, result.stderr);
+  return result.status === 0 ? result.stdout.split(/\r?\n/).filter(Boolean) : [];
+};
+// Git evaluates includeIf (gitdir, onbranch, ...) only for the invoking worktree and branch, so a
+// foreign path that applies elsewhere is invisible above. Read every include target with its
+// condition ignored and keep everything when any target reachable through includeIf sets a foreign path.
+// ponytail: %(prefix) include paths are not resolved; add them when a project relies on them.
+const conditional = [];
+const scanned = new Set();
+const scan = (file, underCondition) => {
+  if (scanned.has(fold(file)) || !existsSync(file)) return;
+  scanned.add(fold(file));
+  const own = run('config', '--file', file, '--no-includes', '--null', '--get-all', 'core.hooksPath');
+  assert.ok(own.status <= 1, own.stderr);
+  if (underCondition && own.status === 0)
+    conditional.push(...own.stdout.split('\0').slice(0, -1).map(value => ({ value, origin: fold(file) })));
+  const includes = run('config', '--file', file, '--no-includes', '--null', '--get-regexp', '^include(if\\..*)?\\.path$');
+  assert.ok(includes.status <= 1, includes.stderr);
+  for (const entry of includes.status === 0 ? includes.stdout.split('\0').slice(0, -1) : []) {
+    const key = entry.slice(0, entry.indexOf('\n')), path = entry.slice(entry.indexOf('\n') + 1);
+    const target = path.startsWith('~/') ? join(process.env.HOME ?? homedir(), path.slice(2)) : resolve(dirname(file), path);
+    scan(target, underCondition || key.startsWith('includeif.'));
+  }
+};
+for (const file of [localFile, ...worktreeFiles, ...configFiles('GIT_CONFIG_GLOBAL'), ...configFiles('GIT_CONFIG_SYSTEM')])
+  scan(file, false);
+const foreignConditional = conditional.filter(entry => !isOurs(entry.value));
+if (foreignConditional.length) {
+  report(`kept as is: includeIf may set ${describe(foreignConditional)}; integrate .githooks there by hand`);
+  process.exit(0);
+}
 
 // Local config wins over global and system; an unset local must not shadow someone's global hooks.
 const local = entries('--file', localFile);

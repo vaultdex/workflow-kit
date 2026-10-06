@@ -102,10 +102,12 @@ node .vendor/workflow-kit/scripts/install-git-hooks.mjs          # --check only 
 It sets the relative `.githooks`, so every worktree runs the hooks of its own branch.
 Absolute paths into this repository's worktrees and matching `config.worktree`
 overrides become that relative path. It changes a config file only when every
-`core.hooksPath` entry there (including `include`/`includeIf` files) points to this
-repository's `.githooks` and is written in that file itself. Anything else, such as a
-foreign path in local, global or system config, stays and is reported: integrate
-`.githooks` there yourself. Without `.githooks/` it does nothing.
+`core.hooksPath` entry there (including `include` files) points to this
+repository's `.githooks` and is written in that file itself. Because Git evaluates
+`includeIf` per worktree and branch, it changes nothing when any `includeIf` target,
+whatever its condition, sets a foreign path. Anything else, such as a foreign path in
+local, global or system config, stays and is reported: integrate `.githooks` there
+yourself. Without `.githooks/` it does nothing.
 
 ## Board commands
 
