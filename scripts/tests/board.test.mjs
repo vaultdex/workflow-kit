@@ -166,7 +166,7 @@ process.stdout.write(JSON.stringify({ data }));`);
 }
 
 const issue = (status = 'Ready', nodes = [], totalCount = nodes.length) => ({
-  id: 'I1', number: 1, title: 'Fixture', state: 'OPEN', assignees: { nodes: [] },
+  id: 'I1', number: 1, title: 'Fixture', state: 'OPEN', bodyHTML: '', assignees: { nodes: [] },
   projectItems: { nodes: [{ id: 'PI1', project: { id: 'P1' }, status: { name: status } }] },
   blockedBy: { totalCount, nodes },
 });
@@ -305,7 +305,7 @@ test('handoff rechecks issue prerequisites after review and link reads, before m
     { ...ready, projectItems: issue('In progress').projectItems },
     { ...ready, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } },
     { ...ready, blockedBy: { totalCount: 1, nodes: [] } },
-    { ...ready, body: '- [ ] added while waiting' },
+    { ...ready, bodyHTML: task('added while waiting') },
   ];
   for (const changed of changes) {
     writeIssue(ready);
@@ -317,26 +317,41 @@ test('handoff rechecks issue prerequisites after review and link reads, before m
   }
 });
 
+// GitHub's rendering of a task item, an issue reference and a code block (shape of its Markdown API output).
+const task = (text, checked) => `<li class="task-list-item"><input type="checkbox" id="" disabled="" class="task-list-item-checkbox" aria-label="${checked ? 'Completed' : 'Incomplete'} task"${checked ? ' checked=""' : ''}> ${text}</li>`;
+const reference = '<a class="issue-link js-issue-link" href="https://github.com/test/example/issues/12">#12</a>';
+const list = items => `<ul class="contains-task-list">\n${items.join('\n')}\n</ul>`;
+const codeBlock = '<pre class="notranslate"><code class="notranslate">- [ ] sample in code\n</code></pre>';
+
 test('handoff rejects open acceptance without an issue reference and names each line', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
-  const open = ['- [ ] first', '* [ ] second', '1. [ ] third #', '  - [ ] nested', '- [ ] ref in other word abc#12', '- [ ] color #123abc', '- [ ] revisit #12later', '- item\n    - [ ] nested open', '```\n```still-code\n- [ ] in example\n```\n- [ ] after fence', '```\n- [ ] in code\n```\n- [ ] after code'];
-  for (const body of open) {
-    writeIssue({ ...ready, body: 'Intro\n' + body });
+  const open = [
+    [list([task('first'), task('second ' + reference), task('third')]), ['first', 'third']],
+    [list([task('color #123abc and revisit #12later')]), ['color #123abc and revisit #12later']],
+    [list([task('url <a href="https://example.com/page#12">https://example.com/page#12</a>')]), ['url https://example.com/page#12']],
+    [list([task('a &lt; b')]), ['a < b']],
+    [`<ul>\n<li>Phase<br>\nCriteria:\n${list([task('nested')])}\n</li>\n</ul>`, ['nested']],
+    [codeBlock + list([task('after code')]), ['after code']],
+  ];
+  for (const [bodyHTML, lines] of open) {
+    writeIssue({ ...ready, bodyHTML });
     const result = run('handoff', '1', '7');
-    assert.equal(result.status, 1, body + result.stdout + result.stderr);
-    assert.ok(result.stdout.includes(body.split('\n').at(-1).trim()), 'The output names the open line: ' + result.stdout);
-    assert.doesNotMatch(result.stdout, /in (code|example)/);
+    assert.equal(result.status, 1, bodyHTML + result.stdout + result.stderr);
+    for (const line of lines) assert.ok(result.stdout.includes(': ' + line), result.stdout);
+    assert.doesNotMatch(result.stdout, /sample in code|second/);
     assert.equal(existsSync(join(checkout, 'mutations')), false, 'Rejected handoff never mutates status');
   }
-  const done = ['', 'no list', '- [x] done', '- [X] done', '- [ ] moved to #12', '- [ ] moved to test/other#12', '- [ ] a #3\n- [x] b', '```\n- [ ] example\n```', '~~~\n- [ ] example\n~~~', 'text\n\n    - [ ] indented example', 'text\n\n\t- [ ] tab example', '````\n```\n- [ ] example\n```\n````'];
-  for (const body of done) {
-    writeIssue({ ...ready, body });
+  // No list, only code, checked off, or moved to a follow-up: the issue may go to Human review.
+  for (const bodyHTML of ['', '<p>no list</p>', codeBlock, list([task('done', true)]), list([task('moved to ' + reference), task('b', true)])]) {
+    writeIssue({ ...ready, bodyHTML });
     const result = run('handoff', '1', '7');
-    assert.equal(result.status, 0, body + result.stdout + result.stderr);
+    assert.equal(result.status, 0, bodyHTML + result.stdout + result.stderr);
   }
+  writeIssue({ ...ready, bodyHTML: undefined });
+  assert.equal(run('handoff', '1', '7').status, 2, 'An unreadable rendered body is unknown, never a handoff');
 });
 
 test('handoff rechecks PR gates before mutation and rejects changed review proof', t => {
