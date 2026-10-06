@@ -47,6 +47,12 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
       assert.equal(result.stdout, '', 'a successful init prints nothing');
       assert.ok(existsSync(join(first, '.vendor/workflow-kit/AGENT_RULES.md')), `${file} initializes the kit`);
 
+      const rules = join(first, '.vendor/workflow-kit/AGENT_RULES.md');
+      rmSync(rules);
+      result = trial(first);
+      assert.match(result.stdout, /AGENT_RULES.md/, 'a kit whose rules file is missing despite the update is reported');
+      git(join(first, '.vendor/workflow-kit'), 'checkout', '--', 'AGENT_RULES.md');
+
       renameSync(kit, `${kit}-gone`);
       result = trial(first);
       assert.deepEqual([result.status, result.stdout, result.stderr], [0, '', ''], 'an initialized kit is not touched, not even to reach the source');
