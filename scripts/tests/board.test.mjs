@@ -894,7 +894,8 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   };
 
   prepare();
-  assert.match(run('status', '1', 'Automated review', '7').stderr, /board\.mjs link 1 7/, 'Without the comment the guard refuses and names link as the remedy');
+  assert.notEqual(run('status', '1', 'Automated review', '7').status, 0, 'Without the comment the guard refuses');
+  assert.equal(mutations(), 0, 'and writes nothing');
   let result = run('link', '1', '7');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(mutations(), 1, 'A Draft PR is connected with one write');
