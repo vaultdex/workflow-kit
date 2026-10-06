@@ -212,6 +212,7 @@ a check alone does not claim work.
 ## Developing the kit
 
 ```sh
+git submodule update --init --recursive    # the tests clone the pinned submodules
 node scripts/init-project.mjs --existing
 node scripts/setup-skills.mjs
 git status --short    # review intended outputs; preserve unrelated work
