@@ -1264,11 +1264,11 @@ test('board check shows the age of a claim and whether a linked PR is open', t =
   claimedAgo((2 * 24 + 4) * 3_600_000 + 30 * 60_000);
   withPrs([]);
   assert.match(run('check', '1', '--session', 'S1').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: none$/m);
-  withPrs([{ number: 123, state: 'OPEN' }, { number: 99, state: 'MERGED' }]);
-  assert.match(run('check', '1', '--session', 'S2').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: #123$/m, 'Shown to other sessions too');
+  withPrs([{ number: 123, state: 'OPEN', repository: { nameWithOwner: 'Test/Example' } }, { number: 99, state: 'MERGED', repository: { nameWithOwner: 'test/example' } }, { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/other' } }]);
+  assert.match(run('check', '1', '--session', 'S2').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: #123, test\/other#7$/m, 'Shown to other sessions too; foreign PRs are qualified');
   claimedAgo(5 * 60_000 + 10_000);
-  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #123$/m);
-  writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: 150, nodes: [{ number: 5, state: 'OPEN' }] } });
+  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #123, test\/other#7$/m);
+  writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: 150, nodes: [{ number: 5, state: 'OPEN', repository: { nameWithOwner: 'test/example' } }] } });
   assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #5 \(first 1 of 150\)$/m, 'A cut list says so');
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');
   assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');

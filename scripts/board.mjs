@@ -25,7 +25,7 @@ const issueFields = `id number title state body repository{nameWithOwner} assign
 // ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
   ${issueFields} bodyHTML
-  closedByPullRequestsReferences(first:100){totalCount nodes{number state}}
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
   subIssues(first:100){totalCount nodes{${issueFields}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
@@ -130,6 +130,8 @@ function issueReasons(issue) {
   return { status, blocked, unknown };
 }
 const verdictOf = ({ blocked, unknown }) => blocked.length ? 'BLOCKED' : unknown.length ? 'UNKNOWN' : 'STARTABLE';
+// #N in the project's repository, OWNER/REPO#N elsewhere: a bare number must never name a same-number issue or PR of another repository.
+const refOf = (repository, number) => `${repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() ? '' : repository.nameWithOwner}#${number}`;
 const logins = issue => issue.assignees.nodes.map(assignee => assignee.login).join(', ');
 const ago = ms => {
   const minutes = Math.max(0, Math.floor(ms / 60_000)), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60);
@@ -153,7 +155,7 @@ function check(issue = readIssue(), claims) {
   for (const note of notes) console.log(`note: ${note}`);
   if (claim) {
     const linked = issue.closedByPullRequestsReferences;
-    const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => `#${pr.number}`);
+    const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => refOf(pr.repository, pr.number));
     // A list cut at 100 is never presented as complete.
     const cut = linked?.totalCount > linked?.nodes?.length ? ` (first ${linked.nodes.length} of ${linked.totalCount})` : '';
     console.log(`claim: ${ago(Date.now() - Date.parse(claim.comment.created_at))} ago (Session ${claim.session ?? 'unknown'}), open PR: ${prs ? prs.join(', ') || 'none' : 'unknown'}${cut}`);
@@ -161,8 +163,7 @@ function check(issue = readIssue(), claims) {
   if (claims && issue.subIssues?.nodes?.length) {
     if (issue.subIssues.totalCount > issue.subIssues.nodes.length) console.log(`note: ${issue.subIssues.nodes.length} of ${issue.subIssues.totalCount} sub-issues listed`);
     for (const child of issue.subIssues.nodes) {
-      const other = child.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() ? '' : child.repository.nameWithOwner;
-      console.log(`${other}#${child.number}  ${projectItem(child)?.status?.name ?? '-'}  ${logins(child) || '-'}  ${verdictOf(issueReasons(child))}`);
+      console.log(`${refOf(child.repository, child.number)}  ${projectItem(child)?.status?.name ?? '-'}  ${logins(child) || '-'}  ${verdictOf(issueReasons(child))}`);
     }
   }
   process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2 }[verdict];
