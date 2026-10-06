@@ -256,7 +256,7 @@ function setField() {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state isDraft createdAt headRefOid mergeStateStatus reviewDecision
+  number state isDraft createdAt headRefName headRefOid mergeStateStatus reviewDecision
   readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
@@ -359,6 +359,16 @@ function sonarIssues(detailsUrl, prNumber) {
   const { total } = JSON.parse(body);
   assert.ok(Number.isSafeInteger(total) && total >= 0, 'Sonar issue count is unreadable');
   return total;
+}
+
+/** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
+function headSetAt(pr) {
+  const log = rest(`repos/${project.repository}/activity?ref=${encodeURIComponent(`refs/heads/${pr.headRefName}`)}&per_page=100`);
+  const push = log.find(entry => entry.after === pr.headRefOid);
+  assert.ok(push, 'Push time of the head is not readable; retry the read');
+  const time = Date.parse(push.timestamp);
+  assert.ok(Number.isFinite(time), 'Push time of the head is unreadable');
+  return time;
 }
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
@@ -498,9 +508,11 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // later, often after CI is green. Until the grace has passed since the PR became ready or the head was
   // pushed, whichever is later, a missing trace is no answer yet.
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
-  const graceFrom = Math.max(readyAt, pushed);
-  if (!pr.isDraft && graceMinutes > 0 && now - graceFrom < graceMinutes * 60_000) {
-    waiting.push({ text: `reviewers may still start until ${new Date(graceFrom + graceMinutes * 60_000).toISOString()}`, since: Infinity });
+  if (!pr.isDraft && graceMinutes > 0) {
+    const graceFrom = Math.max(readyAt, pushed, headSetAt(pr));
+    if (now - graceFrom < graceMinutes * 60_000) {
+      waiting.push({ text: `reviewers may still start until ${new Date(graceFrom + graceMinutes * 60_000).toISOString()}`, since: Infinity });
+    }
   }
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
