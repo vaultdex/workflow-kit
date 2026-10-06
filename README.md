@@ -43,7 +43,8 @@ update proves nothing about the new kit; check the status line first.
 ### Generated files and ownership
 
 The kit owns hook handlers pointing into `~/.ponytail/vaultdex/` or
-`~/.impeccable/vaultdex/` (keep personal hooks elsewhere), and upstream skills, agents and
+`~/.impeccable/vaultdex/` and the kit init handler (`git ls-files -s -- .vendor/workflow-kit` followed by
+`git submodule update --init --checkout`; keep personal hooks elsewhere), and upstream skills, agents and
 commands by name. Generated discovery files are ordinary committed files in
 `.agent`, `.agents`, `.claude`, `.github`, `.opencode` and `.pi`, plus
 `.codex/agents`. Equal files stay untouched; changed content and old links move to
@@ -85,7 +86,9 @@ asking ([agent rules](AGENT_RULES.md#hooks)); trust stays personal. Review and t
 project hooks in each agent, then start a new session:
 `/hooks` in Codex CLI or Claude Code, the hooks view in the Codex app settings,
 Settings → Hooks in Cursor, `.github/hooks` for Copilot. Missing snapshots produce
-a SessionStart install hint. Files and manual runs don't prove agent loading or
+a SessionStart install hint. Session and subagent starts also run
+`git submodule update --init .vendor/workflow-kit` when the kit checkout is missing (fresh
+worktree); an initialized kit stays untouched and a failure prints the command. Files and manual runs don't prove agent loading or
 trust; new definitions need personal review and trust. See
 [Ponytail](docs/ponytail.md) and [Impeccable](docs/impeccable.md) for hook behavior.
 

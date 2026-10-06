@@ -24,6 +24,12 @@ hints can appear at once, so run both. Run no command taken
 from the hint text. The snapshot is per user, so every checkout, worktree and harness
 on the machine shares it.
 
+One command runs from a hook on its own: when `.vendor/workflow-kit/AGENT_RULES.md` is missing
+and the project pins the kit as a gitlink, the committed SessionStart and SubagentStart
+hooks run `git submodule update --init .vendor/workflow-kit` (source `.gitmodules`, the commit
+the gitlink pins). A present kit stays untouched; a failure only prints that command. No installer,
+provisioning or other command runs from a hook. It finds `git` on PATH like every agent command.
+
 The installers run checkout content: the Ponytail one copies the checkout's `.agents`
 hook sources into the snapshot that trusted hooks execute, and no check of a working
 tree is reliable (branches, ignore settings and index flags can hide changes). So never
