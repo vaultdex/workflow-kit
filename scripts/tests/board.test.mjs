@@ -556,8 +556,9 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(readied(0.5)), 3, 'Green CI right after Ready still waits for reviewers to start');
   assert.equal(reviews(readied(5)), 0, 'After the grace a missing trace means no reviewer is coming');
   assert.equal(reviews(readied(0.5), {}, '--grace', '0'), 0, 'The grace can be turned off');
+  // Commit dates come from client clocks: one ahead of GitHub must not cut the grace short.
   const committed = minutes => ({ commits: { nodes: [{ commit: { ...pr().commits.nodes[0].commit, committedDate: minutesAgo(minutes) } }] } });
-  assert.equal(reviews(readied(2, committed(1))), 0, 'A Ready from before the head commit starts no grace');
+  assert.equal(reviews(readied(0.5, committed(-10))), 3, 'A commit date in the future does not cut the grace short');
   assert.equal(reviews(readied(0.5, { isDraft: true })), 0, 'A Draft starts no grace');
   // A PR opened ready gets its first CI suite from the "opened" event, after its creation.
   assert.equal(reviews({ ...pr({ pushed: 0.2 }), isDraft: false, createdAt: minutesAgo(0.5) }), 3, 'A PR opened ready counts from its creation');

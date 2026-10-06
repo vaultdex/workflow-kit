@@ -421,11 +421,11 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     waiting.push({ text: `review requested from ${reviewerName(reviewer) ?? 'an unreadable reviewer'}`, since: Math.max(pushed, ...requested) });
   }
   // Bots that start on "ready for review" (Codex) leave their first trace a minute or two later, often after
-  // CI is green. Until the grace has passed since this head became ready, a missing trace is no answer yet.
-  // The commit date bounds the push from below: CI may open its first suite only after "opened" or "ready",
-  // so the suite time would hide a fresh Ready. A Ready from before the commit belongs to an older head.
+  // CI is green. Until the grace has passed since the PR became ready, a missing trace is no answer yet.
+  // No push boundary: suite times can follow "opened"/"ready" and commit dates are client clocks, while an
+  // older Ready ends by time anyway; at worst a push right after Ready waits the grace once more.
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
-  if (!pr.isDraft && readyAt >= Date.parse(commit.committedDate) && now - readyAt < graceMinutes * 60_000) {
+  if (!pr.isDraft && now - readyAt < graceMinutes * 60_000) {
     waiting.push({ text: `reviewers may still start until ${new Date(readyAt + graceMinutes * 60_000).toISOString()}`, since: Infinity });
   }
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
