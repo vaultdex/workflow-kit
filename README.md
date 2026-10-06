@@ -118,7 +118,8 @@ yourself. Without `.githooks/` it does nothing.
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
 
 - `next`, `check ISSUE [--session ID]`, `status ISSUE "STATUS"`, `priority ISSUE High`,
-  `block ISSUE OWNER/REPO#N`.
+  `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
+  `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
 - `field ISSUE NAME VALUE`: any single-select field, read back after writing.
 - `status ISSUE "Automated review" PR [OTHER_ISSUE...]` (or `field ISSUE Status
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference

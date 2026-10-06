@@ -1,5 +1,5 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run in the project: board.mjs next | check | status | priority | field | block | reviews | wait (see usage below).
+// Run in the project: board.mjs next | check | status | priority | field | block | sub | reviews | wait (see usage below).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -856,11 +856,26 @@ function block() {
   console.log(`#${number} is blocked by ${value}`);
 }
 
-const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, status: () => set('Status'), priority: () => set('Priority'), field: setField,
+// Attaches CHILD as a native sub-issue of ISSUE and reads the parent link back; an existing link is a success.
+function sub() {
+  const [childOwner, childName] = blockerRepository(value).split('/');
+  const childNumber = Number(value.slice(value.lastIndexOf('#') + 1));
+  const read = () => graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id parent{number repository{nameWithOwner}}}}}`,
+    { owner: childOwner, name: childName, number: childNumber }).repository.issue;
+  const underParent = ({ parent }) => parent?.number === number && parent.repository.nameWithOwner === project.repository;
+  const child = read();
+  // Without replaceParent GitHub refuses a child that already has another parent; that error is left to surface.
+  if (!underParent(child)) graphql(`mutation($issue:ID!,$sub:ID!){addSubIssue(input:{issueId:$issue,subIssueId:$sub}){issue{number}}}`,
+    { issue: readIssue().id, sub: child.id });
+  assert.ok(underParent(read()), `#${number} did not take ${value} as sub-issue (read-back shows another parent)`);
+  console.log(`#${number} has sub-issue ${value.includes('/') ? value : `#${childNumber}`}`);
+}
+
+const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField,
   reviews: reviewsOnce, wait, handoff, ready, link, body };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
+  + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE';
@@ -875,7 +890,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
-  || (command === 'block' && !validBlocker(value ?? ''))) {
+  || (['block', 'sub'].includes(command) && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
 }
