@@ -161,12 +161,14 @@ const issue = (status = 'Ready', nodes = [], totalCount = nodes.length) => ({
 });
 const predecessor = (state, stateReason) => ({ number: 9, state, stateReason, repository: { nameWithOwner: 'test/other' } });
 
+// Pushed long enough ago that the reviewer grace has passed.
+const pushedAt = () => new Date(Date.now() - 10 * 60_000).toISOString();
 const handoffPr = changes => ({
   number: 7, state: 'OPEN', isDraft: false, baseRefName: 'release/0.1.1', headRefOid: 'abcdef1234',
   mergeStateStatus: 'CLEAN', reviewDecision: null,
   latestOpinionatedReviews: { totalCount: 0, nodes: [] },
-  commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: new Date().toISOString(),
-    checkSuites: { totalCount: 1, nodes: [{ createdAt: new Date().toISOString(), status: 'COMPLETED', conclusion: 'SUCCESS', app: { slug: 'github-actions' }, checkRuns: { totalCount: 1 } }] },
+  commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: pushedAt(),
+    checkSuites: { totalCount: 1, nodes: [{ createdAt: pushedAt(), status: 'COMPLETED', conclusion: 'SUCCESS', app: { slug: 'github-actions' }, checkRuns: { totalCount: 1 } }] },
     statusCheckRollup: { contexts: { totalCount: 1, nodes: [
       { __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' },
     ] } } } }] },
@@ -570,7 +572,7 @@ test('reviews waits only for traces on the current head and never reads failures
     workflowRun: run === undefined ? null : { databaseId: run, workflow: { id: workflowId } } });
   const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, requestEventTotal, threadPages,
     suites = [suite('COMPLETED', 1, pushed)], suiteTotal = suites.length } = {}) => ({
-    number: 7, state: 'OPEN', headRefOid: 'abcdef1234', mergeStateStatus: 'CLEAN', reviewDecision: null,
+    number: 7, state: 'OPEN', isDraft: true, headRefOid: 'abcdef1234', mergeStateStatus: 'CLEAN', reviewDecision: null,
     latestOpinionatedReviews: { totalCount: 0, nodes: [] },
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
       checkSuites: { totalCount: suiteTotal, nodes: suites }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
@@ -596,9 +598,12 @@ test('reviews waits only for traces on the current head and never reads failures
 
   assert.equal(reviews(pr()), 0, 'Green CI without other traces is done');
   // Codex starts on "ready for review" and shows its first trace a minute or two later, often after CI is green.
-  const readied = (minutes, changes) => ({ ...pr(), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(minutes) }] }, ...changes });
+  const readied = (minutes, changes, pushed = 1) => ({ ...pr({ pushed }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(minutes) }] }, ...changes });
   assert.equal(reviews(readied(0.5)), 3, 'Green CI right after Ready still waits for reviewers to start');
-  assert.equal(reviews(readied(5)), 0, 'After the grace a missing trace means no reviewer is coming');
+  assert.equal(reviews(readied(5, {}, 5)), 0, 'After the grace a missing trace means no reviewer is coming');
+  // Codex also reviews new commits: a push to a long-ready PR starts the grace again.
+  assert.equal(reviews(readied(30, {}, 1)), 3, 'Green CI right after a push to a ready PR still waits for reviewers');
+  assert.equal(reviews(readied(30, {}, 5)), 0, 'After the grace since the push a missing trace means no reviewer is coming');
   assert.equal(reviews(readied(0.5), {}, '--grace', '0'), 0, 'The grace can be turned off');
   assert.equal(reviews(readied(-0.5)), 3, 'Precondition: a Ready after now still waits with the default grace');
   assert.equal(reviews(readied(-0.5), {}, '--grace', '0'), 0, 'Ready during the query (after now) does not revive a disabled grace');
