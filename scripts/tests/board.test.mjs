@@ -928,8 +928,16 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
 
   prepare({ linkPages: [['I1']] });
   writeFileSync(join(checkout, 'comment-noop'), '');
-  assert.equal(run('link', '1', '7').status, 2, 'A comment the read-back does not show is no success');
+  result = run('link', '1', '7');
+  assert.equal(result.status, 2, 'A comment the read-back does not show is no success');
+  assert.match(result.stdout, /^ERROR$/m);
   assert.equal(commentWrites(), 1, 'The comment is not written again blindly');
+
+  prepare();
+  writeIssue({ ...issue('In progress'), state: 'CLOSED' });
+  assert.equal(run('link', '1', '7').status, 2, 'A closed issue takes no backlink');
+  assert.equal(mutations() + commentWrites(), 0, 'and is refused before any write');
+  writeIssue(issue('In progress'));
 
   prepare();
   writeFileSync(join(checkout, 'fail'), '');

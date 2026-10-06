@@ -652,6 +652,8 @@ function link() {
   const prNumber = Number(value);
   const issue = readIssue();
   assert.ok(issue?.id, 'Issue identity is unreadable');
+  // The backlink comment belongs on an open issue (the guard requires one); refuse before any write instead of half-way.
+  assert.equal(issue.state, 'OPEN', `#${number} is not an open issue`);
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     pullRequest(number:$number){id number state url headRefOid}}}`, { owner, name, number: prNumber }).repository;
   assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${value} is not an open pull request of ${project.repository}`);
