@@ -2,7 +2,7 @@
 // Nutzen: Jeder Clone und Worktree nutzt die Hooks seines Branches; fremde Hooks gehen nie verloren.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -189,6 +189,10 @@ test('switching branches with another kit gitlink leaves no modified submodule',
   assert.equal(f.switchTo('main').status, 0);
   assert.equal(readFileSync(f.rules, 'utf8'), 'rules 1\n');
   assert.equal(f.status(), '');
+  // A new worktree starts with an empty kit directory; the same hook fills it.
+  const linked = join(f.repo, '../linked');
+  f.sh(f.repo, 'worktree', 'add', '-q', '--detach', linked, 'other');
+  assert.equal(readFileSync(join(linked, '.vendor/workflow-kit/AGENT_RULES.md'), 'utf8'), 'rules 2\n');
 });
 
 test('a kit with local changes keeps them, prints a hint and does not fail the switch', t => {
@@ -198,6 +202,18 @@ test('a kit with local changes keeps them, prints a hint and does not fail the s
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /local changes/);
   assert.equal(readFileSync(f.rules, 'utf8'), 'my edit\n');
+});
+
+test('a failing kit update prints the command and does not fail the switch', t => {
+  const f = kitFixture(t);
+  // The kit is not cloned (empty directory) and its source is gone, so the update cannot succeed.
+  renameSync(join(f.repo, '../kit'), join(f.repo, '../kit-gone'));
+  rmSync(join(f.repo, '.vendor/workflow-kit'), { recursive: true, force: true });
+  rmSync(join(f.repo, '.git/modules'), { recursive: true, force: true });
+  mkdirSync(join(f.repo, '.vendor/workflow-kit'));
+  const result = f.switchTo('other');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /git submodule update --init \.vendor\/workflow-kit/);
 });
 
 test('an existing, different post-checkout hook of the project is kept', t => {
