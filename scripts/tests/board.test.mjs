@@ -1033,6 +1033,8 @@ test('board check blocks a newer claim of another session of the same login unle
   const old = check([comment('Claim: Driver, Branch x')], '--session', 'S2');
   assert.equal(old.status, 0, old.stdout);
   assert.match(old.stdout, /note: claim without Agent\/Session field/);
+  assert.equal(check([claim('claude', 'S1'), comment('Claim: Driver, Branch x')], '--session', 'S2').status, 0, 'a newer claim without the field is unknown, not the old holder');
+  assert.equal(check([comment('Agent: reviewer, Session: S1')], '--session', 'S2').status, 0, 'only claude and codex name a claim');
   const unnamed = check([claim('claude', 'S1')]);
   assert.equal(unnamed.status, 0, 'without --session the verdict stays as before');
   assert.match(unnamed.stdout, /note: newest claim: Agent claude, Session S1/);

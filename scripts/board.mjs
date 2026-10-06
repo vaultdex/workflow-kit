@@ -44,7 +44,7 @@ function predecessorReasons({ totalCount, nodes }) {
 }
 
 // Claim comments of the own login carry "Agent: claude|codex, Session: ID"; "Handover: ID" passes the claim to that session.
-const claimField = /^Agent:\s*([\w-]+)\s*,\s*Session:\s*([\w.-]+)\s*$/im;
+const claimField = /^Agent:\s*(claude|codex)\s*,\s*Session:\s*([\w.-]+)\s*$/im;
 const handoverField = /^Handover:\s*([\w.-]+)\s*$/im;
 // ponytail: sessions are told apart by the id the driver passes, not authenticated; Claude and Codex share one login.
 /** Blocks when the newest claim or handover of the own login belongs to another session; claims without the field only note. */
@@ -57,7 +57,7 @@ function claimReasons(issue, session) {
     if (comment.user?.login?.toLowerCase() !== viewer.login.toLowerCase()) continue;
     const body = comment.body ?? '', claim = claimField.exec(body), handover = handoverField.exec(body);
     if (handover || claim) [holder, legacy] = [{ agent: claim?.[1], session: handover?.[1] ?? claim[2], comment }, undefined];
-    else if (/^Claim:/m.test(body)) legacy = comment;
+    else if (/^Claim:/m.test(body)) [holder, legacy] = [undefined, comment];
   }
   const notes = [], blocked = [];
   const about = ({ agent, session: id, comment }) => `${agent ? `Agent ${agent}, ` : ''}Session ${id}, ${comment.created_at}, ${comment.html_url}`;

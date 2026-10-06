@@ -41,7 +41,7 @@ does not replace it.
 with the line `Handover: ID` (from the earlier session or the human handing over) passes the claim to
 that session. The newest claim or handover decides, the later comment wins on equal times. If it names
 another session than `--session`, `check` reports BLOCKED with agent, session, time and comment link.
-Without `--session`, or with an old claim that lacks the field, `check` only shows a note. Unreadable
+Without `--session`, or when the newest claim is an old one that lacks the field (no known session), `check` only shows a note. Unreadable
 comments are UNKNOWN. Assignment stays no lock; this check only reports.
 
 STARTABLE covers native prerequisites, not permission or ownership. Also inspect
