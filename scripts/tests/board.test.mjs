@@ -52,6 +52,12 @@ if (!path.startsWith('graphql')) {
     process.stdout.write(JSON.stringify(items.slice((page - 1) * 100, page * 100)));
     process.exit(0);
   }
+  if (parts[3] === 'activity') {
+    // The branch's push log; by default the head was set long ago.
+    const head = JSON.parse(fs.readFileSync('pr.json')).headRefOid;
+    process.stdout.write(fs.existsSync('activity.json') ? fs.readFileSync('activity.json') : JSON.stringify([{ after: head, timestamp: '2000-01-01T00:00:00Z' }]));
+    process.exit(0);
+  }
   const file = parts.at(-3) + '-' + parts.at(-1) + '.json';
   const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
   const items = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
@@ -604,6 +610,21 @@ test('reviews waits only for traces on the current head and never reads failures
   // Codex also reviews new commits: a push to a long-ready PR starts the grace again.
   assert.equal(reviews(readied(30, {}, 1)), 3, 'Green CI right after a push to a ready PR still waits for reviewers');
   assert.equal(reviews(readied(30, {}, 5)), 0, 'After the grace since the push a missing trace means no reviewer is coming');
+  // A head set to an older commit keeps its old suites and commit date; only the branch's push log dates the new push.
+  const pushedToBranch = minutes => writeFileSync(join(checkout, 'activity.json'), JSON.stringify([{ after: 'abcdef1234', timestamp: minutesAgo(minutes) }]));
+  pushedToBranch(0.5);
+  assert.equal(reviews(readied(30, {}, 5)), 3, 'Green CI on a reused commit just pushed to a ready PR still waits for reviewers');
+  pushedToBranch(5);
+  assert.equal(reviews(readied(30, {}, 5)), 0, 'Precondition: a reused commit pushed before the grace is done');
+  // The same commit pushed twice: the latest push counts, in either order.
+  const older = { after: 'abcdef1234', timestamp: minutesAgo(10) }, newer = { after: 'abcdef1234', timestamp: minutesAgo(0.5) };
+  for (const log of [[older, newer], [newer, older]]) {
+    writeFileSync(join(checkout, 'activity.json'), JSON.stringify(log));
+    assert.equal(reviews(readied(30, {}, 5)), 3, 'The latest push of a repeated commit starts the grace');
+  }
+  writeFileSync(join(checkout, 'activity.json'), '[]');
+  assert.equal(reviews(readied(30, {}, 5)), 2, 'An unreadable push time never reads as done');
+  rmSync(join(checkout, 'activity.json'));
   assert.equal(reviews(readied(0.5), {}, '--grace', '0'), 0, 'The grace can be turned off');
   assert.equal(reviews(readied(-0.5)), 3, 'Precondition: a Ready after now still waits with the default grace');
   assert.equal(reviews(readied(-0.5), {}, '--grace', '0'), 0, 'Ready during the query (after now) does not revive a disabled grace');
