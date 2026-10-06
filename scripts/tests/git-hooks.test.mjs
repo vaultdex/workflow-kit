@@ -69,8 +69,10 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   assert.equal(f.value('--local'), '.husky');
   assert.notEqual(f.value('--file', f.linkedConfig), '');
 
-  const g = fixture(t);
-  writeFileSync(g.global, '[core]\n\thooksPath = /shared/hooks\n');
+  // Global hooks, here only reachable through an include, are not shadowed by a local entry.
+  const g = fixture(t), included = join(g.global, '../included.gitconfig');
+  writeFileSync(included, '[core]\n\thooksPath = /shared/hooks\n');
+  writeFileSync(g.global, `[include]\n\tpath = ${included.replaceAll('\\', '/')}\n`);
   g.run();
   assert.equal(g.value('--local'), '');
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { externalTool, projectRoot } from './checkout-root.mjs';
 
@@ -19,9 +19,10 @@ const out = (...args) => {
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 };
-/** Value of core.hooksPath in the given config source, or null when unset (git config exits 1). */
+/** Value of core.hooksPath in the given config source, or null when unset (git config exits 1).
+ * A selected source skips include/includeIf unless --includes is given. */
 const get = (...source) => {
-  const result = run('config', ...source, '--get', 'core.hooksPath');
+  const result = run('config', ...source, '--includes', '--get', 'core.hooksPath');
   assert.ok(result.status <= 1, result.stderr);
   return result.status === 0 ? result.stdout.trim() : null;
 };
@@ -33,7 +34,12 @@ if (!existsSync(join(root, '.githooks'))) {
 }
 
 // Every worktree's .githooks counts as ours, so an absolute path into another worktree is migrated too.
-const fold = path => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
+// Existing paths are canonicalized (symlinks, Windows 8.3 names); missing ones compare as written.
+const fold = path => {
+  let canonical = resolve(path);
+  try { canonical = realpathSync.native(canonical); } catch { /* missing or inaccessible: keep as written */ }
+  return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
+};
 const tops = out('worktree', 'list', '--porcelain').split(/\r?\n/)
   .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
 const ours = new Set(tops.map(top => fold(join(top, '.githooks'))));
