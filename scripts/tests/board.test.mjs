@@ -588,6 +588,17 @@ test('reviews waits only for traces on the current head and never reads failures
   const reviews = (...args) => look(...args).status;
 
   assert.equal(reviews(pr()), 0, 'Green CI without other traces is done');
+  // Codex starts on "ready for review" and shows its first trace a minute or two later, often after CI is green.
+  const readied = (minutes, changes) => ({ ...pr(), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(minutes) }] }, ...changes });
+  assert.equal(reviews(readied(0.5)), 3, 'Green CI right after Ready still waits for reviewers to start');
+  assert.equal(reviews(readied(5)), 0, 'After the grace a missing trace means no reviewer is coming');
+  assert.equal(reviews(readied(0.5), {}, '--grace', '0'), 0, 'The grace can be turned off');
+  // Commit dates come from client clocks: one ahead of GitHub must not cut the grace short.
+  const committed = minutes => ({ commits: { nodes: [{ commit: { ...pr().commits.nodes[0].commit, committedDate: minutesAgo(minutes) } }] } });
+  assert.equal(reviews(readied(0.5, committed(-10))), 3, 'A commit date in the future does not cut the grace short');
+  assert.equal(reviews(readied(0.5, { isDraft: true })), 0, 'A Draft starts no grace');
+  // A PR opened ready gets its first CI suite from the "opened" event, after its creation.
+  assert.equal(reviews({ ...pr({ pushed: 0.2 }), isDraft: false, createdAt: minutesAgo(0.5) }), 3, 'A PR opened ready counts from its creation');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'Red CI ends the wait as FAILED, never DONE');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'SKIPPED')] })), 0);
   assert.equal(reviews(pr({ contexts: [check('IN_PROGRESS')] })), 3);
