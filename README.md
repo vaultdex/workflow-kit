@@ -117,7 +117,9 @@ yourself. Without `.githooks/` it does nothing.
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
 
-- `next`, `check ISSUE [--session ID]`, `status ISSUE "STATUS"`, `priority ISSUE High`,
+- `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open
+  predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);
+  `next` lists such issues apart, with the base PR), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
 - `field ISSUE NAME VALUE`: any single-select field, read back after writing.

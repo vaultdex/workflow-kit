@@ -9,7 +9,9 @@ details only for the current step.
 - Humans accept and merge. Never merge, enable auto-merge or set Done before a
   human merged.
 - Never force-push, rewrite shared history, reset, stash or discard work you don't
-  own, or bypass branch protection, required checks or spending limits.
+  own, or bypass branch protection, required checks or spending limits. One exception:
+  `--force-with-lease` on your own upper layer of a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests),
+  never on another layer and never plain `--force`.
 - Never expose secrets or commit personal configuration.
 
 ## Hooks
@@ -64,8 +66,10 @@ The driver completes these steps before implementation, including review fixes:
 2. Run `node .vendor/workflow-kit/scripts/board.mjs check ISSUE` now, with `--session ID` (your session id, as in
    step 5). BLOCKED or
    UNKNOWN stops dependent edits except for a specifically authorized, documented
-   [exception](docs/CONTRIBUTING.md#execution-check).
-3. Create the [issue-linked branch](docs/CONTRIBUTING.md#delivery), or reuse your
+   [exception](docs/CONTRIBUTING.md#execution-check). STACKABLE (only an open predecessor
+   PR holds the issue) continues as a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests).
+3. Create the [issue-linked branch](docs/CONTRIBUTING.md#delivery) (on STACKABLE from the
+   head of the base PR's branch), or reuse your
    existing branch and PR for this issue. Switch to it in your worktree and verify
    `git branch --show-current` before editing; preserve unrelated work.
 4. Assign yourself: `gh issue edit ISSUE --add-assignee "@me"`.
@@ -73,7 +77,7 @@ The driver completes these steps before implementation, including review fixes:
    `Agent: claude|codex, Session: ID` (use the same ID for `--session`). A newer claim of
    another session blocks `check` unless a `Handover: ID` comment passes it to yours
    ([Execution check](docs/CONTRIBUTING.md#execution-check)). Assignment is not a lock.
-6. On STARTABLE, run `node .vendor/workflow-kit/scripts/board.mjs status ISSUE "In progress"`.
+6. On STARTABLE or STACKABLE, run `node .vendor/workflow-kit/scripts/board.mjs status ISSUE "In progress"`.
    Read back the assignee, claim comment and Project status; start edits only when
    all match. The command rechecks native readiness and your assignment, not session
    ownership, external prerequisites or authorization.
@@ -133,6 +137,8 @@ Run [board commands](README.md#board-commands) in the project with authenticated
   `board.mjs wait PR` in the background (a driver subagent runs it in the foreground, see
   [parallel drivers](docs/parallel-drivers.md#driver-regeln) rule 4) instead of hand-written polling loops.
 - Every push restarts CI and reviews: finish fixes and formatting before pushing.
+  A stack is at most two layers deep unless the human decides otherwise: a correction in
+  the lower layer restarts CI and reviews above it.
 - No routine setup reruns, broad audits, or new CI jobs and triggers without an
   estimate of the added usage; get approval when the budget is unknown.
 
@@ -143,6 +149,7 @@ Run [board commands](README.md#board-commands) in the project with authenticated
 | Pick work, resolve start authorization or blockers | [Starting work](docs/CONTRIBUTING.md#starting-work) |
 | Write or change an issue | [Issues](docs/CONTRIBUTING.md#issues) |
 | Branch, PR and review loop | [Delivery](docs/CONTRIBUTING.md#delivery) |
+| Dependent issue whose predecessor PR is still open | [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests) |
 | Blocked, failed or out-of-scope work | [Blockers and scope](docs/CONTRIBUTING.md#blockers-and-scope) |
 | Several drivers at once | [Parallel drivers](docs/parallel-drivers.md) |
 | Set up or update the kit, hooks | [README](README.md), [SETUP](SETUP.md) |

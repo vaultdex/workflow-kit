@@ -18,21 +18,24 @@ function graphql(query, variables = {}) {
   return JSON.parse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 })).data;
 }
 
+// A predecessor with its open PRs: the base of a stack is found through the native closing links (manual ones included).
+const predecessorFields = `number state stateReason repository{nameWithOwner}
+  closedByPullRequestsReferences(first:10,includeClosedPrs:false){totalCount nodes{number state isDraft isCrossRepository baseRefName headRefName}}`;
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
   id number title state body bodyHTML assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
-  blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}}}}`;
+  blockedBy(first:100){totalCount nodes{${predecessorFields}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
 function predecessorReasons({ totalCount, nodes }) {
-  const blocked = [], unknown = [];
+  const blocked = [], unknown = [], open = [];
   const readable = nodes.filter(Boolean);
   if (readable.length < totalCount) unknown.push(`only ${readable.length} of ${totalCount} predecessors are readable`);
   for (const predecessor of readable) {
     const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
-    if (predecessor.state === 'OPEN') blocked.push(`blocked by ${label} (open)`);
+    if (predecessor.state === 'OPEN') { blocked.push(`blocked by ${label} (open)`); open.push(predecessor); }
     else if (!predecessor.stateReason) unknown.push(`${label} is closed without a readable reason`);
     // Only a completed predecessor delivered; not planned or duplicate needs a recorded decision.
     else if (predecessor.stateReason !== 'COMPLETED') {
@@ -40,7 +43,34 @@ function predecessorReasons({ totalCount, nodes }) {
       blocked.push(`blocked by ${label} (closed as ${reason}; record a decision)`);
     }
   }
-  return { blocked, unknown };
+  return { blocked, unknown, open };
+}
+
+/**
+ * The one open PR a dependent issue can be stacked on (docs/CONTRIBUTING.md#stacked-pull-requests): every open predecessor
+ * lives in this repository and is delivered by the same single open, ready PR from a branch of this repository. Anything else
+ * says why not (`refused`); incomplete PR data is `unknown`, never "no PR".
+ */
+function stackBase(open) {
+  const refused = [], unknown = [], prs = new Map();
+  for (const predecessor of open) {
+    const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
+    const links = predecessor.closedByPullRequestsReferences;
+    if (predecessor.repository.nameWithOwner.toLowerCase() !== project.repository.toLowerCase()) refused.push(`${label} is in another repository`);
+    else if (!links?.nodes || links.nodes.filter(Boolean).length < links.totalCount) unknown.push(`the pull requests of ${label} are not completely readable`);
+    else {
+      const delivering = links.nodes.filter(pr => pr.state === 'OPEN');
+      if (!delivering.length) refused.push(`${label} has no open PR`);
+      for (const pr of delivering) prs.set(pr.number, pr);
+    }
+  }
+  if (!refused.length && !unknown.length && prs.size > 1) refused.push(`the predecessors are delivered by ${prs.size} open PRs (#${[...prs.keys()].join(', #')}), not one`);
+  const [pr] = prs.values();
+  if (!refused.length && !unknown.length) {
+    if (pr.isDraft) refused.push(`PR #${pr.number} is still Draft`);
+    if (pr.isCrossRepository) refused.push(`PR #${pr.number} comes from a fork`);
+  }
+  return { pr: refused.length || unknown.length ? undefined : pr, refused, unknown };
 }
 
 /** Git's Regeln für Ref-Namen (git check-ref-format): jeder gültige Tag wird nachgeschlagen, kein ungültiger. */
@@ -107,6 +137,19 @@ function claimReasons(issue, session) {
   return { blocked, notes };
 }
 
+/** Base PR of the issue the last check() judged STACKABLE; handoff compares it with the PR's base branch. */
+let stackedOn;
+
+/** True when open predecessors are the only thing holding the issue: a stack may then replace the wait. */
+const heldOnlyByOpenPredecessors = (reasons, predecessors) => predecessors.open.length > 0 && reasons.length === predecessors.open.length;
+
+/** STARTABLE and STACKABLE both allow work; check() reports the latter with exit 4, which a successful guarded command must not keep. */
+function mayStart(verdict) {
+  if (!['STARTABLE', 'STACKABLE'].includes(verdict)) return false;
+  process.exitCode = 0;
+  return true;
+}
+
 function check(issue = readIssue(), claims) {
   const status = projectItem(issue)?.status?.name;
   const blocked = [], unknown = [];
@@ -127,14 +170,30 @@ function check(issue = readIssue(), claims) {
     blocked.push(...found.blocked);
     notes.push(...found.notes);
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
-  let verdict = 'STARTABLE';
+  // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
+  stackedOn = undefined;
+  let stack;
+  if (heldOnlyByOpenPredecessors(blocked, predecessors) && !unknown.length) {
+    stack = stackBase(predecessors.open);
+    if (stack.pr) {
+      stackedOn = stack.pr;
+      notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
+      blocked.length = 0;
+    } else if (stack.unknown.length) {
+      unknown.push(...stack.unknown);
+      blocked.length = 0;
+    } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`));
+  }
+  let verdict = stackedOn ? 'STACKABLE' : 'STARTABLE';
   if (unknown.length) verdict = 'UNKNOWN';
   if (blocked.length) verdict = 'BLOCKED';
   const assignees = issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none';
   console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${assignees}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
+  if (stackedOn) console.log(`stack base: PR #${stackedOn.number} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
   for (const note of notes) console.log(`note: ${note}`);
-  process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2 }[verdict];
+  // STACKABLE is not 0: a caller that knows only STARTABLE must not start it without the stack rules.
+  process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2, STACKABLE: 4 }[verdict];
   return verdict;
 }
 
@@ -145,7 +204,7 @@ function next() {
   for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body assignees(first:10){nodes{login}}
-      blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}
+      blockedBy(first:100){totalCount nodes{${predecessorFields}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
@@ -166,16 +225,21 @@ function next() {
     .filter(issue => issue.item?.status?.name === 'Ready')
     .map(issue => {
       const predecessors = predecessorReasons(issue.blockedBy), waits = waitReasons(issue.body);
-      return { ...issue, reasons: [...predecessors.blocked, ...waits.blocked, ...predecessors.unknown, ...waits.unknown], priority: issue.item.priority?.name
+      return { ...issue, predecessors, reasons: [...predecessors.blocked, ...waits.blocked, ...predecessors.unknown, ...waits.unknown], priority: issue.item.priority?.name
         ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name };
     })
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);
   const line = issue => `#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`
     + ` (assignees: ${issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none'})`;
-  const held = ready.filter(issue => issue.reasons.length);
   const startable = ready.filter(issue => !issue.reasons.length);
+  // Held only by open predecessors that one open PR delivers: stackable on that PR.
+  const stackable = ready.filter(issue => issue.reasons.length && heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors))
+    .map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
+  const held = ready.filter(issue => issue.reasons.length && !stackable.some(candidate => candidate.number === issue.number));
   for (const issue of startable) console.log(line(issue));
   console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
+  if (stackable.length) console.log('\nReady and stackable on an open PR (check ISSUE shows STACKABLE; see docs/CONTRIBUTING.md#stacked-pull-requests):');
+  for (const issue of stackable) console.log(`${line(issue)}\n  - base PR #${issue.base.number} (branch ${issue.base.headRefName})`);
   if (held.length) console.log('\nReady but not startable:');
   for (const issue of held) console.log([line(issue), ...issue.reasons.map(reason => `  - ${reason}`)].join('\n'));
 }
@@ -214,7 +278,7 @@ function set(fieldName, optionName = value, beforeWrite) {
   const option = choices.find(choice => choice.name.toLowerCase() === String(optionName).toLowerCase());
   assert.ok(option, `Use one of: ${choices.map(choice => choice.name).join(', ')}`);
   if (fieldName === 'Status' && option.name === 'In progress') {
-    if (check(issue) !== 'STARTABLE') return;
+    if (!mayStart(check(issue))) return;
     const { viewer } = graphql('query{viewer{login}}');
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     assert.ok(issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase()),
@@ -676,10 +740,16 @@ function openAcceptance(bodyHtml) {
 
 /** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
 function handoffIssue(issue, viewer) {
-  if (check(issue) !== 'STARTABLE') return false;
+  if (!mayStart(check(issue))) return false;
   assert.ok(issue.id, 'Issue identity is unreadable');
   const status = projectItem(issue)?.status?.name;
   const reasons = [];
+  // An upper layer may be handed off before the base is merged, but only as a layer on that base.
+  if (stackedOn) {
+    const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+      pullRequest(number:$number){baseRefName}}}`, { owner, name, number: Number(value) }).repository;
+    if (pr?.baseRefName !== stackedOn.headRefName) reasons.push(`the open predecessor PR #${stackedOn.number} is not merged: PR #${value} must target its branch ${stackedOn.headRefName}, not ${pr?.baseRefName}`);
+  }
   if (!['Automated review', 'Human review'].includes(status)) reasons.push('finish implementation and Automated review first');
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
     reasons.push('the issue is not assigned to the authenticated driver');

@@ -170,7 +170,9 @@ const issue = (status = 'Ready', nodes = [], totalCount = nodes.length) => ({
   projectItems: { nodes: [{ id: 'PI1', project: { id: 'P1' }, status: { name: status } }] },
   blockedBy: { totalCount, nodes },
 });
-const predecessor = (state, stateReason) => ({ number: 9, state, stateReason, repository: { nameWithOwner: 'test/other' } });
+// prs: the PRs GitHub lists as closing the predecessor (closedByPullRequestsReferences).
+const predecessor = (state, stateReason, prs = [], changes) => ({ number: 9, state, stateReason, repository: { nameWithOwner: 'test/other' },
+  closedByPullRequestsReferences: { totalCount: prs.length, nodes: prs }, ...changes });
 
 // Pushed long enough ago that the reviewer grace has passed.
 const pushedAt = () => new Date(Date.now() - 10 * 60_000).toISOString();
@@ -409,6 +411,78 @@ test('board check exits 0 only for startable issues: 1 blocked, 2 unknown', t =>
   assert.equal(check('Ready', [predecessor('CLOSED', null)]), 2, 'A closure without a reason is unknown');
   writeFileSync(join(checkout, 'fail'), '');
   assert.equal(check('Ready', []), 2, 'A failed read is never "no blockers"');
+});
+
+test('an issue held only by open predecessors is STACKABLE on the one open, ready PR that delivers them all, else BLOCKED', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const pr = (number, changes) => ({ number, state: 'OPEN', isDraft: false, isCrossRepository: false, baseRefName: 'release/0.1.1', headRefName: `claude/${number}-base`, ...changes });
+  const open = (number, prs, changes) => predecessor('OPEN', null, prs, { number, repository: { nameWithOwner: 'test/example' }, ...changes });
+  const check = (...predecessors) => { writeIssue(issue('Ready', predecessors)); return run('check', '1'); };
+
+  const stackable = check(open(2, [pr(5)]));
+  assert.equal(stackable.status, 4, stackable.stdout);
+  assert.match(stackable.stdout, /^STACKABLE$/m);
+  assert.match(stackable.stdout, /stack base: PR #5 \(branch claude\/5-base/);
+  assert.equal(check(open(2, [pr(5)]), open(3, [pr(5)]), predecessor('CLOSED', 'COMPLETED')).status, 4, 'Several predecessors delivered by one PR');
+  assert.equal(check(open(2, [pr(5), pr(6, { state: 'MERGED' })])).status, 4, 'Only open PRs count');
+  const refused = [
+    ['no PR', open(2, [])],
+    ['only a Draft PR', open(2, [pr(5, { isDraft: true })])],
+    ['a PR from a fork', open(2, [pr(5, { isCrossRepository: true })])],
+    ['a closed PR', open(2, [pr(5, { state: 'CLOSED' })])],
+    ['two PRs for one predecessor', open(2, [pr(5), pr(6)])],
+    ['a predecessor in another repository', open(2, [pr(5)], { repository: { nameWithOwner: 'test/other' } })],
+  ];
+  for (const [label, candidate] of refused) assert.equal(check(candidate).status, 1, `${label} stays BLOCKED`);
+  assert.equal(check(open(2, [pr(5)]), open(3, [pr(6)])).status, 1, 'Two predecessors in two PRs are not linear');
+  assert.equal(check(open(2, [pr(5)]), open(3, [])).status, 1, 'Every open predecessor needs the PR');
+  assert.equal(check(open(2, [pr(5)]), predecessor('CLOSED', 'NOT_PLANNED')).status, 1, 'A decision-less closure still blocks');
+  assert.equal(check(open(2, [pr(5)]), predecessor('CLOSED', null)).status, 1, 'An unreadable predecessor never turns a wait into a stack');
+  const partial = open(2, [pr(5)]);
+  partial.closedByPullRequestsReferences.totalCount = 2;
+  assert.equal(check(partial).status, 2, 'Incomplete PR data is unknown, not "no PR"');
+  writeIssue({ ...issue('Backlog', [open(2, [pr(5)])]) });
+  assert.equal(run('check', '1').status, 1, 'Another blocker is not lifted by a stack');
+  writeIssue({ ...issue('Ready', [open(2, [pr(5)])]), body: 'Wartet bis: 2999-01-01T00:00Z' });
+  assert.equal(run('check', '1').status, 1, '"Wartet bis" is not lifted by a stack');
+
+  // status accepts STACKABLE and still rejects BLOCKED.
+  const assigned = changes => ({ ...issue('Ready', [open(2, [pr(5)])]), assignees: { nodes: [{ login: 'worker' }] }, ...changes });
+  writeIssue(assigned({ blockedBy: { totalCount: 1, nodes: [open(2, [])] } }));
+  assert.notEqual(run('status', '1', 'In progress').status, 0);
+  assert.equal(existsSync(join(checkout, 'mutations')), false);
+  writeIssue(assigned());
+  assert.equal(run('status', '1', 'In progress').status, 0);
+  assert.equal(readFileSync(join(checkout, 'mutations'), 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 1);
+
+  // The upper layer may reach Human review before the base is merged, but only as a layer on that base.
+  const layer = assigned({ projectItems: issue('Automated review').projectItems });
+  writeIssue(layer);
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  writeFileSync(join(checkout, 'stored'), 'Automated review');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
+  const onRelease = run('handoff', '1', '7');
+  assert.equal(onRelease.status, 1, onRelease.stdout);
+  assert.match(onRelease.stdout, /not merged: PR #7 must target its branch claude\/5-base/);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'claude/5-base' })));
+  const handed = run('handoff', '1', '7');
+  assert.equal(handed.status, 0, handed.stdout + handed.stderr);
+  assert.match(handed.stdout, /HANDOFF #1 PR #7/);
+});
+
+test('next lists stackable Ready issues with their base PR apart from blocked ones', t => {
+  const { checkout, run } = fixture(t);
+  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, baseRefName: 'main', headRefName: 'claude/5-base' };
+  const ready = (number, nodes) => ({ ...issue('Ready', nodes), number, issueFieldValues: { nodes: [] } });
+  const open = prs => predecessor('OPEN', null, prs, { repository: { nameWithOwner: 'test/example' } });
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([ready(1, [open([pr])]), ready(2, [open([])]), ready(3, [predecessor('CLOSED', 'COMPLETED')])]));
+  const result = run('next');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const [startable, stackable, held] = result.stdout.split('\n\n');
+  assert.deepEqual(startable.match(/^#\d+/gm), ['#3']);
+  assert.deepEqual(stackable.match(/^#\d+/gm), ['#1']);
+  assert.ok(stackable.includes('base PR #5'), 'The base PR is named');
+  assert.deepEqual(held.match(/^#\d+/gm), ['#2']);
 });
 
 test('"Wartet bis" holds an issue until its tag exists or its UTC time has passed; unreadable values are unknown', t => {

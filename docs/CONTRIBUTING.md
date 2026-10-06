@@ -18,8 +18,9 @@ Ready. Authorization for an issue covers its review fixes; a different issue nee
 its own. Automations and bots never authorize a start.
 
 **Finding work.** `board.mjs next` lists open Ready issues with every native
-predecessor completed, highest Priority first, then the remaining Ready issues with
-their native blockers; both show assignees. It does not check session ownership or
+predecessor completed, highest Priority first, then the Ready issues that are
+[stackable](#stacked-pull-requests) with their base PR, then the remaining Ready issues with
+their native blockers; all show assignees. It does not check session ownership or
 external prerequisites. Check remaining candidates before reporting no available
 work. Then report blockers and propose a Backlog issue with a reason; do not start
 it or change its status without authorization.
@@ -33,8 +34,9 @@ does not replace it.
 | Verdict | Meaning |
 | --- | --- |
 | STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed, every `Wartet bis` condition met. |
-| BLOCKED | An open predecessor, a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, or an unmet `Wartet bis` condition. |
-| UNKNOWN | API error, incomplete dependency data, an inaccessible predecessor, an unset or unknown status, the issue is missing from the Project, or an unreadable `Wartet bis` line. Retry the read; never read it as "no blockers". |
+| STACKABLE | Held only by open native predecessors, all in this repository and all delivered by the same single open, non-Draft PR from a branch of this repository. `check` names it (`stack base: PR #N`); work starts as a [stacked pull request](#stacked-pull-requests) on that PR. Exit code 4, never 0. |
+| BLOCKED | An open predecessor that is not STACKABLE (no open PR, only a Draft PR, a fork PR, several PRs, another repository), a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, or an unmet `Wartet bis` condition. |
+| UNKNOWN | API error, incomplete dependency data (including the PR list of an open predecessor), an inaccessible predecessor, an unset or unknown status, the issue is missing from the Project, or an unreadable `Wartet bis` line. Retry the read; never read it as "no blockers". |
 
 **Claims.** `check ISSUE --session ID` also reads the issue comments of the authenticated login
 (other authors are ignored). A claim carries the line `Agent: claude|codex, Session: ID`; a comment
@@ -46,7 +48,7 @@ comments are UNKNOWN. Assignment stays no lock; this check only reports, and `st
 
 STARTABLE covers native prerequisites, not permission or ownership. Also inspect
 **Abhängigkeiten und Wiederaufnahme** for external access, releases and decisions.
-`status ISSUE "In progress"` repeats this check and requires assignment to the
+`status ISSUE "In progress"` accepts STARTABLE and STACKABLE, repeats this check and requires assignment to the
 authenticated GitHub user before writing; it cannot distinguish sessions sharing
 a login. Failed reads prevent the transition. Automated review also checks
 [PR backlinks](#pr-backlinks); remaining status commands are metadata operations,
@@ -164,6 +166,45 @@ reason and the benefit, with before/after where useful, plus the issue links. Ad
 **Prüfung und Grenzen** only for problems, skipped checks or proof limits. Link the
 evidence in the issue instead of pasting logs or CI status. Delete template hints
 and empty sections.
+
+### Stacked pull requests
+
+Use GitHub's [stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs)
+(public preview) so a dependent issue does not wait for the merge of its predecessor's
+PR. Stack only when `check` says STACKABLE; otherwise the issue stays BLOCKED. Nothing
+obliges you to stack, and humans still merge, the whole stack included, bottom layer first.
+No stacks across forks or repositories and none made of several parallel branches. In
+Economy, a stack is at most two layers deep (base PR plus yours) unless the human decides
+otherwise: every correction below restarts CI and reviews above.
+
+1. **Branch.** Create the issue-linked branch from the head of the base PR's branch (`stack
+   base: … branch B` in the `check` output):
+   `gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base B`. On a base
+   PR into `release/X.Y.Z` the stack's trunk is that release branch; that is allowed.
+2. **PR and stack.** Create your PR as Draft with base `B` (`gh pr create --draft --base B`),
+   then link both PRs: `gh stack link BASE_PR YOUR_PR` (bottom first; extension
+   `gh extension install github/gh-stack`). Without the extension, `gh api -X POST
+   repos/OWNER/REPO/stacks -F 'pull_requests[]=BASE_PR' -F 'pull_requests[]=YOUR_PR'` does the same.
+   Read it back with `gh api "repos/OWNER/REPO/stacks?pull_request=YOUR_PR"`; an empty result is
+   no stack. If `gh stack` or the Stacks API is unavailable or fails (for example exit code 9, not
+   enabled for the repository), there is no stack: keep the PR Draft, record the error in the issue
+   and treat the issue as BLOCKED until `check` says STARTABLE.
+3. **Body and link.** `Closes #N` stays in the PR body. Because the base is not the default branch,
+   also run `board.mjs link ISSUE PR` and read the connection back, as for any
+   [non-default base](#delivery). Post the [backlinks](#pr-backlinks) as usual.
+4. **Force-push.** The one exception to the force-push ban: `git push --force-with-lease=<branch>:<expected SHA> origin <branch>`
+   on your own upper layer. Never push, rebase or force anything else, the base PR's branch
+   included. So don't run `gh stack push`, `sync`, `rebase` or `submit`: they act on every layer,
+   lower ones too. If the lease fails, read the remote again and decide from what changed; never
+   repeat with `--force`.
+5. **Corrections below.** When the lower layer's owner changes the base branch, you rebase only your
+   branch onto the new base head (`git rebase --onto NEW_BASE_HEAD OLD_BASE_HEAD <your branch>`) and
+   push it with the lease. When the base PR is merged, GitHub retargets and rebases your layer itself:
+   fetch, then check the base branch and CI on the new head before anything else. If the base PR is
+   closed without merge, your layer stops: run `check` again and report; don't retarget your PR on your own.
+6. **Handoff.** Your layer may go to Human review before the base PR is merged. `board.mjs handoff`
+   then requires your PR to target the base PR's branch. The handoff comment names the merge order
+   (base PR first, then yours).
 
 ### PR backlinks
 

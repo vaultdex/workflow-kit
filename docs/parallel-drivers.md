@@ -57,7 +57,9 @@ Modellwahl stehen hier nicht.
    dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume) mit
    `Agent: …, Session: …`. Den Issue-Branch zweigt der Driver vom Ziel-Release-Branch
    ab (`--base` im `gh issue develop` der [Delivery](CONTRIBUTING.md#delivery)-Regel
-   ist dann dieser Branch, nicht `main`).
+   ist dann dieser Branch, nicht `main`). Bei STACKABLE ist es der Branch des Basis-PR
+   ([Stacked pull requests](CONTRIBUTING.md#stacked-pull-requests)). Er bleibt ein fremder
+   Branch (Regel 3): der Driver zweigt davon ab und liest ihn, pusht ihn aber nie.
 3. **Fremde Branches in Ruhe lassen.** `codex/*`-Branches und Branches anderer
    Driver nicht anfassen, auch wenn der eigene Branch `codex/*` heißt; nur der eigene
    Issue-Branch gehört dem Driver. Überschneidungen melden.
