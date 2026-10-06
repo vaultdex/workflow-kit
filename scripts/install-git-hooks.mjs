@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { externalTool, projectRoot } from './checkout-root.mjs';
@@ -37,7 +37,12 @@ if (!existingHook) {
   if (!check) writeFileSync(hookFile, hookSource, { flag: 'wx', mode: 0o755 });
   console.log(`post-checkout: ${check ? 'would create' : 'created'} .githooks/post-checkout (kit sync after branch checkout); commit it with: git add --chmod=+x .githooks/post-checkout`);
 } else if (existingHook.isFile() && readFileSync(hookFile, 'utf8').replaceAll('\r\n', '\n') === hookSource) {
-  console.log('post-checkout: .githooks/post-checkout is current');
+  // Git skips a hook without the executable bit; Windows has none to check, there only the index mode counts.
+  const runnable = process.platform === 'win32' || (existingHook.mode & 0o111) !== 0;
+  if (!runnable && !check) chmodSync(hookFile, 0o755);
+  console.log(`post-checkout: .githooks/post-checkout is current${runnable ? '' : check ? ' (would make it executable)' : ' (made executable)'}`);
+  if (out('ls-files', '-s', '--', '.githooks/post-checkout').startsWith('100644'))
+    console.log('post-checkout: tracked without executable bit, so Git skips it elsewhere; run: git update-index --chmod=+x .githooks/post-checkout');
 } else {
   console.log('post-checkout: kept existing .githooks/post-checkout; integrate scripts/git-hooks/post-checkout there by hand');
 }

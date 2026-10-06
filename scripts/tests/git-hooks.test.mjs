@@ -2,7 +2,7 @@
 // Nutzen: Jeder Clone und Worktree nutzt die Hooks seines Branches; fremde Hooks gehen nie verloren.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -177,7 +177,7 @@ function kitFixture(t) {
   sh(repo, 'switch', '-q', 'main');
   sh(repo, 'submodule', '-q', 'update', '--init');
   const rules = join(repo, '.vendor/workflow-kit/AGENT_RULES.md');
-  return { repo, sh, rules, status: () => sh(repo, 'status', '--porcelain').stdout, switchTo: branch => spawnSync('git', ['switch', '-q', branch], { cwd: repo, env, encoding: 'utf8' }) };
+  return { repo, sh, rules, status: () => sh(repo, 'status', '--porcelain').stdout, switchTo: (branch, extra) => spawnSync('git', ['switch', '-q', branch], { cwd: repo, env: { ...env, ...extra }, encoding: 'utf8' }) };
 }
 
 test('switching branches with another kit gitlink leaves no modified submodule', t => {
@@ -241,6 +241,39 @@ test('local commits and ignored files are kept; a clean published kit still foll
   c.sh(kit(c), 'checkout', '-q', 'origin/main');
   assert.equal(c.switchTo('other').status, 0);
   assert.equal(readFileSync(c.rules, 'utf8'), 'rules 2\n');
+});
+
+test('the kit update runs no hooks of the kit clone', t => {
+  const f = kitFixture(t), kitDir = join(f.repo, '.vendor/workflow-kit');
+  const hooks = resolve(kitDir, f.sh(kitDir, 'rev-parse', '--git-path', 'hooks').stdout.trim()), marker = join(f.repo, '../hook-ran');
+  mkdirSync(hooks, { recursive: true });
+  writeFileSync(join(hooks, 'post-checkout'), `#!/bin/sh\ntouch "${marker.replaceAll('\\', '/')}"\n`, { mode: 0o755 });
+  assert.equal(f.switchTo('other').status, 0);
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 2\n', 'the kit was updated');
+  assert.equal(existsSync(marker), false);
+});
+
+test('the kit update asks ssh to stay noninteractive', t => {
+  const f = kitFixture(t), log = join(f.repo, '../ssh-args').replaceAll('\\', '/'), fake = join(f.repo, '../fake-ssh.mjs').replaceAll('\\', '/');
+  writeFileSync(fake, `import { appendFileSync } from 'node:fs';\nappendFileSync('${log}', process.argv.slice(2).join(' ') + '\\n');\nprocess.exit(1);\n`);
+  // No clone and an ssh source: the update must go through ssh, which here only records its arguments.
+  rmSync(join(f.repo, '.vendor/workflow-kit'), { recursive: true, force: true });
+  rmSync(join(f.repo, '.git/modules'), { recursive: true, force: true });
+  mkdirSync(join(f.repo, '.vendor/workflow-kit'));
+  f.sh(f.repo, 'config', 'submodule..vendor/workflow-kit.url', 'ssh://example.invalid/kit');
+  const result = f.switchTo('other', { GIT_SSH_COMMAND: `node "${fake}"` });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(readFileSync(log, 'utf8'), /BatchMode=yes/);
+});
+
+test('an installed hook without the executable bit is repaired', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t), hook = join(f.repo, '.githooks/post-checkout');
+  f.run();
+  chmodSync(hook, 0o644);
+  f.run('--check');
+  assert.equal(statSync(hook).mode & 0o111, 0);
+  f.run();
+  assert.notEqual(statSync(hook).mode & 0o111, 0);
 });
 
 test('an existing, different post-checkout hook of the project is kept', t => {
