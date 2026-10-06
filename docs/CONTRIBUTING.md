@@ -173,6 +173,10 @@ repos/OWNER/REPO/issues/ISSUE/comments`). PR creation is complete only after eve
 backlink is confirmed, including for Draft PRs. Reuse an existing comment pointing
 to the same open PR on resume; after a partial write or an API error, read first
 before retrying. A link in the chat or PR body does not replace the issue comment.
+`board.mjs link ISSUE PR` does both for an issue of this repository: the native
+connection and, if no comment with the PR's URL exists yet, that comment, read back
+afterwards. A second run writes nothing twice. `status` never writes it; its
+refusal names `link` as the remedy.
 
 Before Automated review, run `board.mjs status ISSUE "Automated review" PR
 [OTHER_ISSUE...]` with the PR number and all other issues it delivers in this
