@@ -100,6 +100,20 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   c.run();
   assert.equal(c.value('--local'), '');
 
+  // The same file reached first by a worktree's plain include still counts behind the includeIf.
+  const d = fixture(t), shared = join(d.global, '../shared.gitconfig').replaceAll('\\', '/');
+  writeFileSync(shared, '[core]\n\thooksPath = /release/hooks\n');
+  writeFileSync(d.linkedConfig, `[include]\n\tpath = ${shared}\n`);
+  writeFileSync(d.global, `[includeIf "onbranch:release"]\n\tpath = ${shared}\n`);
+  d.run();
+  assert.equal(d.value('--local'), '');
+
+  // An include target this script cannot resolve like Git (~user/) blocks changes.
+  const u = fixture(t);
+  writeFileSync(u.global, '[includeIf "onbranch:release"]\n\tpath = ~someone/hooks.gitconfig\n');
+  u.run();
+  assert.equal(u.value('--local'), '');
+
   const none = fixture(t, { hooks: false });
   none.run();
   assert.equal(none.value('--local'), '');
