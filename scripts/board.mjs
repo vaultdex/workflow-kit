@@ -302,6 +302,7 @@ function setField() {
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
   number state isDraft createdAt headRefName headRefOid mergeStateStatus reviewDecision
   readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
+  firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
@@ -406,10 +407,27 @@ function sonarIssues(detailsUrl, prNumber) {
   return total;
 }
 
-/** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
-function headSetAt(pr) {
+function pushLog(pr) {
   const log = rest(`repos/${project.repository}/activity?ref=${encodeURIComponent(`refs/heads/${pr.headRefName}`)}&per_page=100`);
   assert.ok(Array.isArray(log), 'Push log is unreadable');
+  return log;
+}
+
+/** Distinct heads pushed after the PR first became ready; the head that set Ready is no correction, a force-push counts as one push. Null while there was no Ready.
+ * ponytail: the log is the newest 100 pushes and a PR opened ready that was converted to Draft and readied again counts from its second Ready; replace when the timeline lists pushes. */
+function correctionPushes(pr, pushes) {
+  const first = pr.firstReadyEvents?.nodes?.[0]?.createdAt ?? (pr.isDraft ? undefined : pr.createdAt);
+  if (!first) return null;
+  const since = Date.parse(first);
+  assert.ok(Number.isFinite(since), 'The first Ready time is unreadable');
+  const log = pushes().filter(entry => !/^0+$/.test(entry.after));
+  // The head that set Ready is the latest push up to the Ready event; pushing back to it later is no new head.
+  const atReady = log.filter(entry => Date.parse(entry.timestamp) <= since).sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0]?.after;
+  return new Set(log.filter(entry => Date.parse(entry.timestamp) > since && entry.after !== atReady).map(entry => entry.after)).size;
+}
+
+/** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
+function headSetAt(pr, log = pushLog(pr)) {
   // The same commit can be pushed twice (X, Y, X again); the latest push counts, whatever the order.
   const pushes = log.filter(entry => entry.after === pr.headRefOid);
   assert.ok(pushes.length, 'Push time of the head is not readable; retry the read');
@@ -432,6 +450,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const suites = commit.checkSuites.nodes.map(suite => Date.parse(suite.createdAt));
   const pushed = suites.length ? Math.min(...suites) : Date.parse(commit.committedDate);
   const after = time => Date.parse(time) >= pushed;
+  let log;
+  const pushes = () => log ??= pushLog(pr);
   const stalled = since => now - since > stallMinutes * 60_000; // false for Infinity
   const waiting = [];
   let failed = false;
@@ -493,6 +513,18 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
       failed = true;
       lines.push(`check suite ${suite.app.slug}: ${suite.conclusion}`);
     }
+  }
+  // The review loop stops pushing after two corrections (docs/CONTRIBUTING.md#review-loop); nothing enforces it, so say where the PR stands.
+  // It is read before the red verdict, because a red head is when the next correction is weighed.
+  try {
+    const corrections = correctionPushes(pr, pushes);
+    if (corrections !== null) {
+      lines.push(`correction pushes after ready: ${corrections}`);
+      if (corrections >= 2) lines.push('cap reached: collect non-blocking findings in one follow-up issue');
+    }
+  } catch (error) {
+    // The count is information only: an unreadable one never changes the verdict (neither red into ERROR nor green into ERROR).
+    lines.push(`note: correction pushes unreadable (${error.message})`);
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
@@ -593,7 +625,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // pushed, whichever is later, a missing trace is no answer yet.
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
   if (!pr.isDraft && graceMinutes > 0) {
-    const graceFrom = Math.max(readyAt, pushed, headSetAt(pr));
+    const graceFrom = Math.max(readyAt, pushed, headSetAt(pr, pushes()));
     if (now - graceFrom < graceMinutes * 60_000) {
       waiting.push({ text: `reviewers may still start until ${new Date(graceFrom + graceMinutes * 60_000).toISOString()}`, since: Infinity });
     }
