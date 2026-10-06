@@ -399,27 +399,6 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   const decisiveRun = check => newestExecuted.get(jobKey(check)) ?? newestSkipped.get(jobKey(check));
   const current = contexts.nodes.filter(check => !orderable(check) || runOf(check) === decisiveRun(check));
-  // A pull_request run skipped while the PR was still Draft (the usual `!draft` job guard) executed nothing, so it says
-  // nothing about the Ready head. Ready normally starts a fresh run; until the workflow has an executed run created after
-  // Ready, its path is missing, not green. An executed Draft run does not exempt the workflow (an unguarded job next to a
-  // guarded one); a skip after Ready is a real optional skip. GitHub's required flag is no basis: it is false on
-  // release branches for checks the project demands. A run triggered by converting to Draft can land just after a quick
-  // Ready, so that window counts as Draft too.
-  // ponytail: 10 s window for run creation lag after a Draft conversion; replace when the run's trigger action is readable.
-  const readyEvent = Date.parse(pr.readyEvents?.nodes?.[0]?.createdAt);
-  assert.ok(!pr.readyEvents?.nodes?.length || Number.isFinite(readyEvent), 'The Ready event time is unreadable');
-  const readyBoundary = Math.max(readyEvent, (Date.parse(pr.convertEvents?.nodes?.[0]?.createdAt) || -Infinity) + 10_000);
-  const startedAt = check => Date.parse(check.checkSuite?.createdAt);
-  const flowOf = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id]);
-  const executedFlows = new Set(contexts.nodes.filter(check => orderable(check) && check.conclusion !== 'SKIPPED' && startedAt(check) >= readyBoundary).map(flowOf));
-  const draftSkip = check => {
-    if (pr.isDraft || !Number.isFinite(readyEvent) || check.conclusion !== 'SKIPPED' || !check.checkSuite?.workflowRun) return false;
-    const { event } = check.checkSuite.workflowRun;
-    assert.equal(typeof event, 'string', `The event of skipped check ${check.name} is unreadable`);
-    if (!['pull_request', 'pull_request_target'].includes(event)) return false;
-    assert.ok(Number.isFinite(startedAt(check)), `The run of skipped check ${check.name} has no readable start time`);
-    return startedAt(check) < readyBoundary && !executedFlows.has(flowOf(check));
-  };
   for (const check of current.filter(check => orderable(check) && newestSkipped.get(jobKey(check)) > runOf(check))) {
     lines.push(`note: ${check.name} was SKIPPED in a newer run, which proves nothing; run ${runOf(check)} decides`);
   }
@@ -429,7 +408,6 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // CI never stalls: a running check is not success however long it takes.
     if (pending) { waiting.push({ text: `check ${label}`, since: Infinity }); continue; }
     const result = check.conclusion ?? check.state;
-    if (draftSkip(check)) waiting.push({ text: `check ${label} was skipped while Draft; no run since Ready`, since: Infinity });
     if (!passed.has(result)) failed = true;
     // Descriptions carry results such as "Review rate limited" behind a green state.
     lines.push(`check ${label}: ${result}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);
@@ -462,6 +440,36 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
+  // A pull_request run skipped while the PR was still Draft (the usual `!draft` job guard) executed nothing, so it says
+  // nothing about the Ready head. Ready normally starts a fresh run; until the workflow has an executed run created after
+  // Ready, its path is missing, not green. An executed Draft run does not exempt the workflow (an unguarded job next to a
+  // guarded one); a skip after Ready is a real optional skip. GitHub's required flag is no basis: it is false on
+  // release branches for checks the project demands. A run triggered by converting to Draft can land just after a quick
+  // Ready, so that window counts as Draft too.
+  // ponytail: 10 s window for run creation lag after a Draft conversion; replace when the run's trigger action is readable.
+  // It is judged over every run of the head, not only each job's decisive one: an executed push run of the same job from
+  // before Ready must not hide the Draft skip. Only a run since Ready covers it: any run of the job, or an executed run of
+  // the workflow.
+  const readyEvent = Date.parse(pr.readyEvents?.nodes?.[0]?.createdAt);
+  assert.ok(!pr.readyEvents?.nodes?.length || Number.isFinite(readyEvent), 'The Ready event time is unreadable');
+  const convertEvent = Date.parse(pr.convertEvents?.nodes?.[0]?.createdAt);
+  assert.ok(!pr.convertEvents?.nodes?.length || Number.isFinite(convertEvent), 'The Draft conversion time is unreadable');
+  const readyBoundary = Math.max(readyEvent, (Number.isFinite(convertEvent) ? convertEvent : -Infinity) + 10_000);
+  const runs = contexts.nodes.filter(orderable);
+  const startedAt = check => Date.parse(check.checkSuite?.createdAt);
+  const flowOf = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id]);
+  const sinceReady = check => startedAt(check) >= readyBoundary;
+  const readyFlows = new Set(runs.filter(check => check.conclusion !== 'SKIPPED' && sinceReady(check)).map(flowOf));
+  const readyJobs = new Set(runs.filter(sinceReady).map(jobKey));
+  const draftSkipped = new Set();
+  for (const check of runs.filter(check => !pr.isDraft && Number.isFinite(readyEvent) && check.conclusion === 'SKIPPED' && check.checkSuite.workflowRun && !sinceReady(check))) {
+    const { event } = check.checkSuite.workflowRun;
+    assert.equal(typeof event, 'string', `The event of skipped check ${check.name} is unreadable`);
+    if (!['pull_request', 'pull_request_target'].includes(event)) continue;
+    assert.ok(runs.filter(run => flowOf(run) === flowOf(check)).every(run => Number.isFinite(startedAt(run))), `A run of the workflow of skipped check ${check.name} has no readable start time`);
+    if (!readyFlows.has(flowOf(check)) && !readyJobs.has(jobKey(check))) draftSkipped.add(check.name);
+  }
+  for (const label of draftSkipped) waiting.push({ text: `check ${label} was skipped while Draft; no run since Ready`, since: Infinity });
   // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final; a skipped check ran no analysis.
   for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
     const open = sonarIssues(check.detailsUrl, pr.number);
