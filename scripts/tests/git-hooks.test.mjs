@@ -133,3 +133,11 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   none.run();
   assert.equal(none.value('--local'), '');
 });
+
+test('an own worktree path with a newline is still migrated', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t), odd = join(f.linked, '../line\nbreak');
+  f.git('worktree', 'add', '-q', '--detach', odd);
+  f.git('config', '--local', 'core.hooksPath', join(odd, '.githooks'));
+  f.run();
+  assert.equal(f.value('--local'), '.githooks');
+});
