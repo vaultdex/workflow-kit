@@ -763,7 +763,8 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
-  || (command === 'check' && process.argv.includes('--session') && !/^[\w.-]+$/.test(sessionOption() ?? ''))
+  // A misspelled flag must not silently turn the session check off.
+  || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^[\w.-]+$/.test(process.argv[5])))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
