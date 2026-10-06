@@ -380,9 +380,11 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
   writeFileSync(join(checkout, 'tags-2026.json'), JSON.stringify([{ ref: 'refs/tags/release/2026' }])); // Der Mock benennt die Datei nach den Pfadteilen -3 und -1.
   assert.equal(check('Wartet bis: release/2026').status, 0, 'Tags need not look like versions');
   assert.equal(check('Wartet bis: release/2027').status, 1);
+  writeFileSync(join(checkout, 'matching-refs-release%402026.json'), JSON.stringify([{ ref: 'refs/tags/release@2026' }]));
+  assert.equal(check('Wartet bis: release@2026').status, 0, 'Any tag Git accepts is looked up, URL-encoded');
   writeIssue({ ...issue(), body: '### Abhängigkeiten und Wiederaufnahme\n\n#### Release\n\nWartet bis: 2999-01-01T00:00Z\n' });
   assert.equal(run('check', '1').status, 1, 'A nested heading stays inside the section');
-  for (const invalid of ['Wartet bis: bald nach dem Release','Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
+  for (const invalid of ['Wartet bis: bald nach dem Release', 'Wartet bis: release.', 'Wartet bis: foo.lock', 'Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
     assert.equal(check(invalid).status, 2, `${invalid} is unknown, never "no blocker"`);
   }
   writeFileSync(join(checkout, 'fail-rest'), '');

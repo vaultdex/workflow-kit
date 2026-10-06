@@ -43,6 +43,10 @@ function predecessorReasons({ totalCount, nodes }) {
   return { blocked, unknown };
 }
 
+/** Git's Regeln für Ref-Namen (git check-ref-format): jeder gültige Tag wird nachgeschlagen, kein ungültiger. */
+const validTagName = tag => tag !== '' && !/[\p{Cc} ~^:?*[\\]|\.\.|@\{|\/\/|^\/|\/$|\.$/u.test(tag)
+  && tag.split('/').every(part => !part.startsWith('.') && !part.endsWith('.lock'));
+
 /**
  * Zeilen `Wartet bis: <Tag | JJJJ-MM-TTThh:mmZ>` im Abschnitt "Abhängigkeiten und Wiederaufnahme": ein fehlender Tag oder
  * ein künftiger UTC-Zeitpunkt hält das Issue wie ein nativer Blocker; was nicht lesbar ist, zählt als unbekannt, nie als frei.
@@ -63,10 +67,10 @@ function waitReasons(body) {
       // Ein Datum wie 2026-02-30 rollt über; nur der unveränderte Wert zählt.
       if (!Number.isFinite(at) || `${new Date(at).toISOString().slice(0, 16)}Z` !== wanted) unknown.push(`invalid "Wartet bis: ${wanted}": no such UTC time`);
       else if (Date.now() < at) blocked.push(`waits until ${wanted} (UTC)`);
-    } else if (/^(?!.*\.\.)[\w+-][\w.+-]*(?:\/[\w+-][\w.+-]*)*$/.test(wanted)) { // Tagname wie in Git, auch release/2026
+    } else if (validTagName(wanted)) {
       try {
         // matching-refs liefert Präfix-Treffer (v0.1.1 findet v0.1.10); nur der genaue Tag zählt.
-        const tags = rest(`repos/${project.repository}/git/matching-refs/tags/${wanted}`);
+        const tags = rest(`repos/${project.repository}/git/matching-refs/tags/${wanted.split('/').map(encodeURIComponent).join('/')}`);
         if (!tags.some(tag => tag.ref === `refs/tags/${wanted}`)) blocked.push(`waits for tag ${wanted} (not found)`);
       } catch (error) {
         unknown.push(`cannot read tag ${wanted}: ${String(error.stderr || error.message).trim()}`);
