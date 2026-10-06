@@ -108,7 +108,8 @@ Run [board commands](README.md#board-commands) in the project with authenticated
   two correction pushes, stop patching and re-examine the whole area's states, data
   flow and assumptions.
 - Before the first push of a rule, policy or state machine, list its cases (missing,
-  stale, partial and unrelated input) and settle open ones with the human.
+  stale, partial and unrelated input) and settle open ones with the human; the
+  written list belongs in the PR ([review loop](docs/CONTRIBUTING.md#review-loop), step 1).
 - Use the first sufficient option: skip speculative work, reuse repository code,
   standard library/platform, installed dependency, then minimal new code. Check
   pinned-version docs before reimplementing; delete obsolete code and abstractions.
