@@ -38,11 +38,11 @@ does not replace it.
 
 **Claims.** `check ISSUE --session ID` also reads the issue comments of the authenticated login
 (other authors are ignored). A claim carries the line `Agent: claude|codex, Session: ID`; a comment
-with the line `Handover: ID` (from the earlier session or the human handing over) passes the claim to
+with the line `Handover: ID` (from the earlier session or the human handing over, under the same login) passes the claim to
 that session. The newest claim or handover decides, the later comment wins on equal times. If it names
 another session than `--session`, `check` reports BLOCKED with agent, session, time and comment link.
 Without `--session`, or when the newest claim is an old one that lacks the field (no known session), `check` only shows a note. Unreadable
-comments are UNKNOWN. Assignment stays no lock; this check only reports.
+comments are UNKNOWN. Assignment stays no lock; this check only reports, and `status` and `handoff` do not read claims.
 
 STARTABLE covers native prerequisites, not permission or ownership. Also inspect
 **Abhängigkeiten und Wiederaufnahme** for external access, releases and decisions.

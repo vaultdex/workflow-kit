@@ -44,8 +44,8 @@ function predecessorReasons({ totalCount, nodes }) {
 }
 
 // Claim comments of the own login carry "Agent: claude|codex, Session: ID"; "Handover: ID" passes the claim to that session.
-const claimField = /^Agent:\s*(claude|codex)\s*,\s*Session:\s*([\w.-]+)\s*$/im;
-const handoverField = /^Handover:\s*([\w.-]+)\s*$/im;
+const claimField = /^Agent:[ \t]*(claude|codex)[ \t]*,[ \t]*Session:[ \t]*(\w[\w.-]*)(?![\w.-])/im;
+const handoverField = /^Handover:[ \t]*(\w[\w.-]*)[ \t]*$/im;
 // ponytail: sessions are told apart by the id the driver passes, not authenticated; Claude and Codex share one login.
 /** Blocks when the newest claim or handover of the own login belongs to another session; claims without the field only note. */
 function claimReasons(issue, session) {
@@ -56,8 +56,10 @@ function claimReasons(issue, session) {
   for (const comment of restAll(`repos/${project.repository}/issues/${issue.number}/comments`)) {
     if (comment.user?.login?.toLowerCase() !== viewer.login.toLowerCase()) continue;
     const body = comment.body ?? '', claim = claimField.exec(body), handover = handoverField.exec(body);
-    if (handover || claim) [holder, legacy] = [{ agent: claim?.[1], session: handover?.[1] ?? claim[2], comment }, undefined];
-    else if (/^Claim:/m.test(body)) [holder, legacy] = [undefined, comment];
+    if (handover) [holder, legacy] = [{ session: handover[1], comment }, undefined];
+    else if (claim) [holder, legacy] = [{ agent: claim[1], session: claim[2], comment }, undefined];
+    // A claim without the field names no session: it never lifts a known holder, it is only shown.
+    else if (/^Claim:/m.test(body)) legacy = comment;
   }
   const notes = [], blocked = [];
   const about = ({ agent, session: id, comment }) => `${agent ? `Agent ${agent}, ` : ''}Session ${id}, ${comment.created_at}, ${comment.html_url}`;
@@ -775,7 +777,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   // A misspelled flag must not silently turn the session check off.
-  || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^[\w.-]+$/.test(process.argv[5])))
+  || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^\w[\w.-]*$/.test(process.argv[5])))
   || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))

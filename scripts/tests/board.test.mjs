@@ -1044,7 +1044,10 @@ test('board check blocks a newer claim of another session of the same login unle
   const old = check([comment('Claim: Driver, Branch x')], '--session', 'S2');
   assert.equal(old.status, 0, old.stdout);
   assert.match(old.stdout, /note: claim without Agent\/Session field/);
-  assert.equal(check([claim('claude', 'S1'), comment('Claim: Driver, Branch x')], '--session', 'S2').status, 0, 'a newer claim without the field is unknown, not the old holder');
+  const stray = check([claim('claude', 'S1'), comment('Claim: released')], '--session', 'S2');
+  assert.equal(stray.status, 1, 'a newer claim without the field never lifts a known holder');
+  assert.match(stray.stdout, /note: claim without Agent\/Session field/);
+  assert.equal(check([comment('Agent: codex, Session: S1, Branch: x')], '--session', 'S2').status, 1, 'text after the session id is allowed');
   assert.equal(check([comment('Agent: reviewer, Session: S1')], '--session', 'S2').status, 0, 'only claude and codex name a claim');
   assert.equal(check([claim('claude', 'S1')], '--sesion', 'S2').status, 2, 'a misspelled flag is a usage error, not a silent skip');
   const unnamed = check([claim('claude', 'S1')]);
