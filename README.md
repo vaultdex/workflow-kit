@@ -89,6 +89,21 @@ a SessionStart install hint. Files and manual runs don't prove agent loading or
 trust; new definitions need personal review and trust. See
 [Ponytail](docs/ponytail.md) and [Impeccable](docs/impeccable.md) for hook behavior.
 
+### Git hooks
+
+A project's versioned Git hooks in `.githooks/` run only after each clone sets
+`core.hooksPath`; Git never does this on checkout. Run per clone, for example from the
+project's setup script:
+
+```sh
+node .vendor/workflow-kit/scripts/install-git-hooks.mjs          # --check only reports
+```
+
+It sets the relative `.githooks`, so every worktree runs the hooks of its own branch.
+Absolute paths into this repository's worktrees and matching `config.worktree`
+overrides become that relative path. A foreign path (local, global or system) stays
+and is reported: integrate `.githooks` there yourself. Without `.githooks/` it does nothing.
+
 ## Board commands
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:

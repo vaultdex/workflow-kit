@@ -99,6 +99,7 @@ require UI configuration:
 ## 4. Agents and hooks
 
 Use [Hooks](README.md#hooks) for the chosen agents; personal trust remains required.
+Projects with `.githooks/` call [install-git-hooks.mjs](README.md#git-hooks) from their setup.
 Report each integration as enabled, untrusted or unavailable.
 
 ## 5. Deliver
