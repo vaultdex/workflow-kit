@@ -36,7 +36,8 @@ const fold = path => {
   try { canonical = realpathSync.native(canonical); } catch { /* missing or inaccessible: keep as written */ }
   return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
 };
-const tops = out('worktree', 'list', '--porcelain').split(/\r?\n/)
+// -z: NUL-separated attributes, so worktree paths may contain newlines.
+const tops = out('worktree', 'list', '--porcelain', '-z').split('\0')
   .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
 const ours = new Set(tops.map(top => fold(join(top, '.githooks'))));
 // Git resolves a relative hooks path in whichever worktree runs the hook, so only .githooks itself is
