@@ -494,13 +494,13 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     assert.ok(requested.length || pr.requestEvents.nodes.length === pr.requestEvents.totalCount, 'Review request history is incomplete');
     waiting.push({ text: `review requested from ${reviewerName(reviewer) ?? 'an unreadable reviewer'}`, since: Math.max(pushed, ...requested) });
   }
-  // Bots that start on "ready for review" (Codex) leave their first trace a minute or two later, often after
-  // CI is green. Until the grace has passed since the PR became ready, a missing trace is no answer yet.
-  // No push boundary: suite times can follow "opened"/"ready" and commit dates are client clocks, while an
-  // older Ready ends by time anyway; at worst a push right after Ready waits the grace once more.
+  // Bots that start on "ready for review" (Codex) or on new commits leave their first trace a minute or two
+  // later, often after CI is green. Until the grace has passed since the PR became ready or the head was
+  // pushed, whichever is later, a missing trace is no answer yet.
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
-  if (!pr.isDraft && graceMinutes > 0 && now - readyAt < graceMinutes * 60_000) {
-    waiting.push({ text: `reviewers may still start until ${new Date(readyAt + graceMinutes * 60_000).toISOString()}`, since: Infinity });
+  const graceFrom = Math.max(readyAt, pushed);
+  if (!pr.isDraft && graceMinutes > 0 && now - graceFrom < graceMinutes * 60_000) {
+    waiting.push({ text: `reviewers may still start until ${new Date(graceFrom + graceMinutes * 60_000).toISOString()}`, since: Infinity });
   }
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
