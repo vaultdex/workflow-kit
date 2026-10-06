@@ -446,7 +446,10 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // guarded one); a skip after Ready is a real optional skip. GitHub's required flag is no basis: it is false on
   // release branches for checks the project demands. A run triggered by converting to Draft can land just after a quick
   // Ready, so that window counts as Draft too.
-  // ponytail: 10 s window for run creation lag after a Draft conversion; replace when the run's trigger action is readable.
+  // Only the latest Draft period counts: a skip from before the latest conversion belongs to an earlier period (a PR opened
+  // Ready) and is no Draft skip.
+  // ponytail: 10 s window for run creation lag after a Draft conversion, and a Draft skip of an earlier period stays unseen
+  // unless the latest period created a run too; replace both when the run's trigger action and the Draft history are readable.
   // It is judged over every run of the head, not only each job's decisive one: an executed push run of the same job from
   // before Ready must not hide the Draft skip. Only a run since Ready covers it: any run of the job, or an executed run of
   // the workflow.
@@ -462,7 +465,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const readyFlows = new Set(runs.filter(check => check.conclusion !== 'SKIPPED' && sinceReady(check)).map(flowOf));
   const readyJobs = new Set(runs.filter(sinceReady).map(jobKey));
   const draftSkipped = new Set();
-  for (const check of runs.filter(check => !pr.isDraft && Number.isFinite(readyEvent) && check.conclusion === 'SKIPPED' && check.checkSuite.workflowRun && !sinceReady(check))) {
+  for (const check of runs.filter(check => !pr.isDraft && Number.isFinite(readyEvent) && check.conclusion === 'SKIPPED' && check.checkSuite.workflowRun && !sinceReady(check)
+    && !(startedAt(check) < convertEvent))) {
     const { event } = check.checkSuite.workflowRun;
     assert.equal(typeof event, 'string', `The event of skipped check ${check.name} is unreadable`);
     if (!['pull_request', 'pull_request_target'].includes(event)) continue;
