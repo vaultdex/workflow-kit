@@ -665,17 +665,25 @@ function link() {
  * done nor moved to a follow-up. Fenced code blocks are examples, not acceptance.
  */
 function openAcceptance(body) {
-  const open = [];
-  let fence;
-  for (const line of String(body ?? '').split(/\r?\n/)) {
-    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+  const open = [], item = /^(?:[-*+]|\d+[.)])\s/;
+  let fence, inList = false;
+  for (const raw of String(body ?? '').split(/\r?\n/)) {
+    const line = raw.replaceAll('\t', '    '), text = line.trim(), indent = line.length - line.trimStart().length;
+    if (!text) continue;
+    // Only the bare marker closes a fence, at least as long as the opening one.
     if (fence) {
-      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = undefined;
-    } else if (mark) {
-      fence = mark;
-    } else if (/^\s*(?:[-*+]|\d+[.)])\s+\[ \]/.test(line) && !/(?<![\w&])(?:[\w.-]+\/[\w.-]+)?#\d+/.test(line)) {
-      open.push(line.trim());
+      if (/^(`{3,}|~{3,})$/.test(text) && text[0] === fence[0] && text.length >= fence.length) fence = undefined;
+      continue;
     }
+    // Four spaces make an indented code block, unless the line continues a list item (nested list).
+    if (indent >= 4 && !inList) continue;
+    const mark = /^(`{3,})[^`]*$|^(~{3,})/.exec(text);
+    if (mark) {
+      fence = mark[1] ?? mark[2];
+      continue;
+    }
+    if (indent < 4) inList = item.test(text);
+    if (/^(?:[-*+]|\d+[.)])\s+\[ \](?:\s|$)/.test(text) && !/(?<![\w&])(?:[\w.-]+\/[\w.-]+)?#\d+(?!\w)/.test(text)) open.push(text);
   }
   return open;
 }
