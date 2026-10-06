@@ -616,6 +616,12 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(readied(30, {}, 5)), 3, 'Green CI on a reused commit just pushed to a ready PR still waits for reviewers');
   pushedToBranch(5);
   assert.equal(reviews(readied(30, {}, 5)), 0, 'Precondition: a reused commit pushed before the grace is done');
+  // The same commit pushed twice: the latest push counts, in either order.
+  const older = { after: 'abcdef1234', timestamp: minutesAgo(10) }, newer = { after: 'abcdef1234', timestamp: minutesAgo(0.5) };
+  for (const log of [[older, newer], [newer, older]]) {
+    writeFileSync(join(checkout, 'activity.json'), JSON.stringify(log));
+    assert.equal(reviews(readied(30, {}, 5)), 3, 'The latest push of a repeated commit starts the grace');
+  }
   writeFileSync(join(checkout, 'activity.json'), '[]');
   assert.equal(reviews(readied(30, {}, 5)), 2, 'An unreadable push time never reads as done');
   rmSync(join(checkout, 'activity.json'));

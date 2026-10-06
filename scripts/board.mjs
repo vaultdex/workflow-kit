@@ -364,9 +364,11 @@ function sonarIssues(detailsUrl, prNumber) {
 /** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
 function headSetAt(pr) {
   const log = rest(`repos/${project.repository}/activity?ref=${encodeURIComponent(`refs/heads/${pr.headRefName}`)}&per_page=100`);
-  const push = log.find(entry => entry.after === pr.headRefOid);
-  assert.ok(push, 'Push time of the head is not readable; retry the read');
-  const time = Date.parse(push.timestamp);
+  assert.ok(Array.isArray(log), 'Push log is unreadable');
+  // The same commit can be pushed twice (X, Y, X again); the latest push counts, whatever the order.
+  const pushes = log.filter(entry => entry.after === pr.headRefOid);
+  assert.ok(pushes.length, 'Push time of the head is not readable; retry the read');
+  const time = Math.max(...pushes.map(entry => Date.parse(entry.timestamp)));
   assert.ok(Number.isFinite(time), 'Push time of the head is unreadable');
   return time;
 }
