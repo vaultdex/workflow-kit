@@ -639,16 +639,25 @@ test('reviews waits only for traces on the current head and never reads failures
     writeFileSync(join(checkout, 'activity.json'), JSON.stringify(pushes.map(([after, minutes]) => ({ after, timestamp: minutesAgo(minutes) }))));
     return look({ ...readied(30, {}, 5), firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] }, ...changes }).stdout;
   };
-  const cap = /^cap reached: collect non-blocking findings in one follow-up issue$/m;
+  // Only the number and the presence of the cap notice are checked, not the wording around them.
+  const count = output => output.match(/correction pushes after ready: (\d+)/)?.[1];
+  const cap = /cap reached/;
   const twoPushes = corrections([['abcdef1234', 5], ['bbbbbbb', 15], ['aaaaaaa', 25]]);
-  assert.match(twoPushes, /^correction pushes after ready: 2$/m);
+  assert.equal(count(twoPushes), '2');
   assert.match(twoPushes, cap);
   const onePush = corrections([['abcdef1234', 15], ['aaaaaaa', 25]]);
-  assert.match(onePush, /^correction pushes after ready: 1$/m);
+  assert.equal(count(onePush), '1');
   assert.doesNotMatch(onePush, cap);
   assert.doesNotMatch(corrections([['abcdef1234', 5], ['abcdef1234', 10], ['aaaaaaa', 25]]), cap, 'A repeated head is one push');
-  assert.match(corrections([['abcdef1234', 25]]), /^correction pushes after ready: 0$/m);
-  assert.doesNotMatch(look({ ...pr(), firstReadyEvents: { nodes: [] } }).stdout, /correction pushes/, 'A PR that never was ready has no count');
+  assert.equal(count(corrections([['abcdef1234', 25]])), '0');
+  assert.equal(count(look({ ...pr(), firstReadyEvents: { nodes: [] } }).stdout), undefined, 'A PR that never was ready has no count');
+  // A red head still reports the count, and an unreadable push log never turns the red verdict into ERROR.
+  const red = { commits: pr({ pushed: 5, contexts: [check('COMPLETED', 'FAILURE')] }).commits };
+  const redPushes = [['abcdef1234', 5], ['bbbbbbb', 15], ['aaaaaaa', 25]];
+  assert.equal(count(corrections(redPushes, red)), '2', 'A red head reports the count too');
+  assert.equal(look({ ...readied(30, {}, 5), ...red, firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] } }).status, 1);
+  writeFileSync(join(checkout, 'activity.json'), 'unreadable');
+  assert.equal(look({ ...readied(30, {}, 5), ...red, firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] } }).status, 1, 'An unreadable push log keeps the red verdict');
   rmSync(join(checkout, 'activity.json'));
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'Red CI ends the wait as FAILED, never DONE');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'SKIPPED')] })), 0);

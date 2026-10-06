@@ -403,6 +403,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const suites = commit.checkSuites.nodes.map(suite => Date.parse(suite.createdAt));
   const pushed = suites.length ? Math.min(...suites) : Date.parse(commit.committedDate);
   const after = time => Date.parse(time) >= pushed;
+  let log;
+  const pushes = () => log ??= pushLog(pr);
   const stalled = since => now - since > stallMinutes * 60_000; // false for Infinity
   const waiting = [];
   let failed = false;
@@ -464,6 +466,19 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
       failed = true;
       lines.push(`check suite ${suite.app.slug}: ${suite.conclusion}`);
     }
+  }
+  // The review loop stops pushing after two corrections (docs/CONTRIBUTING.md#review-loop); nothing enforces it, so say where the PR stands.
+  // It is read before the red verdict, because a red head is when the next correction is weighed.
+  try {
+    const corrections = correctionPushes(pr, pushes);
+    if (corrections !== null) {
+      lines.push(`correction pushes after ready: ${corrections}`);
+      if (corrections >= 2) lines.push('cap reached: collect non-blocking findings in one follow-up issue');
+    }
+  } catch (error) {
+    // A known CI failure is the verdict; an unreadable count must not turn it into ERROR (the count is information only).
+    if (!failed) throw error;
+    lines.push(`note: correction pushes unreadable (${error.message})`);
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
@@ -562,8 +577,6 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // Bots that start on "ready for review" (Codex) or on new commits leave their first trace a minute or two
   // later, often after CI is green. Until the grace has passed since the PR became ready or the head was
   // pushed, whichever is later, a missing trace is no answer yet.
-  let log;
-  const pushes = () => log ??= pushLog(pr);
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
   if (!pr.isDraft && graceMinutes > 0) {
     const graceFrom = Math.max(readyAt, pushed, headSetAt(pr, pushes()));
@@ -576,12 +589,6 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const comment of inline.filter(comment => after(comment.updated_at))) lines.push(`inline ${login(comment.user)} ${comment.html_url}`);
   const threads = unresolvedThreads(pr.number);
   lines.push(`unresolved threads: ${threads.length}`, ...threads.map(link => `thread ${link}`));
-  // The review loop stops pushing after two corrections (docs/CONTRIBUTING.md#review-loop); nothing enforces it, so say where the PR stands.
-  const corrections = correctionPushes(pr, pushes);
-  if (corrections !== null) {
-    lines.push(`correction pushes after ready: ${corrections}`);
-    if (corrections >= 2) lines.push('cap reached: collect non-blocking findings in one follow-up issue');
-  }
   // Mergeable is not merge-ready: a standing change request, a ruleset or conflicts still block the human.
   lines.push(`merge: ${pr.mergeStateStatus}, review decision: ${pr.reviewDecision ?? 'none'}`);
   assert.equal(pr.latestOpinionatedReviews.nodes.length, pr.latestOpinionatedReviews.totalCount, 'Not every review decision is readable');
