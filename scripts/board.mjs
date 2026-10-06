@@ -458,7 +458,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // No push boundary: suite times can follow "opened"/"ready" and commit dates are client clocks, while an
   // older Ready ends by time anyway; at worst a push right after Ready waits the grace once more.
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
-  if (!pr.isDraft && now - readyAt < graceMinutes * 60_000) {
+  if (!pr.isDraft && graceMinutes > 0 && now - readyAt < graceMinutes * 60_000) {
     waiting.push({ text: `reviewers may still start until ${new Date(readyAt + graceMinutes * 60_000).toISOString()}`, since: Infinity });
   }
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
