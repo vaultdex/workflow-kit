@@ -54,17 +54,19 @@ const validTagName = tag => tag !== '' && !/[\p{Cc} ~^:?*[\\]|\.\.|@\{|\/\/|^\/|
 function waitReasons(body) {
   const blocked = [], unknown = [], values = [];
   // Untergliederungen gehören zum Abschnitt: er endet erst an einer Überschrift gleicher oder höherer Ebene.
-  // Zeilen in Code-Blöcken sind weder Überschrift noch Bedingung.
+  // Code-Blöcke (Zaun oder ab vier Leerzeichen Einrückung) und HTML-Kommentare enthalten weder Überschrift noch Bedingung.
   // ponytail: ein Zaun schaltet um, ohne Zeichen und Länge des öffnenden zu vergleichen; ersetzen, wenn verschachtelte Zäune vorkommen.
-  let level = 0, fenced = false;
+  let level = 0, fenced = false, commented = false;
   for (const line of String(body ?? '').split(/\r?\n/)) {
     if (/^ {0,3}(`{3,}|~{3,})/.test(line)) { fenced = !fenced; continue; }
     if (fenced) continue;
+    if (commented) { commented = !line.includes('-->'); continue; }
+    if (/^ {0,3}<!--/.test(line) && !line.includes('-->')) { commented = true; continue; }
     const heading = /^ {0,3}(#{1,6})\s+(.*?)\s*$/.exec(line);
     if (heading?.[2] === 'Abhängigkeiten und Wiederaufnahme') level = heading[1].length;
     else if (heading && heading[1].length <= level) level = 0;
     else if (level) {
-      const value = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line)?.[1].trim();
+      const value = /^ {0,3}(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line)?.[1].trim();
       if (value !== undefined) values.push(value);
     }
   }

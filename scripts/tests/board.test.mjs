@@ -388,6 +388,10 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
   const fenced = run('check', '1');
   assert.equal(fenced.status, 1, 'A fenced line is no heading');
   assert.doesNotMatch(fenced.stdout, /v9\.9\.9/, 'A fenced line is no condition');
+  writeIssue({ ...issue(), body: '## Abhängigkeiten und Wiederaufnahme\n\n    Wartet bis: v9.9.9\n\n<!--\n## Kommentar\nWartet bis: v9.9.9\n-->\n\nWartet bis: 2999-01-01T00:00Z\n' });
+  const hidden = run('check', '1');
+  assert.equal(hidden.status, 1, hidden.stdout);
+  assert.doesNotMatch(hidden.stdout, /v9\.9\.9/, 'Indented code and HTML comments are no conditions');
   for (const invalid of ['Wartet bis: bald nach dem Release', 'Wartet bis: release.', 'Wartet bis: foo.lock', 'Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
     assert.equal(check(invalid).status, 2, `${invalid} is unknown, never "no blocker"`);
   }
