@@ -556,6 +556,7 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(readied(0.5)), 3, 'Green CI right after Ready still waits for reviewers to start');
   assert.equal(reviews(readied(5)), 0, 'After the grace a missing trace means no reviewer is coming');
   assert.equal(reviews(readied(0.5), {}, '--grace', '0'), 0, 'The grace can be turned off');
+  assert.equal(reviews(readied(-0.5), {}, '--grace', '0'), 0, 'Ready during the query (after now) does not revive a disabled grace');
   // Commit dates come from client clocks: one ahead of GitHub must not cut the grace short.
   const committed = minutes => ({ commits: { nodes: [{ commit: { ...pr().commits.nodes[0].commit, committedDate: minutesAgo(minutes) } }] } });
   assert.equal(reviews(readied(0.5, committed(-10))), 3, 'A commit date in the future does not cut the grace short');
