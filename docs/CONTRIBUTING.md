@@ -119,7 +119,8 @@ single-select fields), not text in the body. Priority reflects
 impact and urgency (Urgent, High, Medium, Low). If unsure, give a provisional one
 and state its basis. Don't reprioritize others' active work. Confirmed production,
 security or data-loss fixes use the milestone `Hotfixes · laufend`. Labels describe
-scope, never approval, priority or checks.
+scope, never approval, priority or checks. The sub-tasks of a spec are native sub-issues:
+`board.mjs sub PARENT CHILD` links and reads back (no raw GraphQL).
 
 ### Human input
 
