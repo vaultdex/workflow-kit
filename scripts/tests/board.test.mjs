@@ -693,7 +693,7 @@ test('reviews waits only for traces on the current head and never reads failures
     const base = job(run, conclusion === 'IN_PROGRESS' ? conclusion : 'COMPLETED', conclusion === 'IN_PROGRESS' ? null : conclusion, names.name, names.workflow);
     return { ...base, checkSuite: { ...base.checkSuite, createdAt: time ?? minutesAgo(minutes), workflowRun: { ...base.checkSuite.workflowRun, event } } };
   };
-  const readyHead = (contexts, extra) => ({ ...pr({ contexts }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] }, ...extra });
+  const readyHead = (contexts, extra) => ({ ...pr({ contexts, pushed: 10 }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] }, ...extra });
   const oldTraces = { comments: [codex('Completed', 0)] };
   assert.equal(reviews(readyHead([draftRun(1)]), oldTraces), 3, 'A Ready head whose only runs were skipped while Draft is not proof');
   assert.equal(reviews(readyHead([draftRun(1), draftRun(2, 'SKIPPED', { name: 'Lint', workflow: 'Lint' }), job(3, 'COMPLETED', 'SUCCESS', 'Backend', 'Frontend')]), oldTraces), 3,
@@ -706,11 +706,11 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(readyHead([draftRun(1), draftRun(2, 'SUCCESS', { name: 'Lint' })]), oldTraces), 3, 'An unguarded job that ran while Draft does not cover the guarded one');
   // Converting to Draft right before Ready starts a Draft run that can land just after the Ready event.
   const toggled = contexts => readyHead(contexts, { convertEvents: { nodes: [{ createdAt: minutesAgo(5.02) }] } });
-  const lateSkip = draftRun(1, 'SKIPPED', { minutes: 4.95 });
-  assert.equal(reviews(toggled([lateSkip]), oldTraces), 3, 'A Draft-conversion run just after Ready is no Ready proof');
+  const lateSkip = () => draftRun(1, 'SKIPPED', { minutes: 4.95 });
+  assert.equal(reviews(toggled([lateSkip()]), oldTraces), 3, 'A Draft-conversion run just after Ready is no Ready proof');
   assert.equal(reviews(toggled([draftRun(1, 'SKIPPED', { minutes: 20 })]), oldTraces), 0, 'A skip from before the latest Draft conversion belongs to an earlier period');
-  assert.equal(reviews(readyHead([lateSkip]), oldTraces), 0, 'Precondition: without the conversion that skip is after Ready');
-  assert.equal(reviews(toggled([lateSkip, draftRun(2, 'SUCCESS', { minutes: 3 })]), oldTraces), 0, 'A later executed run of the workflow is the proof');
+  assert.equal(reviews(readyHead([lateSkip()]), oldTraces), 0, 'Precondition: without the conversion that skip is after Ready');
+  assert.equal(reviews(toggled([lateSkip(), draftRun(2, 'SUCCESS', { minutes: 3 })]), oldTraces), 0, 'A later executed run of the workflow is the proof');
   assert.equal(reviews(readyHead([draftRun(1, 'SUCCESS', { event: 'push' }), draftRun(2)]), oldTraces), 3, 'An executed push run of the same job from before Ready does not hide the Draft skip');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: null, minutes: 2 })]), oldTraces), 0, 'A skip after Ready needs no readable event');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: 'push' })]), oldTraces), 0, 'Only pull_request runs carry a Draft guard');
