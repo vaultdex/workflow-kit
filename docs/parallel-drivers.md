@@ -15,9 +15,10 @@ Die Sperre dafür ist projektseitig geplant:
 [vaultdex/Vaultdex#1099](https://github.com/vaultdex/Vaultdex/issues/1099).
 
 **Flyway-Migrationsnummern.** Legen zwei Driver parallel Migrationen an, können die
-Nummern kollidieren. Eine Vergaberegel dagegen gibt es bisher weder im Kit noch im
-Projekt (Vaultdex); die Nummern gehören dem Projekt und sind dort von der
-Produktversion unabhängig ([Produktversion und Releases](https://github.com/vaultdex/Vaultdex/blob/main/CONTRIBUTING.md#produktversion-und-releases)).
+Nummern kollidieren. Die Regel steht im Projekt, nicht im Kit: Vaultdex
+[Flyway-Versionen](https://github.com/vaultdex/Vaultdex/blob/main/CONTRIBUTING.md#flyway-versionen)
+(auf `main` erst mit dem Merge von `release/0.1.1`), mechanisch geprüft von der
+Repository-CI ([vaultdex/Vaultdex#980](https://github.com/vaultdex/Vaultdex/issues/980)).
 
 **Sonar.** Null offene Sonar-Issues prüft `board.mjs handoff` bereits mechanisch
 ([#134](https://github.com/vaultdex/workflow-kit/issues/134)); nichts weiter zu tun.
