@@ -44,8 +44,8 @@ schreiben und per `--body-file` übergeben, nicht per Heredoc.
 
 ## Driver-Regeln
 
-Allgemeine Regeln für jeden Driver-Subagenten; projektspezifische Regeln (Nachweis-Sperre,
-Test-Suiten, Build-Hygiene) und die Modellwahl gehören nicht hierher.
+Allgemeine Regeln für jeden Driver-Subagenten. Projektspezifische Regeln und die
+Modellwahl stehen hier nicht.
 
 1. **Ein Issue bis „Human review“ treiben.** Früher enden nur bei einem menschlichen
    Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung): erst im Issue
@@ -56,11 +56,12 @@ Test-Suiten, Build-Hygiene) und die Modellwahl gehören nicht hierher.
    `Agent: …, Session: …`.
 3. **Fremde Branches in Ruhe lassen.** `codex/*`-Branches und Branches anderer
    Driver nicht anfassen; Überschneidungen melden.
-4. **Warten ohne Handarbeit.** `board.mjs wait PR` im Vordergrund ausführen und DONE
-   vertrauen; ein Driver-Subagent erfährt von Hintergrundaufgaben erst, wenn sein Zug
-   endet. Review-Subagenten ebenfalls im Vordergrund starten. `tasks/*.output` nicht
-   pollen, die Datei bleibt leer. Ein Reviewer ohne Spur auf dem Head kommt nicht
-   ([Review loop](CONTRIBUTING.md#review-loop)): keine Wartezeit von Hand.
+4. **Warten ohne Handarbeit.** Abweichend von [AGENT_RULES.md](../AGENT_RULES.md#economy)
+   und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
+   `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
+   Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht von Hand auf weitere
+   Reviewer warten. Review-Subagenten ebenfalls im Vordergrund starten;
+   `tasks/*.output` nicht pollen, die Datei bleibt leer.
 5. **Shell.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus, mit
    literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
 6. **Abschlussbericht** mit höchstens 12 Zeilen: PR, zurückgelesener Status,
