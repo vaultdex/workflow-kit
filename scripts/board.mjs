@@ -24,7 +24,7 @@ const issueFields = `id number title state body repository{nameWithOwner} assign
   blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}`;
 // ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
-  ${issueFields}
+  ${issueFields} bodyHTML
   closedByPullRequestsReferences(first:20){nodes{number state}}
   subIssues(first:100){totalCount nodes{${issueFields}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
@@ -688,6 +688,20 @@ function link() {
   console.log(`#${number} is natively linked to PR #${value}`);
 }
 
+/**
+ * Open task-list items of the issue body, as GitHub renders it, that name no issue: acceptance that is neither done nor
+ * moved to a follow-up. GitHub's rendering decides what a task, a code block and an issue reference ("#N", "OWNER/REPO#N",
+ * an issue URL) are, so no Markdown is parsed here.
+ */
+// ponytail: relies on GitHub's task-list markup (task-list-item-checkbox, issue-link); replace when GitHub changes it.
+function openAcceptance(bodyHtml) {
+  assert.equal(typeof bodyHtml, 'string', 'The rendered issue body is unreadable');
+  const decode = text => text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  return [...bodyHtml.matchAll(/(<input type="checkbox"[^>]*>)([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>]|<input type="checkbox")/g)]
+    .filter(([, box, text]) => box.includes('task-list-item-checkbox') && !/\schecked[\s=>]/.test(box) && !text.includes('class="issue-link'))
+    .map(([, , text]) => decode(text.replace(/<[^>]*>/g, '')).trim());
+}
+
 /** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
 function handoffIssue(issue, viewer) {
   if (check(issue) !== 'STARTABLE') return false;
@@ -698,6 +712,7 @@ function handoffIssue(issue, viewer) {
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
     reasons.push('the issue is not assigned to the authenticated driver');
   }
+  for (const line of openAcceptance(issue.bodyHTML)) reasons.push(`open acceptance without an issue reference (check it off, or move it to a follow-up and link that issue): ${line}`);
   if (reasons.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     process.exitCode = 1;
