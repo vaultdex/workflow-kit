@@ -167,8 +167,9 @@ yourself. Without `.githooks/` it does nothing.
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
   `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3): for that long after
-  the PR became ready (Ready event, or creation as non-draft), they keep
-  waiting for reviewers that start on Ready, such as Codex, even when CI is already
+  the PR became ready (Ready event, or creation as non-draft) and after each push of the
+  head, whichever is later, they keep
+  waiting for reviewers that start on Ready or on new commits, such as Codex, even when CI is already
   green; `handoff` honors both. `wait PR --merged` waits for the human merge
   and ends `FAILED` if the PR is closed unmerged. Analyzers that create their
   check only when finished are awaited when listed in `"awaitApps"`
