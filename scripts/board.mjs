@@ -44,7 +44,7 @@ function predecessorReasons({ totalCount, nodes }) {
 }
 
 /** Git's Regeln für Ref-Namen (git check-ref-format): jeder gültige Tag wird nachgeschlagen, kein ungültiger. */
-const validTagName = tag => tag !== '' && !/[\p{Cc} ~^:?*[\\]|\.\.|@\{|\/\/|^\/|\/$|\.$/u.test(tag)
+const validTagName = tag => tag !== '' && !/[\x00-\x1f\x7f ~^:?*[\\]|\.\.|@\{|\/\/|^\/|\/$|\.$/u.test(tag)
   && tag.split('/').every(part => !part.startsWith('.') && !part.endsWith('.lock'));
 
 /**
