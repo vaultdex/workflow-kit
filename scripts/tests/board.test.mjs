@@ -737,6 +737,11 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(toggled([draftRun(1, 'SKIPPED', { minutes: 20 })]), oldTraces), 0, 'A skip from before the latest Draft conversion belongs to an earlier period');
   assert.equal(reviews(readyHead([lateSkip()]), oldTraces), 0, 'Precondition: without the conversion that skip is after Ready');
   assert.equal(reviews(toggled([lateSkip(), draftRun(2, 'SUCCESS', { minutes: 3 })]), oldTraces), 0, 'A later executed run of the workflow is the proof');
+  // Opened as Draft (Ready event, no conversion) and marked Ready within seconds: the delayed `opened` run is a Draft run too.
+  const openedDraft = contexts => readyHead(contexts, { createdAt: minutesAgo(5.05) });
+  assert.equal(reviews(openedDraft([lateSkip()]), oldTraces), 3, 'An opened-as-Draft run just after Ready is no Ready proof');
+  assert.equal(reviews(openedDraft([lateSkip(), draftRun(2, 'SUCCESS', { minutes: 3 })]), oldTraces), 0, 'A later executed run of the workflow is the proof');
+  assert.equal(reviews(readyHead([lateSkip()], { createdAt: 'unreadable' }), oldTraces), 2, 'An unreadable creation time is an error, never proof');
   assert.equal(reviews(readyHead([draftRun(1, 'SUCCESS', { event: 'push' }), draftRun(2)]), oldTraces), 3, 'An executed push run of the same job from before Ready does not hide the Draft skip');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: null, minutes: 2 })]), oldTraces), 0, 'A skip after Ready needs no readable event');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: 'push' })]), oldTraces), 0, 'Only pull_request runs carry a Draft guard');

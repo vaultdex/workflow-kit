@@ -456,11 +456,11 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // nothing about the Ready head. Ready normally starts a fresh run; until the workflow has an executed run created after
   // Ready, its path is missing, not green. An executed Draft run does not exempt the workflow (an unguarded job next to a
   // guarded one); a skip after Ready is a real optional skip. GitHub's required flag is no basis: it is false on
-  // release branches for checks the project demands. A run triggered by converting to Draft can land just after a quick
-  // Ready, so that window counts as Draft too.
+  // release branches for checks the project demands. A run triggered by opening as Draft or converting to Draft can land
+  // just after a quick Ready, so that window counts as Draft too.
   // Only the latest Draft period counts: a skip from before the latest conversion belongs to an earlier period (a PR opened
   // Ready) and is no Draft skip.
-  // ponytail: 10 s window for run creation lag after a Draft conversion, and a Draft skip of an earlier period stays unseen
+  // ponytail: 10 s window for run creation lag after opening as Draft or a Draft conversion (a real Ready run inside it waits for the next push), and a Draft skip of an earlier period stays unseen
   // unless the latest period created a run too; replace both when the run's trigger action and the Draft history are readable.
   // It is judged over every run of the head, not only each job's decisive one: an executed push run of the same job from
   // before Ready must not hide the Draft skip. Only a run since Ready covers it: any run of the job, or an executed run of
@@ -469,7 +469,10 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   assert.ok(!pr.readyEvents?.nodes?.length || Number.isFinite(readyEvent), 'The Ready event time is unreadable');
   const convertEvent = Date.parse(pr.convertEvents?.nodes?.[0]?.createdAt);
   assert.ok(!pr.convertEvents?.nodes?.length || Number.isFinite(convertEvent), 'The Draft conversion time is unreadable');
-  const readyBoundary = Math.max(readyEvent, (Number.isFinite(convertEvent) ? convertEvent : -Infinity) + 10_000);
+  // Without a conversion, a Ready event means the PR was opened as Draft: its creation starts the Draft period like a conversion.
+  const draftStart = convertEvent || (Number.isFinite(readyEvent) ? Date.parse(pr.createdAt) : -Infinity);
+  assert.ok(!Number.isNaN(draftStart), 'The PR creation time is unreadable');
+  const readyBoundary = Math.max(readyEvent, draftStart + 10_000);
   const runs = contexts.nodes.filter(orderable);
   const startedAt = check => Date.parse(check.checkSuite?.createdAt);
   const flowOf = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id]);
