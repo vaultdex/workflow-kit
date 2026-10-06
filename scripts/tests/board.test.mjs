@@ -388,7 +388,7 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
     writeIssue({ ...issue(), body });
     assert.equal(run('check', '1').status, 1, body);
   }
-  for (const variant of ['**Wartet bis:** v1.2.3', '> Wartet bis: v1.2.3', '1. Wartet bis: v1.2.3', '- [ ] Wartet bis: v1.2.3', 'Wartet bis v1.2.3']) {
+  for (const variant of ['**Wartet bis:** v1.2.3', '> Wartet bis: v1.2.3', '1. Wartet bis: v1.2.3', '- [ ] Wartet bis: v1.2.3', '## Wartet bis: v1.2.3', '| Wartet bis: v1.2.3 |', '`Wartet bis: v1.2.3`','Wartet bis v1.2.3']) {
     const result = check(variant);
     assert.equal(result.status, 2, `${variant} is unknown, never overlooked`);
     assert.match(result.stdout, /unreadable line/);

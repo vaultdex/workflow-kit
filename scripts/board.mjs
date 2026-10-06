@@ -59,7 +59,7 @@ function waitReasons(body) {
     const strict = /^\s*(?:[-*]\s+)?Wartet bis:(.*)$/i.exec(line);
     if (strict) values.push(strict[1].trim());
     // Formatierte Varianten (**Wartet bis:**, > …, 1. …, - [ ] …) sind keine lesbare Bedingung, aber auch kein Freibrief.
-    else if (/^[\s>*_+\-[\]xX\d.]*wartet\s+bis\b/i.test(line)) unknown.push(`unreadable line "${line.trim()}": write it as "Wartet bis: <tag or UTC time>"`);
+    else if (/^[\s>*_+\-[\]xX\d.#|`~=()]*wartet\s+bis\b/i.test(line)) unknown.push(`unreadable line "${line.trim()}": write it as "Wartet bis: <tag or UTC time>"`);
   }
   for (const wanted of values) {
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(wanted)) {
