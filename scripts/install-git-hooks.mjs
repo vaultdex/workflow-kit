@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { externalTool, projectRoot } from './checkout-root.mjs';
 
 // Explicit setup: points Git at the project's versioned .githooks, per clone. Automatic hooks never run this file.
@@ -10,6 +10,8 @@ import { externalTool, projectRoot } from './checkout-root.mjs';
 const root = projectRoot();
 const check = process.argv.includes('--check');
 const git = externalTool('git', root);
+// Inherited repository selection (e.g. when called from a Git hook) would redirect Git away from root.
+for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR']) delete git.env[name];
 const run = (...args) => {
   const result = spawnSync(git.file, args, { cwd: root, env: git.env, encoding: 'utf8' });
   assert.equal(result.error, undefined, result.error?.message);
@@ -22,7 +24,7 @@ const out = (...args) => {
 };
 const report = message => console.log(`core.hooksPath: ${message}`);
 
-if (!existsSync(join(root, '.githooks'))) {
+if (!statSync(join(root, '.githooks'), { throwIfNoEntry: false })?.isDirectory()) {
   report('no .githooks directory, nothing to do');
   process.exit(0);
 }
@@ -37,7 +39,9 @@ const fold = path => {
 const tops = out('worktree', 'list', '--porcelain').split(/\r?\n/)
   .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
 const ours = new Set(tops.map(top => fold(join(top, '.githooks'))));
-const isOurs = value => ours.has(fold(resolve(root, value)));
+// Git resolves a relative hooks path in whichever worktree runs the hook, so only .githooks itself is
+// ours in every worktree; any other relative value may point elsewhere there and stays foreign.
+const isOurs = value => isAbsolute(value) ? ours.has(fold(value)) : normalize(value) === '.githooks';
 
 /** Every core.hooksPath entry of one config source as { value, origin }, including include/includeIf
  * files (a selected source skips them without --includes). --null keeps origins unquoted. */

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const script = fileURLToPath(new URL('../install-git-hooks.mjs', import.meta.url));
 
 /** A repository with .githooks and one linked worktree; global and system config are isolated. */
-function fixture(t, { hooks = true } = {}) {
+function fixture(t, { hooks = true, extraEnv = {} } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'kit git hooks '));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const repo = join(base, 'repo'), linked = join(base, 'linked'), global = join(base, 'global.gitconfig');
@@ -33,7 +33,7 @@ function fixture(t, { hooks = true } = {}) {
   git('worktree', 'add', '-q', '--detach', linked);
   const linkedConfig = join(repo, '.git/worktrees/linked/config.worktree');
   const run = (...args) => {
-    const result = spawnSync(process.execPath, [script, ...args], { cwd: repo, env, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [script, ...args], { cwd: repo, env: { ...env, ...extraEnv }, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     return result.stdout;
   };
@@ -114,7 +114,22 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   u.run();
   assert.equal(u.value('--local'), '');
 
+  // A relative path other than .githooks resolves per worktree and may point elsewhere: kept.
+  const r = fixture(t);
+  writeFileSync(r.linkedConfig, '[core]\n\thooksPath = ../repo/.githooks\n');
+  r.run();
+  assert.equal(r.value('--file', r.linkedConfig), '../repo/.githooks');
+
+  // An inherited GIT_DIR of another repository neither redirects the write nor touches that repository.
+  const other = fixture(t), e = fixture(t, { extraEnv: { GIT_DIR: join(other.repo, '.git') } });
+  e.run();
+  assert.equal(e.value('--local'), '.githooks');
+  assert.equal(other.value('--local'), '');
+
   const none = fixture(t, { hooks: false });
+  none.run();
+  assert.equal(none.value('--local'), '');
+  writeFileSync(join(none.repo, '.githooks'), '');
   none.run();
   assert.equal(none.value('--local'), '');
 });
