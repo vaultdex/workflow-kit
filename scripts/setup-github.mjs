@@ -50,7 +50,7 @@ const priorityOptions = priority.options?.length ? priority.options : JSON.parse
 assert.ok(priorityOptions?.length >= 2, 'Priority needs a usable explicit scale; configure/verify its choices before completing setup');
 gh('project', 'link', String(project.number), '--owner', owner, '--repo', repo);
 const labels = new Set(JSON.parse(gh('api', `repos/${repo}/labels?per_page=100`, '--paginate', '--slurp')).flat().map(l => l.name));
-for (const [label, color] of [['ci', '1d76db'], ['documentation', '0075ca'], ['testing', '5319e7'], ['security', 'b60205'], ['dependencies', '0366d6'], ['needs-human-input', 'd93f0b']])
+for (const [label, color] of [['ci', '1d76db'], ['documentation', '0075ca'], ['testing', '5319e7'], ['security', 'b60205'], ['dependencies', '0366d6'], ['needs-human-input', 'd93f0b'], ['spec', 'c5def5']])
   if (!labels.has(label)) gh('label', 'create', label, '--repo', repo, '--color', color);
 saveProject();
 console.log(`Project linked: ${project.url}\nLabels configured; existing labels preserved.\n`
