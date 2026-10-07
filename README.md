@@ -271,11 +271,11 @@ the installer, so the kit's current one is copied.
   quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), these three sleep until the reset and
   say so on stderr (`rate limited until …`); every other command stops with the reset time
   ([parallel drivers](docs/parallel-drivers.md)). Both take
-  `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3): for that long after
+  `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3, or `"reviewerGraceMinutes"` of the project file; `0` turns it off): for that long after
   the PR became ready (Ready event, or creation as non-draft) and after each push of the
   head (read from the branch's push log, so a reused commit counts too), whichever is later, they keep
   waiting for reviewers that start on Ready or on new commits, such as Codex, even when CI is already
-  green; `handoff` honors both. `wait PR --head SHA` (the full id you just pushed, `git rev-parse HEAD`)
+  green, unless a required bot has already answered for good on this head (a review, a finished comment, a final reaction, or a limit notice such as "usage limit" or "rate limited" in a comment or check): that ends the grace at once, an optional reviewer never does; `handoff` honors both. `wait PR --head SHA` (the full id you just pushed, `git rev-parse HEAD`)
   keeps waiting (`waiting: PR still shows head …`) while an open PR still reports another head:
   right after a push GitHub serves the previous head for a moment, and a plain `wait` would end `DONE` for it.
   A head that never matches waits on until stopped by hand. `wait PR --merged` waits for the human merge
