@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 export const run = (file, args = [], { input, ...options } = {}) => new Promise(resolve => {
   const child = execFile(file, args, { encoding: 'utf8', maxBuffer: 1 << 26, ...options }, (error, stdout, stderr) =>
     resolve({ status: error ? (typeof error.code === 'number' ? error.code : null) : 0, stdout, stderr, error }));
+  child.stdin.on('error', () => {}); // a child that exits without reading its input is no error, as with spawnSync
   child.stdin.end(input);
 });
 
