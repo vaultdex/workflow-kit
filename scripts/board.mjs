@@ -157,14 +157,44 @@ function predecessorReasons({ totalCount, nodes }) {
   return { blocked, unknown, open };
 }
 
+/** The one current PR of an issue, when its complete linked-PR list proves it has exactly one open delivery. */
+function currentIssuePr(issue) {
+  const linked = issue.closedByPullRequestsReferences;
+  if (linked?.totalCount !== 1 || linked.nodes?.length !== 1) return undefined;
+  const [pr] = linked.nodes;
+  return pr?.state === 'OPEN' && pr.repository?.nameWithOwner?.toLowerCase() === project.repository.toLowerCase() ? pr.number : undefined;
+}
+
+function readStackPr(prNumber) {
+  const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    pullRequest(number:$number){number state isDraft isCrossRepository headRepository{nameWithOwner} baseRefName headRefName headRefOid}}}`,
+  { owner, name, number: prNumber }).repository;
+  assert.ok(pr?.number === prNumber && ['OPEN', 'MERGED'].includes(pr.state), `PR #${prNumber} is unreadable`);
+  if (pr.isCrossRepository !== false || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) {
+    return { refused: `PR #${prNumber} comes from a fork or another repository` };
+  }
+  if (pr.state === 'OPEN' && pr.isDraft !== false) return { refused: `PR #${prNumber} is still Draft` };
+  if (typeof pr.baseRefName !== 'string' || typeof pr.headRefName !== 'string' || typeof pr.headRefOid !== 'string') {
+    assert.fail(`PR #${prNumber} has incomplete branch data`);
+  }
+  return { pr: { ...pr, repository: { nameWithOwner: project.repository } } };
+}
+
+function stackMembers(stack) {
+  assert.ok(Number.isSafeInteger(stack.number) && stack.number > 0 && Array.isArray(stack.pull_requests), 'The native stack is incomplete');
+  const members = stack.pull_requests;
+  assert.ok(members.length >= 2 && members.every(member => Number.isSafeInteger(member.number) && member.number > 0)
+    && new Set(members.map(member => member.number)).size === members.length, 'The native stack members are incomplete or repeated');
+  return members;
+}
+
 /**
- * The one PR a dependent issue can be stacked on (docs/CONTRIBUTING.md#stacked-pull-requests): every open predecessor
- * lives in this repository and is delivered by the same single open, ready PR from a branch of this repository. Anything else
- * says why not (`refused`); incomplete PR data is `unknown`, never "no PR". A delivering PR that is already merged (into a
- * release branch, where the predecessor issue stays open until the release) is the base too: the layer above it is then a plain
- * PR on the trunk, `pr.state` says MERGED.
+ * Resolve the native base for a dependent issue (docs/CONTRIBUTING.md#stacked-pull-requests). Every open predecessor must
+ * be delivered by a local, ready PR. If several blocker PRs exist, a single open native stack must contain them all.
+ * New work uses its tip; resuming an issue whose own PR is already in that stack uses the immediately lower member.
+ * Incomplete data is `unknown`, never a fallback to the bottom PR. A sole merged delivery stays a plain PR on its trunk.
  */
-function stackBase(open) {
+function stackBase(open, currentPrNumber) {
   loadDeliveries(open);
   const refused = [], unknown = [], prs = new Map();
   for (const predecessor of open) {
@@ -175,6 +205,7 @@ function stackBase(open) {
     else {
       const delivering = links.nodes.filter(pr => ['OPEN', 'MERGED'].includes(pr.state));
       if (!delivering.length) refused.push(`${label} has no open or merged PR`);
+      if (delivering.length > 1) refused.push(`${label} is delivered by ${delivering.length} open or merged PRs, not one`);
       // A closing keyword can also come from a PR of another repository, which is no local branch to stack on.
       for (const pr of delivering) {
         if (pr.repository?.nameWithOwner?.toLowerCase() === project.repository.toLowerCase()) prs.set(pr.number, pr);
@@ -182,13 +213,71 @@ function stackBase(open) {
       }
     }
   }
-  if (!refused.length && !unknown.length && prs.size > 1) refused.push(`the predecessors are delivered by ${prs.size} PRs (#${[...prs.keys()].join(', #')}), not one`);
-  const [pr] = prs.values();
-  if (!refused.length && !unknown.length && pr.state === 'OPEN') {
+  if (refused.length || unknown.length || !prs.size) return { refused, unknown };
+  const deliveries = [...prs.values()];
+  if (deliveries.some(pr => pr.state === 'MERGED')) {
+    if (deliveries.length > 1) refused.push(`the predecessors are delivered by ${deliveries.length} PRs (#${[...prs.keys()].join(', #')}), not one open native stack`);
+    return { pr: refused.length ? undefined : deliveries[0], refused, unknown };
+  }
+  for (const pr of deliveries) {
     if (pr.isDraft) refused.push(`PR #${pr.number} is still Draft`);
     if (pr.isCrossRepository) refused.push(`PR #${pr.number} comes from a fork`);
+    if (typeof pr.headRefName !== 'string' || typeof pr.headRefOid !== 'string' || typeof pr.baseRefName !== 'string') {
+      unknown.push(`PR #${pr.number} has incomplete branch data`);
+    }
   }
-  return { pr: refused.length || unknown.length ? undefined : pr, refused, unknown };
+  if (refused.length || unknown.length) return { refused, unknown };
+
+  try {
+    const filterNumber = currentPrNumber ?? deliveries[0].number;
+    const stacks = rest(`repos/${project.repository}/stacks?pull_request=${filterNumber}`);
+    assert.ok(Array.isArray(stacks), 'The native stack list is unreadable');
+    if (!stacks.length) {
+      if (currentPrNumber) refused.push(`PR #${currentPrNumber} is not linked in an open native stack`);
+      else if (deliveries.length > 1) refused.push('the blocker PRs are not proven members of one native stack');
+      else return { pr: deliveries[0], refused, unknown };
+    } else {
+      assert.equal(stacks.length, 1, `PR #${filterNumber} belongs to an ambiguous number of native stacks`);
+      const stack = stacks[0], members = stackMembers(stack), positions = new Map(members.map((member, index) => [member.number, index]));
+      if (stack.open !== true) refused.push(`native stack #${stack.number} is closed`);
+      else {
+        const memberNumber = currentPrNumber ?? deliveries[0].number;
+        assert.ok(positions.has(memberNumber), `The native stack response does not contain PR #${memberNumber}`);
+        const currentIndex = positions.get(memberNumber);
+        if (currentPrNumber) {
+          if (currentIndex === 0) refused.push(`PR #${currentPrNumber} has no lower layer in its native stack`);
+          for (const pr of deliveries) {
+            if (!positions.has(pr.number) || positions.get(pr.number) >= currentIndex) {
+              refused.push(`blocker PR #${pr.number} is not below PR #${currentPrNumber} in the same native stack`);
+            }
+          }
+        } else {
+          for (const pr of deliveries) if (!positions.has(pr.number)) refused.push(`blocker PR #${pr.number} is not in native stack #${stack.number}`);
+        }
+        if (!refused.length) {
+          const baseIndex = currentPrNumber ? currentIndex - 1 : members.length - 1;
+          const member = members[baseIndex];
+          const source = prs.get(member.number);
+          const resolved = source ? { pr: source } : readStackPr(member.number);
+          if (resolved.refused) refused.push(resolved.refused);
+          if (!resolved.pr) unknown.push(`PR #${member.number} at the native stack base is unreadable`);
+          else {
+            const expectedBase = baseIndex === 0 ? stack.base?.ref : members[baseIndex - 1]?.head?.ref;
+            if (typeof expectedBase !== 'string' || typeof member.head?.ref !== 'string' || typeof member.head?.sha !== 'string') {
+              unknown.push(`PR #${member.number} has incomplete native stack branch data`);
+            } else if (resolved.pr.baseRefName !== expectedBase || resolved.pr.headRefName !== member.head.ref || resolved.pr.headRefOid !== member.head.sha) {
+              unknown.push(`PR #${member.number} branch data changed while reading native stack #${stack.number}`);
+            } else if (resolved.pr.state !== 'OPEN' || resolved.pr.isDraft || resolved.pr.isCrossRepository) {
+              refused.push(`PR #${member.number} at the native stack base is not an open, ready PR from this repository`);
+            } else return { pr: { ...resolved.pr, stackNumber: stack.number }, refused, unknown };
+          }
+        }
+      }
+    }
+  } catch (error) {
+    unknown.push(`native stack data are unreadable: ${String(error.stderr || error.message).trim()}`);
+  }
+  return { refused, unknown };
 }
 
 /** Git's Regeln für Ref-Namen (git check-ref-format): jeder gültige Tag wird nachgeschlagen, kein ungültiger. */
@@ -311,7 +400,7 @@ const ago = ms => {
 };
 
 /** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
-function check(issue = readIssue(), claims) {
+function check(issue = readIssue(), claims, currentPrNumber = currentIssuePr(issue)) {
   const { status, blocked, unknown, predecessors } = issueReasons(issue);
   const notes = [];
   let claim;
@@ -325,7 +414,7 @@ function check(issue = readIssue(), claims) {
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;
   if (heldOnlyByOpenPredecessors(blocked, predecessors) && !unknown.length) {
-    const stack = stackBase(predecessors.open);
+    const stack = stackBase(predecessors.open, currentPrNumber);
     if (stack.pr) {
       stackedOn = stack.pr;
       notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
@@ -342,7 +431,7 @@ function check(issue = readIssue(), claims) {
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
   if (stackedOn) console.log(stackedOn.state === 'MERGED'
     ? `stack base: PR #${stackedOn.number} is already merged into ${stackedOn.baseRefName}: no stack, work on ${stackedOn.baseRefName}; see docs/CONTRIBUTING.md#stacked-pull-requests`
-    : `stack base: PR #${stackedOn.number} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
+    : `stack base: PR #${stackedOn.number}${stackedOn.stackNumber ? ` in stack #${stackedOn.stackNumber}` : ''} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
   for (const note of notes) console.log(`note: ${note}`);
   if (claim) {
     const linked = issue.closedByPullRequestsReferences;
@@ -1385,8 +1474,8 @@ function openAcceptance(bodyHtml) {
  * supplied issue snapshot, or undefined when check() already printed its verdict and stopped.
  * `reviewedHead`: the PR head the proof was gathered for; a stacked layer must still be that head when this reads it.
  */
-function handoffIssueReasons(issue, viewer, reviewedHead) {
-  if (!mayStart(check(issue))) return;
+function handoffIssueReasons(issue, viewer, reviewedHead, currentPrNumber) {
+  if (!mayStart(check(issue, undefined, currentPrNumber))) return;
   assert.ok(issue.id, 'Issue identity is unreadable');
   const status = projectItem(issue)?.status?.name;
   const reasons = [];
@@ -1402,8 +1491,16 @@ function handoffIssueReasons(issue, viewer, reviewedHead) {
     } else {
       // An aligned branch chain is no stack: GitHub must list both PRs in one open stack (the read-back of the docs, step 2).
       const stacks = rest(`repos/${project.repository}/stacks?pull_request=${Number(value)}`);
-      if (!Array.isArray(stacks) || !stacks.some(stack => stack.open !== false && [stackedOn.number, Number(value)].every(prNumber => stack.pull_requests?.some(member => member.number === prNumber)))) {
-        reasons.push(`PR #${value} and PR #${stackedOn.number} are not linked as a stack on GitHub (GET repos/${project.repository}/stacks?pull_request=${value} lists none): link them (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
+      const stackedImmediatelyAfterBase = Array.isArray(stacks) && stacks.length === 1 && (() => {
+        const [stack] = stacks;
+        const members = stack.pull_requests;
+        if (stack.open !== true || !Array.isArray(members)) return false;
+        const baseIndex = members?.findIndex(member => member.number === stackedOn.number) ?? -1;
+        const ownIndex = members?.findIndex(member => member.number === Number(value)) ?? -1;
+        return baseIndex >= 0 && ownIndex === baseIndex + 1;
+      })();
+      if (!stackedImmediatelyAfterBase) {
+        reasons.push(`PR #${value} is not immediately above PR #${stackedOn.number} in one open native stack (GET repos/${project.repository}/stacks?pull_request=${value}); link it (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
       }
       // Proof of the upper head only counts when that head contains the base PR's current head (a later push below leaves the branch name unchanged).
       if (!reasons.length && pr?.baseRefName === stackedOn.headRefName) {
@@ -1422,8 +1519,8 @@ function handoffIssueReasons(issue, viewer, reviewedHead) {
 }
 
 /** The recheck before the write: true when the issue side holds, otherwise the verdict is printed. */
-function handoffIssue(issue, viewer, reviewedHead) {
-  const reasons = handoffIssueReasons(issue, viewer, reviewedHead);
+function handoffIssue(issue, viewer, reviewedHead, currentPrNumber) {
+  const reasons = handoffIssueReasons(issue, viewer, reviewedHead, currentPrNumber);
   if (reasons?.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     process.exitCode = 1;
@@ -1547,7 +1644,8 @@ function handoff() {
   const { viewer } = graphql('query{viewer{login}}');
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
   // The issue side's reasons wait for the PR side's, so one run names everything that is missing.
-  const prior = handoffIssueReasons(issue, viewer);
+  const currentPrNumber = Number(value);
+  const prior = handoffIssueReasons(issue, viewer, undefined, currentPrNumber);
   if (!prior) return;
   const pr = handoffPr(issue.id, viewer, undefined, prior);
   if (!pr) return;
@@ -1555,7 +1653,7 @@ function handoff() {
     if (!handoffPr(issue.id, viewer, pr.headRefOid)) return;
     const current = readIssue();
     assert.equal(current?.id, issue.id, 'Issue identity changed during handoff');
-    return handoffIssue(current, viewer, pr.headRefOid) ? current : undefined;
+    return handoffIssue(current, viewer, pr.headRefOid, currentPrNumber) ? current : undefined;
   })) return;
   assert.equal(projectItem(readIssue())?.status?.name, 'Human review', 'Human review status read-back differs');
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);

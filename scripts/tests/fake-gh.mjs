@@ -71,6 +71,7 @@ function api(argv, input, stdout, stderr, exit) {
     }
     if (parts[3] === 'stacks') {
       // The stack read-back: by default PR 5 and PR 7 are linked in one open stack.
+      if (fs.existsSync('fail-stacks')) exit(1);
       stdout(fs.existsSync('stacks.json') ? fs.readFileSync('stacks.json') : '[]');
       exit(0);
     }
@@ -257,14 +258,16 @@ function api(argv, input, stdout, stderr, exit) {
         nodes: pages[index].map(id => id === null ? null : { id }) } } } };
   }
   else if (query.includes('pullRequest(number')) {
-    if (fs.existsSync('pr-reads.json')) {
+    const number = Number(argv.find(arg => arg.startsWith('number='))?.slice(7));
+    if (number === 7 && fs.existsSync('pr-reads.json')) {
       // Each read takes the next prepared overlay and the last one stays: metadata that catches up after a push.
       const reads = JSON.parse(fs.readFileSync('pr-reads.json'));
       const overlay = reads.length > 1 ? reads.shift() : reads[0];
       fs.writeFileSync('pr-reads.json', JSON.stringify(reads));
       fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...overlay }));
     }
-    data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
+    const stackPrs = fs.existsSync('stack-prs.json') ? JSON.parse(fs.readFileSync('stack-prs.json')) : {};
+    data = { repository: { pullRequest: stackPrs[number] ?? JSON.parse(fs.readFileSync('pr.json')) } };
   }
   else if (query.includes('issue(number:$number){id parent{')) data = { repository: { issue: JSON.parse(fs.readFileSync('child.json')) } };
   else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
