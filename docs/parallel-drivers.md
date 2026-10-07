@@ -109,7 +109,8 @@ Modellwahl stehen hier nicht.
 5. **Shell und Werkzeuge.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus,
    mit literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
    - Tests: lokal nur die betroffenen (`--test-name-pattern` oder eine Testdatei), die
-     ganze Suite läuft in der CI. Führt die Projekt-CI sie für diesen Head nicht aus,
+     ganze Suite läuft in der CI. Die Testdateien zu den geänderten Dateien nennt
+     `node scripts/affected-tests.mjs` (im Kit); mit `--run` startet er sie auch. Führt die Projekt-CI sie für diesen Head nicht aus,
      läuft sie einmal vor der Übergabe im Hintergrund mit Logdatei. Das Kit fährt sie in
      seiner CI, Kit-Driver testen lokal nur gezielt.
    - Dateien: mit Edit und Write oder mit einem Node-Skript aus einer Datei ändern;

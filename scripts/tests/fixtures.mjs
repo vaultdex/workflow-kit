@@ -2,7 +2,7 @@
 // checkout that runs the suite (its .git/modules), so concurrent runs and concurrent tests do not interfere (#207).
 // Scenarios that do not share state run side by side (#239): child processes are the cost, not the code.
 import { execFile, execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,10 +31,21 @@ export function isolatedGit(dir) {
 
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 
+/** Tests that clone the pinned vendor sources call this first: a fresh clone has them empty, and Git would fail
+ * deep inside a test with "does not appear to be a git repository" (#229). One line, no stack trace. */
+export function requireSubmodules(root = kit) {
+  const paths = execFileSync('git', ['ls-files', '-s', '--', '.vendor'], { cwd: root, encoding: 'utf8' })
+    .split('\n').filter(Boolean).map(line => line.split(/\s+/)[3]);
+  if (paths.every(path => existsSync(join(root, path, '.git')))) return;
+  writeSync(2, 'run: git submodule update --init --recursive\n');
+  process.exit(1);
+}
+
 /** A throwaway kit for scripts that write to the kit they live in (`git submodule update --init` registers
  * submodules in its .git): this checkout's scripts and data, its pinned vendor sources as shared clones,
  * and a Git repository of its own. The suite's own checkout and its .git/modules stay untouched. */
 export function kitCheckout(t) {
+  requireSubmodules();
   const root = temporary(t, 'kit checkout ');
   const env = isolatedGit(root);
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, env, encoding: 'utf8' }).trim();

@@ -356,6 +356,7 @@ node scripts/init-project.mjs --existing
 node scripts/setup-skills.mjs
 git status --short    # review intended outputs; preserve unrelated work
 node --test scripts/tests/<affected>.test.mjs    # add --test-name-pattern for one test
+node scripts/affected-tests.mjs    # test files for the changed files (--run runs them); new scripts need a row in its table
 ```
 
 Locally run only the affected tests; CI runs the commands above plus the full
