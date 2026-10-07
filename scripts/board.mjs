@@ -400,9 +400,15 @@ function create() {
     const waits = waitReasons(text);
     assert.ok(!waits.blocked.length && !waits.unknown.length, `new: the issue would not be startable: ${[...waits.blocked, ...waits.unknown].join('; ')}`);
   }
-  const created = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues`, '-X', 'POST', '--input', '-'],
-    { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: JSON.stringify({ title, body: text, milestone: found.number, labels, ...start && { assignees: [viewer] } }) }));
-  assert.ok(Number.isSafeInteger(created?.number) && created.html_url, 'GitHub did not report the new issue');
+  let created;
+  try {
+    created = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues`, '-X', 'POST', '--input', '-'],
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: JSON.stringify({ title, body: text, milestone: found.number, labels, ...start && { assignees: [viewer] } }) }));
+    assert.ok(Number.isSafeInteger(created?.number) && created.html_url, 'GitHub did not report the new issue');
+  } catch (error) {
+    // A lost or unreadable answer does not prove that nothing was created.
+    throw new Error(`creating the issue failed (${String(error.stderr || error.message).trim()}); it may exist anyway: search ${project.repository} for "${title}" before trying again`, { cause: error });
+  }
   number = created.number;
   let step = 'reading it back';
   try {

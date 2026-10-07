@@ -1531,8 +1531,16 @@ test('new checks every required value before creating, reads all values back and
   assert.match(refused('a field the project requires', ...base), /Zielrelease/);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', requiredFields: ['Size'] }));
 
+  // An unreadable answer to the creation does not prove that nothing exists: the error says so.
+  write('create-response.json', 'not json');
+  let result = run(...base);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /^ERROR - .*may exist anyway.*before trying again/);
+  rmSync(created);
+  write('create-response.json', { number: 1, html_url: 'https://github.com/test/example/issues/1' });
+
   // Without --start the issue lands in Backlog; a label given twice (other casing) is one label.
-  let result = run(...base, '--label', 'ENHANCEMENT');
+  result = run(...base, '--label', 'ENHANCEMENT');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   // One line with the URL and the values read back; their order and separators are not pinned.
   assert.match(result.stdout, /^NEW https:\/\/github\.com\/test\/example\/issues\/1\b[^\n]*\n$/);
