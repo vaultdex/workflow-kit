@@ -417,7 +417,7 @@ backlink never closes an issue.
    resolution: an issue link, `behoben in <SHA>`, `persönlich gemeldet` or
    `kein Handlungsbedarf: <Grund>`; `Keine Funde` as the only line when there are none.
    A fixable finding that no issue covers yet becomes an issue first; a comment alone
-   is no record. `board.mjs handoff` refuses a missing section or a line without a resolution.
+   is no record. `board.mjs handoff` notes a missing section or a line without a resolution.
 6. Run `board.mjs handoff ISSUE PR` for the fully delivered issue only when CI
    passes, every non-optional review with a trace on the current head has finished or stalled,
    each finding is fixed or linked to a follow-up, the
@@ -441,7 +441,7 @@ backlink never closes an issue.
    metadata and do not prove these delivery gates.
    Check off every fulfilled acceptance box in the issue body (`board.mjs body-replace`, one box per call, or `board.mjs body`) before the handoff; a part
    moved to a follow-up stays unchecked and links that issue (`- [ ] … → #12`). `board.mjs handoff`
-   refuses while an open `- [ ]` line has no issue reference.
+   notes every open `- [ ]` line without an issue reference.
 7. A human merges. An agent that was given merge authority (for example by the chief of
    staff) merges only with `board.mjs merge PR`, never with a plain `gh pr merge`: the
    command applies the review gates of `handoff` (CI, every review with a trace on the head

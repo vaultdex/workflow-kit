@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { codeBlock, handoffFixture, handoffComment, handoffPr, issue, list, reference, task, test } from './board-fixture.mjs';
 
-test('handoff rejects open acceptance without an issue reference and names each line', t => {
+test('handoff only notes open acceptance without an issue reference, one note per line', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
   const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
   writeFileSync(join(checkout, 'handoff-fixture'), '');
@@ -19,16 +19,16 @@ test('handoff rejects open acceptance without an issue reference and names each 
   for (const [bodyHTML, lines] of open) {
     writeIssue({ ...ready, bodyHTML });
     const result = run('handoff', '1', '7');
-    assert.equal(result.status, 1, bodyHTML + result.stdout + result.stderr);
-    for (const line of lines) assert.ok(result.stdout.includes(': ' + line), result.stdout);
+    assert.equal(result.status, 0, bodyHTML + result.stdout + result.stderr);
+    for (const line of lines) assert.ok(result.stdout.includes('note: open acceptance without an issue reference: ' + line), result.stdout);
     assert.doesNotMatch(result.stdout, /sample in code|second/);
-    assert.equal(existsSync(join(checkout, 'mutations')), false, 'Rejected handoff never mutates status');
   }
   // No list, only code, checked off, or moved to a follow-up: the issue may go to Human review.
   for (const bodyHTML of ['', '<p>no list</p>', codeBlock, list([task('done', true)]), list([task('moved to ' + reference), task('b', true)])]) {
     writeIssue({ ...ready, bodyHTML });
     const result = run('handoff', '1', '7');
     assert.equal(result.status, 0, bodyHTML + result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /^note:/m);
   }
   writeIssue({ ...ready, bodyHTML: undefined });
   assert.equal(run('handoff', '1', '7').status, 2, 'An unreadable rendered body is unknown, never a handoff');
@@ -80,7 +80,7 @@ const quote = html => `<blockquote>\n${html}\n</blockquote>`;
 const retro = (...lines) => '<h2 dir="auto">Übergabe</h2>\n<p dir="auto">Head: abcdef1</p>\n<h3 dir="auto">Retro</h3>\n<ul dir="auto">\n'
   + lines.map(line => `<li>${line}</li>`).join('\n') + '\n</ul>';
 
-test('handoff needs a retro section whose every line ends with its resolution', t => {
+test('handoff notes a retro section whose lines do not end with a resolution, and still hands off', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
@@ -89,23 +89,23 @@ test('handoff needs a retro section whose every line ends with its resolution', 
     writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment({ body_html })]));
     return run('handoff', '1', '7');
   };
-  const rejected = (html, named, label) => {
+  const noted = (html, named, label) => {
     const result = handoff(html);
-    assert.equal(result.status, 1, label + result.stdout + result.stderr);
+    assert.equal(result.status, 0, label + result.stdout + result.stderr);
+    assert.match(result.stdout, /^note: /m, label + result.stdout);
     for (const line of named) assert.ok(result.stdout.includes(': ' + line), label + result.stdout);
-    assert.equal(existsSync(join(checkout, 'mutations')), false, label + 'Rejected handoff never mutates status');
   };
 
-  rejected(retro('Kit-Init dauert: ' + link, 'Rate-Limit: ohne Erledigung', 'Memory veraltet: persönlich gemeldet'), ['Rate-Limit: ohne Erledigung'], 'one line without resolution: ');
-  rejected(retro('Zeile mit ' + link + ' mittendrin'), ['Zeile mit #12 mittendrin'], 'reference not at the end: ');
-  rejected(retro('Zeile mit <code>#12</code>'), ['Zeile mit #12'], 'reference in code: ');
-  rejected(retro('Keine Funde', 'Zusätzlicher Fund: ' + link), ['Keine Funde'], 'Keine Funde is allowed only alone: ');
-  rejected(retro('Fund: ' + pullLink), ['Fund: #12'], 'a pull request is no follow-up issue: ');
-  rejected(retro('Fund.', 'Fund ' + link + ' danach noch Text.'), ['Fund.', 'Fund #12 danach noch Text.'], 'punctuation alone is no resolution, text after the link still is none: ');
-  rejected('<h2 dir="auto">Übergabe</h2>\n<ul dir="auto">\n<li>Retro: keine Befunde</li>\n</ul>', [], 'no retro section: ');
-  rejected('<h2 dir="auto">Übergabe</h2>\n<h3 dir="auto">Retro</h3>\n<p dir="auto">Nichts gefunden.</p>', [], 'section without lines: ');
-  rejected(quote(retro('Keine Funde')), [], 'a quoted retro section is no section: ');
-  rejected(quote(quote(retro('Keine Funde'))), [], 'a nested quote is no section either: ');
+  noted(retro('Kit-Init dauert: ' + link, 'Rate-Limit: ohne Erledigung', 'Memory veraltet: persönlich gemeldet'), ['Rate-Limit: ohne Erledigung'], 'one line without resolution: ');
+  noted(retro('Zeile mit ' + link + ' mittendrin'), ['Zeile mit #12 mittendrin'], 'reference not at the end: ');
+  noted(retro('Zeile mit <code>#12</code>'), ['Zeile mit #12'], 'reference in code: ');
+  noted(retro('Keine Funde', 'Zusätzlicher Fund: ' + link), ['Keine Funde'], 'Keine Funde is allowed only alone: ');
+  noted(retro('Fund: ' + pullLink), ['Fund: #12'], 'a pull request is no follow-up issue: ');
+  noted(retro('Fund.', 'Fund ' + link + ' danach noch Text.'), ['Fund.', 'Fund #12 danach noch Text.'], 'punctuation alone is no resolution, text after the link still is none: ');
+  noted('<h2 dir="auto">Übergabe</h2>\n<ul dir="auto">\n<li>Retro: keine Befunde</li>\n</ul>', [], 'no retro section: ');
+  noted('<h2 dir="auto">Übergabe</h2>\n<h3 dir="auto">Retro</h3>\n<p dir="auto">Nichts gefunden.</p>', [], 'section without lines: ');
+  noted(quote(retro('Keine Funde')), [], 'a quoted retro section is no section: ');
+  noted(quote(quote(retro('Keine Funde'))), [], 'a nested quote is no section either: ');
 
   for (const [html, label] of [
     [retro('Keine Funde'), 'Keine Funde alone'],
@@ -117,8 +117,15 @@ test('handoff needs a retro section whose every line ends with its resolution', 
   ]) {
     const result = handoff(html);
     assert.equal(result.status, 0, label + ': ' + result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /^note:/m, label);
   }
   assert.equal(handoff(undefined).status, 2, 'An unreadable rendered comment is unknown, never a handoff');
+  // Both notes in one run, and the handoff still goes through.
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
+  const both = handoff('<h2 dir="auto">Übergabe</h2>');
+  assert.equal(both.status, 0, both.stdout + both.stderr);
+  assert.match(both.stdout, /^note: open acceptance .*open box$/m);
+  assert.match(both.stdout, /^note: the handoff comment has no "Retro"/m);
 });
 
 
@@ -127,7 +134,7 @@ const selfReview = (level, ...lines) => `<h${level} dir="auto">Selbstprüfung</h
 
 test('handoff needs the Selbstprüfung section of the PR body to name every check the project lists, and nothing without the field', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
-  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   const config = join(checkout, '.github/workflow-project.json'), plain = JSON.parse(readFileSync(config, 'utf8'));
   const project = changes => writeFileSync(config, JSON.stringify({ ...plain, ...changes }));
@@ -137,12 +144,12 @@ test('handoff needs the Selbstprüfung section of the PR body to name every chec
     return run('handoff', '1', '7');
   };
   const both = '<code>ponytail-review</code>: nichts mehr zu streichen. <code>code-review</code>: ein Fund, behoben.';
-  // The reason names what is missing; one run also lists the other missing point (the open box), so one fix round is enough.
+  // The reason names what is missing.
   const rejected = (bodyHTML, named, label) => {
     const result = handoff(bodyHTML);
     assert.equal(result.status, 1, label + result.stdout + result.stderr);
     const blockers = result.stdout.split('\n').filter(line => line.startsWith('blocker:'));
-    assert.equal(blockers.length, 2, label + result.stdout);
+    assert.equal(blockers.length, 1, label + result.stdout);
     for (const name of named) assert.ok(blockers.some(line => line.includes('Selbstprüfung') && line.includes(name)), label + result.stdout);
     assert.equal(existsSync(join(checkout, 'mutations')), false, label + 'Rejected handoff never mutates status');
   };
