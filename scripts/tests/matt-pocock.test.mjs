@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { requireSubmodules } from './fixtures.mjs';
 
+requireSubmodules();
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const upstream = join(kit, '.vendor/matt-pocock-skills');
 const providers = ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'];
