@@ -1,0 +1,27 @@
+#!/bin/sh
+# Workflow Kit: after a branch checkout, bring .vendor/workflow-kit to the gitlink of the new branch.
+# Installed by install-git-hooks.mjs. Runs only git itself; never fails the checkout.
+[ "$3" = 1 ] || exit 0
+# Git may export the repository of the hook's caller; every command below selects its own.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+case "$(git -C "$root" ls-files -s -- .vendor/workflow-kit 2>/dev/null)" in 160000*) ;; *) exit 0 ;; esac
+kit="$root/.vendor/workflow-kit"
+# An empty directory has no .git of its own; git would then report the project, not the kit.
+if [ -e "$kit/.git" ]; then
+  # Local state the checkout could lose: changes, ignored or untracked files (an ignored file is
+  # overwritten silently), and commits no remote has (stale but published, or the old pin, is safe).
+  old=$(git -C "$root" rev-parse -q --verify "$1:.vendor/workflow-kit" 2>/dev/null)
+  head=$(git -C "$kit" rev-parse -q --verify HEAD 2>/dev/null)
+  if [ -n "$(git -C "$kit" status --porcelain --ignored --untracked-files=all 2>/dev/null)" ] ||
+    { [ "$head" != "$old" ] && [ -n "$(git -C "$kit" rev-list -n 1 HEAD --not --remotes 2>/dev/null)" ]; }; then
+    echo "Workflow Kit has local changes or unpublished commits and was not updated; resolve them, then run: git submodule update --init .vendor/workflow-kit" >&2
+    exit 0
+  fi
+fi
+# Same prompt-free update as the SessionStart hook, minus the hooks of the kit's own clone.
+# ssh may still ask on the terminal; filters and the user's git config apply as for any checkout.
+GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true git -C "$root" -c credential.interactive=false -c core.hooksPath=/dev/null \
+  submodule update --init --checkout .vendor/workflow-kit >/dev/null 2>&1 \
+  || echo "Workflow Kit not updated; run: git submodule update --init .vendor/workflow-kit" >&2
+exit 0
