@@ -1228,6 +1228,7 @@ test('handoff needs the driver handoff comment that names the current head', t =
 const link = '<a class="issue-link js-issue-link" href="https://github.com/test/example/issues/12">#12</a>';
 const pullLink = '<a class="issue-link js-issue-link" data-hovercard-type="pull_request" href="https://github.com/test/example/pull/12">#12</a>';
 const commit = '<a class="commit-link" href="https://github.com/test/example/commit/38e48bd"><tt>38e48bd</tt></a>';
+const quote = html => `<blockquote>\n${html}\n</blockquote>`;
 const retro = (...lines) => '<h2 dir="auto">Übergabe</h2>\n<p dir="auto">Head: abcdef1</p>\n<h3 dir="auto">Retro</h3>\n<ul dir="auto">\n'
   + lines.map(line => `<li>${line}</li>`).join('\n') + '\n</ul>';
 
@@ -1254,12 +1255,15 @@ test('handoff needs a retro section whose every line ends with its resolution', 
   rejected(retro('Fund: ' + pullLink), ['Fund: #12'], 'a pull request is no follow-up issue: ');
   rejected('<h2 dir="auto">Übergabe</h2>\n<ul dir="auto">\n<li>Retro: keine Befunde</li>\n</ul>', [], 'no retro section: ');
   rejected('<h2 dir="auto">Übergabe</h2>\n<h3 dir="auto">Retro</h3>\n<p dir="auto">Nichts gefunden.</p>', [], 'section without lines: ');
+  rejected(quote(retro('Keine Funde')), [], 'a quoted retro section is no section: ');
+  rejected(quote(quote(retro('Keine Funde'))), [], 'a nested quote is no section either: ');
 
   for (const [html, label] of [
     [retro('Keine Funde'), 'Keine Funde alone'],
     [retro('Kit-Init: ' + link, 'Reibung: behoben in ' + commit, 'Memory: persönlich gemeldet', 'Einzelfall: kein Handlungsbedarf: nur einmal aufgetreten'), 'every resolution'],
     [retro(`\n<p dir="auto">Fund: ${link}</p>\n`, `\n<p dir="auto">Reibung: behoben in ${commit}</p>\n`), 'loose list: GitHub wraps each line in a paragraph'],
     [retro('Fund: ' + link) + '\n<h3 dir="auto">Reviews</h3>\n<ul>\n<li>Befunde: keine</li>\n</ul>', 'lines after the next heading are not retro lines'],
+    [quote(retro('Zitat ohne Erledigung')) + '\n' + retro('Keine Funde'), 'a real section beside a quoted one counts'],
   ]) {
     const result = handoff(html);
     assert.equal(result.status, 0, label + ': ' + result.stdout + result.stderr);
