@@ -52,6 +52,11 @@ if (!path.startsWith('graphql')) {
     process.stdout.write(JSON.stringify(items.slice((page - 1) * 100, page * 100)));
     process.exit(0);
   }
+  if (parts[3] === 'compare') {
+    // The upper head against the base head: ahead unless the test says the base moved on.
+    process.stdout.write(fs.existsSync('compare.json') ? fs.readFileSync('compare.json') : JSON.stringify({ status: 'ahead' }));
+    process.exit(0);
+  }
   if (parts[3] === 'activity') {
     // The branch's push log; by default the head was set long ago.
     const head = JSON.parse(fs.readFileSync('pr.json')).headRefOid;
@@ -415,7 +420,7 @@ test('board check exits 0 only for startable issues: 1 blocked, 2 unknown', t =>
 
 test('an issue held only by open predecessors is STACKABLE on the one open, ready PR that delivers them all, else BLOCKED', t => {
   const { checkout, run, writeIssue } = fixture(t);
-  const pr = (number, changes) => ({ number, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'release/0.1.1', headRefName: `claude/${number}-base`, ...changes });
+  const pr = (number, changes) => ({ number, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'release/0.1.1', headRefName: `claude/${number}-base`, headRefOid: 'ba5e0001', ...changes });
   const open = (number, prs, changes) => predecessor('OPEN', null, prs, { number, repository: { nameWithOwner: 'test/example' }, ...changes });
   const check = (...predecessors) => { writeIssue(issue('Ready', predecessors)); return run('check', '1'); };
 
@@ -474,6 +479,13 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
     assert.match(result.stdout, /fork or another repository/);
   }
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(upper)));
+  for (const status of ['behind', 'diverged']) {
+    writeFileSync(join(checkout, 'compare.json'), JSON.stringify({ status }));
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /does not contain the current head ba5e000 of PR #5/);
+  }
+  rmSync(join(checkout, 'compare.json'));
   const handed = run('handoff', '1', '7');
   assert.equal(handed.status, 0, handed.stdout + handed.stderr);
   assert.match(handed.stdout, /HANDOFF #1 PR #7/);

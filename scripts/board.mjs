@@ -20,7 +20,7 @@ function graphql(query, variables = {}) {
 
 // A predecessor with its open PRs: the base of a stack is found through the native closing links (manual ones included).
 const predecessorFields = `number state stateReason repository{nameWithOwner}
-  closedByPullRequestsReferences(first:10,includeClosedPrs:false){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName}}`;
+  closedByPullRequestsReferences(first:10,includeClosedPrs:false){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
   id number title state body bodyHTML assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
@@ -752,8 +752,13 @@ function handoffIssue(issue, viewer) {
   // An upper layer may be handed off before the base is merged, but only as a layer on that base.
   if (stackedOn) {
     const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-      pullRequest(number:$number){baseRefName isCrossRepository headRepository{nameWithOwner}}}}`, { owner, name, number: Number(value) }).repository;
+      pullRequest(number:$number){baseRefName headRefOid isCrossRepository headRepository{nameWithOwner}}}}`, { owner, name, number: Number(value) }).repository;
     if (pr?.isCrossRepository !== false || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) reasons.push(`PR #${value} comes from a fork or another repository: stacks stay inside ${project.repository}`);
+    // Proof of the upper head only counts when that head contains the base PR's current head (a later push below leaves the branch name unchanged).
+    if (!reasons.length && pr?.baseRefName === stackedOn.headRefName) {
+      const { status } = rest(`repos/${project.repository}/compare/${stackedOn.headRefOid}...${pr.headRefOid}`);
+      if (!['ahead', 'identical'].includes(status)) reasons.push(`PR #${value} does not contain the current head ${stackedOn.headRefOid.slice(0, 7)} of PR #${stackedOn.number} (compare says ${status}): rebase onto it and push with the lease`);
+    }
     if (pr?.baseRefName !== stackedOn.headRefName) reasons.push(`the open predecessor PR #${stackedOn.number} is not merged: PR #${value} must target its branch ${stackedOn.headRefName}, not ${pr?.baseRefName}`);
   }
   if (!['Automated review', 'Human review'].includes(status)) reasons.push('finish implementation and Automated review first');

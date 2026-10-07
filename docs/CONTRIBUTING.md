@@ -182,7 +182,9 @@ otherwise: every correction below restarts CI and reviews above.
    `gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base B`. On a base
    PR into `release/X.Y.Z` the stack's trunk is that release branch; that is allowed.
 2. **PR and stack.** Create your PR as Draft with base `B` (`gh pr create --draft --base B`),
-   then link both PRs: `gh stack link BASE_PR YOUR_PR` (bottom first; extension
+   then link both PRs: `gh stack link --base BASE_OF_BASE_PR BASE_PR YOUR_PR` (bottom first;
+   `BASE_OF_BASE_PR` is the `base` shown after `stack base`: without the flag the stack's bottom
+   targets the default branch and would retarget a PR on `release/X.Y.Z`; extension
    `gh extension install github/gh-stack`). Without the extension, `gh api -X POST
    repos/OWNER/REPO/stacks -F 'pull_requests[]=BASE_PR' -F 'pull_requests[]=YOUR_PR'` does the same.
    Read it back with `gh api "repos/OWNER/REPO/stacks?pull_request=YOUR_PR"`; an empty result is
@@ -203,8 +205,9 @@ otherwise: every correction below restarts CI and reviews above.
    fetch, then check the base branch and CI on the new head before anything else. If the base PR is
    closed without merge, your layer stops: run `check` again and report; don't retarget your PR on your own.
 6. **Handoff.** Your layer may go to Human review before the base PR is merged. `board.mjs handoff`
-   then requires your PR to target the base PR's branch. The handoff comment names the merge order
-   (base PR first, then yours).
+   then requires your PR to come from this repository, to target the base PR's branch and to contain
+   that branch's current head (after a push below, rebase first and let CI run again). The handoff
+   comment names the merge order (base PR first, then yours).
 
 ### PR backlinks
 
