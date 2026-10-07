@@ -133,18 +133,29 @@ test('handoff blocks on open Sonar issues behind a passed quality gate and never
   writeFileSync(join(checkout, 'sonar-mock.cjs'), `const fs = require('node:fs');
 globalThis.fetch = async (url, init) => {
   fs.appendFileSync('sonar-requests', JSON.stringify([String(url), init.headers.Authorization]) + '\\n');
-  const { status, total } = JSON.parse(fs.readFileSync('sonar.json', 'utf8'));
-  return { ok: status === 200, status, text: async () => JSON.stringify({ total }) };
+  const { status, total, issues } = JSON.parse(fs.readFileSync('sonar.json', 'utf8'));
+  return { ok: status === 200, status, text: async () => JSON.stringify({ total, issues }) };
 };`);
   env.NODE_OPTIONS = `--require "${join(checkout, 'sonar-mock.cjs').replaceAll(sep, '/')}"`;
   env.SONAR_TOKEN = 'secret-token';
-  const answer = (status, total) => writeFileSync(join(checkout, 'sonar.json'), JSON.stringify({ status, total }));
+  const answer = (status, total, issues = []) => writeFileSync(join(checkout, 'sonar.json'), JSON.stringify({ status, total, issues }));
+  const finding = (rule, file, line, message) => ({ rule, component: `test_example:${file}`, line, message });
   const mutations = join(checkout, 'mutations');
 
-  answer(200, 3);
+  answer(200, 2, [finding('java:S3776', 'src/A.java', 42, 'Refactor this method\nto reduce its Cognitive Complexity'), finding('java:S1135', 'src/B.java', undefined, 'Complete the task')]);
   let result = run('handoff', '1', '7');
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /^blocker:/m);
+  // Rule, file, line and message of each finding, the token never.
+  assert.match(result.stdout, /^sonar: java:S3776 src\/A\.java:42 Refactor this method to reduce its Cognitive Complexity$/m);
+  assert.match(result.stdout, /^sonar: java:S1135 src\/B\.java Complete the task$/m);
+  assert.doesNotMatch(result.stdout + result.stderr, /secret-token/);
+
+  // The list is capped; the rest is only counted.
+  answer(200, 12, Array.from({ length: 12 }, (_, index) => finding('java:S1', `src/F${index}.java`, index + 1, 'm')));
+  result = run('handoff', '1', '7');
+  assert.equal(result.stdout.match(/^sonar: java:S1 /gm).length, 10, result.stdout);
+  assert.match(result.stdout, /^sonar: … 2 more$/m);
   assert.equal(existsSync(mutations), false, 'Open Sonar issues keep the status untouched');
   const [requested, authorization] = JSON.parse(readFileSync(join(checkout, 'sonar-requests'), 'utf8').split('\n')[0]);
   assert.equal(authorization, 'Bearer secret-token', 'The anonymous API reports 0 for private projects');

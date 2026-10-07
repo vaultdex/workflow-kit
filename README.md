@@ -237,7 +237,8 @@ and then work in that directory, their relative paths (changed files given to `a
   It also prints the merge state and `blocker:` lines (standing change requests,
   conflicts), because mergeable is not merge-ready. When the PR has a finished
   SonarCloud check it also counts the head's OPEN and CONFIRMED Sonar issues (the
-  quality gate judges new-code conditions only) and prints a `blocker:` line for any; `handoff`
+  quality gate judges new-code conditions only) and prints a `blocker:` line for any, after up to 10
+  `sonar: RULE file:line message` lines (the rest only counted); `handoff`
   then exits 1. The read needs `SONAR_TOKEN` in the environment (the anonymous API
   reports 0 for private projects); without it, or on a refused read, the command
   ends `ERROR` (exit 2), never green. Security hotspots stay a manual read. A workflow

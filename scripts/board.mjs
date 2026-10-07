@@ -891,6 +891,7 @@ const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const readPr = prNumber => graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
 // The token goes only to these hosts, whatever URL a check run names.
 const sonarHosts = ['https://sonarcloud.io', 'https://sonarqube.us'];
+const sonarListed = 10; // findings printed per analysis; the count says how many more
 /**
  * OPEN and CONFIRMED issues of the pull request analysis a SonarCloud check run points at. The anonymous API reports 0
  * for private projects, so a missing token or a failed read throws (never "clean"). Sync like the other reads: the
@@ -903,14 +904,20 @@ function sonarIssues(detailsUrl, prNumber) {
     `The SonarCloud check does not link PR #${prNumber}'s analysis (${detailsUrl}); open issues are unreadable`);
   assert.ok(process.env.SONAR_TOKEN, 'Set SONAR_TOKEN: without it the Sonar API reports 0 issues for private projects, so open issues are unreadable');
   const api = new URL('/api/issues/search', target.origin);
-  api.search = new URLSearchParams({ componentKeys: key, pullRequest: String(prNumber), issueStatuses: 'OPEN,CONFIRMED', ps: '1' });
+  api.search = new URLSearchParams({ componentKeys: key, pullRequest: String(prNumber), issueStatuses: 'OPEN,CONFIRMED', ps: String(sonarListed) });
   const body = execFileSync(process.execPath, ['--input-type=module', '-e',
     `const r = await fetch(process.argv[1], { headers: { Authorization: 'Bearer ' + process.env.SONAR_TOKEN } });
      if (!r.ok) throw new Error('Sonar API answered ' + r.status);
      process.stdout.write(await r.text());`, api.href], { encoding: 'utf8', maxBuffer: 16 << 20 });
-  const { total } = JSON.parse(body);
-  assert.ok(Number.isSafeInteger(total) && total >= 0, 'Sonar issue count is unreadable');
-  return total;
+  const { total, issues } = JSON.parse(body);
+  assert.ok(Number.isSafeInteger(total) && total >= 0 && Array.isArray(issues), 'Sonar issue count is unreadable');
+  // One line each, so a finding is fixable without a script of its own. The message quotes code of the PR: no control characters.
+  const lines = issues.slice(0, sonarListed).map(({ rule, component, line, message }) => {
+    const file = String(component ?? '').replace(`${key}:`, '');
+    return `sonar: ${rule} ${file}${line ? `:${line}` : ''} ${String(message ?? '').replace(/\p{Cc}+/gu, ' ')}`;
+  });
+  if (total > lines.length) lines.push(`sonar: … ${total - lines.length} more`);
+  return { total, lines };
 }
 
 function pushLog(pr) {
@@ -1118,8 +1125,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final; a skipped check ran no analysis.
   for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
-    const open = sonarIssues(check.detailsUrl, pr.number);
-    lines.push(`sonar: ${open} open issue${open === 1 ? '' : 's'}`);
+    const { total: open, lines: found } = sonarIssues(check.detailsUrl, pr.number);
+    lines.push(`sonar: ${open} open issue${open === 1 ? '' : 's'}`, ...found);
     if (open) lines.push(`blocker: ${open} open Sonar issue${open === 1 ? '' : 's'} on this head; fix them or justify each as a false positive`);
   }
   const comments = restAll(`repos/${project.repository}/issues/${pr.number}/comments`);
