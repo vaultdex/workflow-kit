@@ -328,7 +328,7 @@ comment, a comment for an earlier push does not count, and it works the same for
 a check suite or one that was pushed and checked on another branch first. Put the retro under
 the heading `Retro` (any level, usually `###`), one list line per finding, and, after another
 heading, the review findings with their disposition and, if a reviewer was unavailable or
-stalled, the reviewer, cause and evidence (an optional reviewer only when it found something). Every retro line ends with exactly one resolution:
+stalled, the reviewer, cause and evidence (an optional reviewer only when it found something). Every retro line ends with exactly one resolution (a closing `.`, `,` or `;` after it is ignored):
 
 - an issue link: `#N` or `OWNER/REPO#N` (the issue that owns the fix; a pull request link does not count),
 - `behoben in <SHA>`,
@@ -367,18 +367,21 @@ a check alone does not claim work.
 `node .vendor/workflow-kit/scripts/affected-tests.mjs` knows only the kit's tests. A project adds its own map in
 `.github/affected-tests.json` (`init-project.mjs` does not create it): a path pattern (`*` inside a folder, `**` across
 folders, relative to the project root) and a command or a list of commands. The script prints each matching
-command once after the kit's tests; `--run` runs them in the project root and stops at the first failure.
+command once after the kit's tests; `--run` runs them in the project root and stops at the first failure. A green `--run` prints only the test counts (`ok: <command>` per project command), a red one the failure's output; `--verbose` shows every line.
 Without the file nothing changes. The changed files are those against the merge base with `origin/main`, or with
 `--base origin/release/1.2` for projects that target release branches; files listed as arguments replace them.
 Run it from the project root: the working directory decides which project it reads.
 
 ```json
 {
-  "backend/domain/**": "backend/gradlew -p backend :domain:test",
-  "backend/api/**": ["backend/gradlew -p backend :api:test", "backend/gradlew -p backend :tests:test"],
+  "backend/domain/**": "sh backend/gradlew -p backend :domain:test",
+  "backend/api/**": ["sh backend/gradlew -p backend :api:test", "sh backend/gradlew -p backend :tests:test"],
   "frontend/web/**": "npm --prefix frontend/web run test -- --changed"
 }
 ```
+
+On Windows the commands run through `cmd.exe`, so a bare path or a `./` prefix does not work as the program
+(`backend/gradlew` fails there with "'backend' is not recognized"); `sh backend/gradlew` runs on both systems.
 
 The commands run with the permissions of whoever runs the script, like a `package.json` script; change the
 file only through a reviewed pull request.
