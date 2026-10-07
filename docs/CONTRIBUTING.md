@@ -341,7 +341,8 @@ backlink never closes an issue.
    status or review on the head commit, or, created after the head was pushed, a
    review comment, an open review request, an announced review or a bot's reaction
    to the PR or a review request. Once CI is green, a reviewer without such a trace
-   is not coming. A traced review finishes when it posts its result: a review, a
+   is not coming; that grace (`reviewerGraceMinutes`, default 3 minutes, `0` turns it off, [setup](../SETUP.md#3-board-and-labels))
+   ends at once when a required bot has answered on the head, also with a limit notice. A traced review finishes when it posts its result: a review, a
    completed summary or a final status. If no result arrives within the time the
    reviewer's last completed review on this PR took (otherwise its usual duration),
    it is stalled. Pending, cancelled or missing expected CI checks are not success; a

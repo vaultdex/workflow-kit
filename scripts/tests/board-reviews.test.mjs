@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixture, handoffPr, reviewsFixture, test } from './board-fixture.mjs';
 
@@ -68,6 +68,32 @@ test('reviews waits only for traces on the current head and never reads failures
   // Without the grace nothing else reads the log, so an unreadable one must not turn green into ERROR either.
   assert.equal(look({ ...readied(30, {}, 5), firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] } }, undefined, '--grace', '0').status, 0, 'An unreadable push log keeps the green verdict');
   rmSync(join(checkout, 'activity.json'));
+});
+
+
+test('the reviewer grace ends when a required bot has answered and follows reviewerGraceMinutes', t => {
+  const { checkout, minutesAgo, codexUser, check, pr, codex, reaction, reviews } = reviewsFixture(t);
+  const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8');
+  const readied = { ...pr({ pushed: 1 }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(0.5) }] } };
+  const say = (body, user = codexUser) => ({ id: 77, user, html_url: 'u', created_at: minutesAgo(0.2), updated_at: minutesAgo(0.2), body });
+  assert.equal(reviews(readied), 3, 'Precondition: the grace is still running');
+  assert.equal(reviews(readied, { comments: [say('You have reached your usage limits.')] }), 0, 'A limit notice ends the grace');
+  assert.equal(reviews(readied, { reactions: [reaction('+1', 0.2)] }), 0, 'A final reaction ends the grace');
+  assert.equal(reviews(readied, { comments: [codex('Running', 0.2)] }), 3, 'An unfinished Running summary does not end the grace');
+  assert.equal(reviews(readied, { comments: [say('looks fine', { login: 'maintainer', type: 'User' })] }), 3, 'A human comment does not end the grace');
+  assert.equal(reviews(readied, { comments: [say('coverage', { login: 'github-actions[bot]', type: 'Bot' })] }), 3, 'A CI comment does not end the grace');
+  const limited = { ...check('COMPLETED'), name: 'CodeRabbit', description: 'Review rate limited', checkSuite: { app: { slug: 'coderabbitai' } } };
+  assert.equal(reviews({ ...readied, ...pr({ contexts: [check('COMPLETED'), limited] }), isDraft: false, createdAt: readied.createdAt, readyEvents: readied.readyEvents }), 0, 'A limit notice on a check ends the grace');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: ['chatgpt-codex-connector'] }));
+  assert.equal(reviews(readied, { comments: [say('usage limits')] }), 3, 'An optional reviewer never ends the grace');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), reviewerGraceMinutes: 0 }));
+  assert.equal(reviews(readied), 0, 'reviewerGraceMinutes 0 does not wait');
+  assert.equal(reviews(readied, {}, '--grace', '10'), 3, '--grace overrides the project setting');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), reviewerGraceMinutes: 10 }));
+  assert.equal(reviews({ ...readied, readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] }, ...pr({ pushed: 5 }), isDraft: false, createdAt: readied.createdAt }), 3, 'A longer project grace waits longer than the default');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), reviewerGraceMinutes: '0' }));
+  assert.equal(reviews(readied), 2, 'A malformed setting is an error, never silently the default');
+  writeFileSync(config, plain);
 });
 
 

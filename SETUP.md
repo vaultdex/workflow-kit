@@ -78,6 +78,10 @@ Its findings, open threads and change requests still count, and its 👀 reactio
 shown as a note. An analyzer such as SonarCloud listed there still reports its open issues
 as a blocker, because they are findings, not waiting. A `null` or other non-list value is an
 ERROR; omit the field instead. The script keeps these settings too.
+`board.mjs wait`, `reviews` and `handoff` also keep waiting a few minutes after Ready and after each push, because a
+review bot may start late (`"reviewerGraceMinutes"`, default 3). The wait ends sooner when a required bot has answered on
+the head, a limit notice included. A project whose bots do not start on their own sets
+`"reviewerGraceMinutes": 0`; a non-number or negative value is an ERROR.
 Likewise `"requiredFields": ["Size"]` names Project fields that
 `board.mjs new` demands besides Priority.
 
