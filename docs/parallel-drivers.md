@@ -45,10 +45,15 @@ Konto und wird von allen Drivern gemeinsam verbraucht; ist es leer, scheitert je
 5 Minuten (bei Neuigkeiten wieder von vorn), also etwa 20 bis 40 Punkte pro Stunde und Driver
 statt 120 bei festem Minutentakt. Als Budget gilt: Zahl der Driver mal 40 Punkte, dazu der eigene
 Verbrauch der Agents; höchstens 20 parallele `wait` (rund 800 Punkte pro Stunde, ein Sechstel
-des Kontingents). `wait` und `reviews` melden den Rest in einer Zeile (`quota: …`).
-`wait`, `reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 300 (`wait`)
-beziehungsweise 50 Punkten bis zum Reset (`rate limited until …`) und fragen danach weiter; bei
-einer kurzen Drosselung („secondary rate limit“) warten sie 1, 2, dann 4 Minuten statt bis zum
+des Kontingents). `wait` fragt GraphQL nur noch, wenn sich laut REST etwas geändert hat (Head, Checks,
+Status, Aktualisierungszeit), spätestens alle 5 Minuten und zur Bestätigung jedes Endes; `wait PR --merged` liest nur REST
+([#324](https://github.com/vaultdex/workflow-kit/issues/324)). `wait` und `reviews` melden den Rest in einer Zeile (`quota: …`).
+`node scripts/quota-sample.mjs OUT.jsonl` misst den Verbrauch des ganzen Kontos: eine Stunde lang jede Minute `used` und `usedDelta` (die Abfrage kostet selbst einen Punkt pro Minute).
+`reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 50 Punkten bis zum Reset
+(`rate limited until …`) und fragen danach weiter. `wait` schläft nicht: bei einer Sperre oder unter 300 Punkten liest es
+PR und Checks weiter über REST (Zähler in der Zeile `waiting:`, ohne Urteil) und holt Threads und Urteil nach dem Reset;
+bei `--max-minutes` endet es mit Exit 4 und der Reset-Zeit. Bei
+einer kurzen Drosselung („secondary rate limit“) warten `reviews` und `handoff` 1, 2, dann 4 Minuten statt bis zum
 Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab (Uhrzeit und Minuten bis dahin). Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
 Rest und Reset stammen aus den Headern `x-ratelimit-remaining` und `x-ratelimit-reset` der eigenen Antworten
 (auch der abgewiesenen); zeigt eine Abweisung selbst freies Kontingent, fragt der Befehl sofort erneut,
@@ -141,6 +146,9 @@ Modellwahl stehen hier nicht.
      nicht beim Driver. Hintergrund nur für lange Prüfläufe mit eigener Benachrichtigung.
    - Warten: auf die Benachrichtigung der eigenen Hintergrundaufgabe; Prozessnamen
      (`node.exe`) gehören auch anderen Drivern.
+   - Keine eigenen Schleifen um `gh`: `gh api graphql` meldet die Kontingentsperre als Text und kann mit Exit 0 enden
+     (Driver #1095 wartete so 9 Minuten umsonst). Warten mit `board.mjs wait` oder `board.mjs quota-wait`
+     ([#324](https://github.com/vaultdex/workflow-kit/issues/324)).
    - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
      und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
    - Kommentare eines Issues: `gh api repos/OWNER/REPO/issues/N/comments`.

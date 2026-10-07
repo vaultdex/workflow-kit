@@ -139,6 +139,33 @@ function api(argv, input, stdout, stderr, exit) {
       stdout(fs.existsSync('activity.json') ? fs.readFileSync('activity.json') : JSON.stringify([{ after: head, timestamp: '2000-01-01T00:00:00Z' }]));
       exit(0);
     }
+    if (parts[3] === 'pulls' && parts.length === 5) {
+      // The PR as REST shows it, derived from pr.json so GraphQL and REST agree. Each read takes the next overlay of pr-rest-reads.json
+      // (the last one stays) and applies it to pr.json: a change that becomes visible between two rounds of `wait`. Reads are counted in rest-reads.
+      fs.appendFileSync('rest-reads', 'x\n');
+      if (fs.existsSync('pr-rest-reads.json')) {
+        const reads = JSON.parse(fs.readFileSync('pr-rest-reads.json'));
+        const overlay = reads.length > 1 ? reads.shift() : reads[0];
+        fs.writeFileSync('pr-rest-reads.json', JSON.stringify(reads));
+        fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...overlay }));
+      }
+      const pr = JSON.parse(fs.readFileSync('pr.json'));
+      stdout(JSON.stringify({ number: pr.number, state: pr.state === 'OPEN' ? 'open' : 'closed', merged: pr.state === 'MERGED', draft: pr.isDraft, updated_at: pr.updatedAt ?? 'u',
+        mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid } }));
+      exit(0);
+    }
+    if (parts[3] === 'commits' && ['check-runs', 'check-suites', 'status'].includes(parts[5])) {
+      // The checks of the head, also derived from pr.json.
+      const { commit } = JSON.parse(fs.readFileSync('pr.json')).commits.nodes[0];
+      const contexts = commit.statusCheckRollup?.contexts.nodes ?? [];
+      const pick = nodes => nodes.map((node, id) => ({ id, status: node.status?.toLowerCase(), conclusion: node.conclusion?.toLowerCase() }));
+      stdout(JSON.stringify({
+        'check-runs': { check_runs: pick(contexts.filter(node => node.__typename === 'CheckRun')) },
+        'check-suites': { check_suites: pick(commit.checkSuites.nodes) },
+        status: { statuses: contexts.filter(node => node.__typename === 'StatusContext').map(node => ({ context: node.context, state: node.state, description: node.description })) },
+      }[parts[5]]));
+      exit(0);
+    }
     const file = parts.at(-3) + '-' + parts.at(-1) + '.json';
     const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
     const items = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];
@@ -156,11 +183,14 @@ function api(argv, input, stdout, stderr, exit) {
   };
   // limited: GitHub refuses the next query, like its RATE_LIMIT error, and takes the file away: the quota is back after one wait.
   // "free" in the file: the refusal is stale, its own headers show 4000 points left and a reset three seconds away.
-  if (fs.existsSync('limited')) {
-    const stale = fs.readFileSync('limited', 'utf8') === 'free';
-    fs.unlinkSync('limited');
+  if (fs.existsSync('limited') || fs.existsSync('limited-200')) {
+    const limitedFile = fs.existsSync('limited') ? 'limited' : 'limited-200';
+    const stale = fs.readFileSync(limitedFile, 'utf8') === 'free';
+    fs.unlinkSync(limitedFile);
     answer(JSON.stringify({ errors: [{ type: 'RATE_LIMIT', code: 'graphql_rate_limit', message: 'API rate limit already exceeded for user ID 1.' }] }),
       stale ? [4000, Math.ceil((Date.now() + 3000) / 1000)] : [0, Math.floor(Date.now() / 1000) + 1]);
+    if (!stale) fs.writeFileSync('quota-left', '4000'); // the retry after reset carries a fresh positive quota header
+    if (limitedFile === 'limited-200') return;
     stderr('gh: API rate limit already exceeded for user ID 1.\n');
     exit(1);
   }
@@ -276,12 +306,23 @@ function api(argv, input, stdout, stderr, exit) {
     data = { repository: { issue: { issueFieldValues: { nodes: [] },
       projectItems: { nodes: [{ project: { id: 'P1' }, fieldValues: { nodes: Object.entries(values).map(([id, name]) => ({ name: lost || name, field: { name: names[id] } })) } }] } } } };
   }
-  else if (query.includes('reviewThreads(first:100,after')) {
-    const pages = JSON.parse(fs.readFileSync('pr.json')).threadPages ?? [[]];
+  else if (query.includes('reviewThreads(first:100')) {
+    let pr = JSON.parse(fs.readFileSync('pr.json'));
+    if (query.includes('readyEvents') && fs.existsSync('pr-reads.json')) {
+      const reads = JSON.parse(fs.readFileSync('pr-reads.json'));
+      const overlay = reads.length > 1 ? reads.shift() : reads[0];
+      fs.writeFileSync('pr-reads.json', JSON.stringify(reads));
+      pr = { ...pr, ...overlay };
+      fs.writeFileSync('pr.json', JSON.stringify(pr));
+    }
+    const pages = pr.threadPages ?? [[]];
     const cursor = argv.find(arg => arg.startsWith('after='));
     const index = cursor ? Number(cursor.slice(6)) : 0;
-    data = { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
-      nodes: pages[index].map(isResolved => ({ isResolved, comments: { nodes: [{ url: 'thread-' + index }] } })) } } } };
+    const reviewThreads = { pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
+      nodes: pages[index].map(isResolved => ({ isResolved, comments: { nodes: [{ url: 'thread-' + index }] } })) };
+    data = query.includes('readyEvents')
+      ? { repository: { pullRequest: { ...pr, reviewThreads } } }
+      : { repository: { pullRequest: { reviewThreads } } };
   }
   else if (query.includes('closingIssuesReferences')) {
     if (fs.existsSync('fail-links')) exit(1);

@@ -98,7 +98,7 @@ export const handoffPr = changes => ({
 
 /** What the reviews tests share: a checkout, PR snapshots, Codex traces and `look` (write the snapshot, run `reviews`). */
 export function reviewsFixture(t) {
-  const { checkout, run, runBriefly } = fixture(t);
+  const { checkout, run, runBriefly, queries } = fixture(t);
   const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
   const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
   const check = (status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null) => ({ __typename: 'CheckRun', name: 'CI', status, conclusion });
@@ -142,7 +142,7 @@ export function reviewsFixture(t) {
   };
   const readyHead = (contexts, extra) => ({ ...pr({ contexts, pushed: 10 }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] }, ...extra });
   const oldTraces = { comments: [codex('Completed', 0)] };
-  return { checkout, run, runBriefly, minutesAgo, job, draftRun, readyHead, oldTraces, codexUser, check, suite, pr, codex, reaction, look, reviews };
+  return { checkout, run, runBriefly, queries, minutesAgo, job, draftRun, readyHead, oldTraces, codexUser, check, suite, pr, codex, reaction, look, reviews };
 }
 
 // GitHub's rendering of a task item, an issue reference and a code block (shape of its Markdown API output).

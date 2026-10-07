@@ -47,15 +47,15 @@ test('the quota is read from the headers of a response, a refusal included', () 
   assert.equal(untilText('2026-10-07T04:20:34.000Z', Date.parse('2026-10-07T04:14:10Z')), '2026-10-07T04:20:34.000Z (in 7 min)');
 });
 
-test('little quota left makes reviews wait for the reset before the next query', t => {
-  const { checkout, run } = fixture(t);
+test('little quota left does not require another GraphQL query for the review threads', t => {
+  const { checkout, run, queries } = fixture(t);
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
   writeFileSync(join(checkout, 'quota-left'), '10');
-  const started = Date.now();
   const result = run('reviews', '7');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  // The fixture reports the reset 3 seconds after its first answer, so a run that did not wait for it ends sooner.
-  assert.ok(Date.now() - started >= 3000, 'The second query waited for the reset');
+  const sent = queries();
+  assert.equal(sent.length, 1, 'One query carries the PR and its review threads');
+  assert.ok(sent[0].includes('readyEvents') && sent[0].includes('reviewThreads'), 'The one query includes both required reads');
 });
 
 test('wait pauses longer with every quiet read and, below 1000 points left, twice as long', () => {
