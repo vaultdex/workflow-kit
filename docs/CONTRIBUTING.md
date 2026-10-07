@@ -145,6 +145,22 @@ recommendation or elapsed time is not approval. Remove the section and the label
 only when every point is resolved. Routine technical decisions are yours.
 [Example](task-writing-examples.md#menschliche-mitwirkung).
 
+**Asking a human.** This applies to every question a human must decide, in a
+grilling or anywhere else, not to routine technical choices:
+
+1. **Overview first.** Start with a numbered overview in plain language. For each
+   question give the context, the options with their consequences, and your
+   recommendation.
+2. **Then the question tool.** Ask the same questions through the harness's question
+   tool (Claude Code: `AskUserQuestion`), in batches of at most 4. Questions only as
+   text in a status report are not enough: they get lost. A harness without such a
+   tool gets the numbered list at the end of your answer, and you stop there.
+3. **Never skip.** Don't answer the question yourself, skip it, postpone it
+   silently or work around it. Work that depends on the answer waits; everything
+   else continues. If the human closes the dialog without answering, the question
+   stays open. This extends "Silence, a recommendation or elapsed time is not
+   approval" above.
+
 ## Delivery
 
 **Branch.** Create the branch from the issue so GitHub links it:
