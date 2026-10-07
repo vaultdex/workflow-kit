@@ -109,6 +109,8 @@ Modellwahl stehen hier nicht.
      Bericht zurückkommt; Hintergrund nur für lange Prüfläufe mit eigener Benachrichtigung.
    - Warten: auf die Benachrichtigung der eigenen Hintergrundaufgabe; Prozessnamen
      (`node.exe`) gehören auch anderen Drivern.
+   - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
+     und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
    - `gh issue view N --json comments` liefert die Kommentare; `--comments` passt nicht
      zu `--json`.
    - Worktree: der Driver arbeitet im eigenen Worktree, nie in dem der Eltern-Session;
