@@ -113,11 +113,26 @@ whatever its condition, sets a foreign path. Anything else, such as a foreign pa
 local, global or system config, stays and is reported: integrate `.githooks` there
 yourself. Without `.githooks/` it does nothing.
 
+The installer also writes `.githooks/post-checkout` (from `scripts/git-hooks/post-checkout`) when it is
+missing, unless the project already has a different one, which stays; commit it with
+`git add --chmod=+x .githooks/post-checkout`. After a branch checkout (third argument `1`) the hook runs
+`git submodule update --init --checkout .vendor/workflow-kit`, so the kit follows the gitlink of the
+new branch instead of showing `M .vendor/workflow-kit`. It touches only the kit, not other submodules
+or `submodule.recurse`, disables Git's own prompts like the SessionStart hook (ssh may still ask on the terminal) and runs none of the kit clone's own hooks. Like any checkout it applies the user's Git configuration, including filters.
+A rerun of the installer repairs a missing executable bit and reports a hook tracked without it
+(`git update-index --chmod=+x`). A kit with local changes, ignored or untracked files, or commits no remote has
+(a clean, published kit behind or ahead of the old pin still follows) is not touched: the hook prints a hint
+and the checkout continues; any failure only prints the command. Without a kit gitlink, as in this repository,
+it does nothing. The hook is versioned with each branch (Git resolves `.githooks` in the new worktree after
+the switch), so a branch created before the hook was committed has none and does not sync until it merges
+the default branch. Known limit: where the kit has `core.filemode=false`, a purely local mode change is invisible to
+Git and the update may reset it. A hook copy with CRLF line endings differs from the kit's and is kept, not blessed.
+
 ## Board commands
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
 
-- `next`, `check ISSUE [--session ID]`, `status ISSUE "STATUS"`, `priority ISSUE High`,
+- `next`, `check ISSUE [--session ID]` (shows the age and open PR of a claim and one line per native sub-issue; information only), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
 - `field ISSUE NAME VALUE`: any single-select field, read back after writing.
@@ -140,6 +155,9 @@ yourself. Without `.githooks/` it does nothing.
   five times, one second apart (GitHub shows a new connection with a delay), and a write
   whose read-back still lacks the issue exits 2. The write itself is never repeated.
   It never closes the issue: that happens when the PR merges into the default branch.
+  For an open issue of this repository it also posts the PR's backlink comment, the one `status ISSUE "Automated review" PR`
+  requires, unless a comment with the PR's URL exists, and reads the comments back
+  (a missing comment after the write exits 2; the write is not repeated).
 - `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
   repository ready for review, but only for the commit you pushed. It rereads the PR
   (default 6 reads, 5 s apart; both waits, before the write and for the read-back, together

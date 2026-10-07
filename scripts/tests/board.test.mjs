@@ -46,6 +46,18 @@ if (!path.startsWith('graphql')) {
     process.exit(0);
   }
   const comments = 'backlink-comments-' + parts[4] + '.json';
+  if (parts[3] === 'issues' && parts[5] === 'comments' && process.argv.includes('POST')) {
+    // A comment write; comment-noop is GitHub accepting it without showing it.
+    fs.appendFileSync('comment-writes', 'x\\n');
+    if (!fs.existsSync('comment-noop')) {
+      const items = JSON.parse(fs.readFileSync(comments));
+      items.push({ id: items.length + 1, body: fs.readFileSync(0, 'utf8'), html_url: 'https://github.com/test/example/issues/1#issuecomment-' + (items.length + 1) });
+      fs.writeFileSync(comments, JSON.stringify(items));
+      fs.writeFileSync(backlink, JSON.stringify({ ...JSON.parse(fs.readFileSync(backlink)), comments: items.length }));
+    }
+    process.stdout.write('{}');
+    process.exit(0);
+  }
   if (parts[3] === 'issues' && parts[5] === 'comments' && fs.existsSync(comments)) {
     const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
     const items = JSON.parse(fs.readFileSync(comments));
@@ -900,20 +912,30 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   const { checkout, run, writeIssue } = fixture(t);
   writeIssue(issue('In progress'));
   const mutations = () => existsSync(join(checkout, 'mutations')) ? readFileSync(join(checkout, 'mutations'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const commentWrites = () => existsSync(join(checkout, 'comment-writes')) ? readFileSync(join(checkout, 'comment-writes'), 'utf8').split('\n').filter(Boolean).length : 0;
   const prepare = (changes = {}) => {
-    for (const file of ['mutations', 'link-noop', 'fail']) rmSync(join(checkout, file), { force: true });
-    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [[]], ...changes })));
+    for (const file of ['mutations', 'link-noop', 'fail', 'comment-writes', 'comment-noop']) rmSync(join(checkout, file), { force: true });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [[]],
+      url: 'https://github.com/test/example/pull/7', body: 'Refs #1', ...changes })));
+    writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0 }));
+    writeFileSync(join(checkout, 'backlink-comments-1.json'), '[]');
   };
 
   prepare();
+  assert.notEqual(run('status', '1', 'Automated review', '7').status, 0, 'Without the comment the guard refuses');
+  assert.equal(mutations(), 0, 'and writes nothing');
   let result = run('link', '1', '7');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(mutations(), 1, 'A Draft PR is connected with one write');
   assert.match(readFileSync(join(checkout, 'mutations'), 'utf8'), /addCloseIssueReferences\(input:\{issueId:\$issue,pullRequestIds:\[\$pr\]\}\)/);
+  assert.equal(commentWrites(), 1, 'The missing backlink comment is written once');
+  result = run('status', '1', 'Automated review', '7');
+  assert.equal(result.status, 0, 'The guard accepts what link wrote: ' + result.stdout + result.stderr);
 
   result = run('link', '1', '7');
   assert.equal(result.status, 0, 'A second run finds the link already there');
-  assert.equal(mutations(), 1, 'No second write');
+  assert.equal(readFileSync(join(checkout, 'mutations'), 'utf8').match(/addCloseIssueReferences/g).length, 1, 'No second link write');
+  assert.equal(commentWrites(), 1, 'No second comment');
 
   prepare();
   writeFileSync(join(checkout, 'link-delay'), '2');
@@ -932,6 +954,19 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   assert.equal(result.status, 2, 'A write whose read-back lacks the issue is no success');
   assert.match(result.stdout, /^ERROR$/m);
   assert.equal(mutations(), 1, 'The write is not repeated blindly');
+
+  prepare({ linkPages: [['I1']] });
+  writeFileSync(join(checkout, 'comment-noop'), '');
+  result = run('link', '1', '7');
+  assert.equal(result.status, 2, 'A comment the read-back does not show is no success');
+  assert.match(result.stdout, /^ERROR$/m);
+  assert.equal(commentWrites(), 1, 'The comment is not written again blindly');
+
+  prepare();
+  writeIssue({ ...issue('In progress'), state: 'CLOSED' });
+  assert.equal(run('link', '1', '7').status, 2, 'A closed issue takes no backlink');
+  assert.equal(mutations() + commentWrites(), 0, 'and is refused before any write');
+  writeIssue(issue('In progress'));
 
   prepare();
   writeFileSync(join(checkout, 'fail'), '');
@@ -1262,4 +1297,42 @@ test('sub links a child once, reads the parent back and refuses bad or unconfirm
   const lost = run('sub', '1', 'test/other#6');
   assert.notEqual(lost.status, 0, 'A link GitHub does not show back is never reported as done');
   assert.doesNotMatch(lost.stdout, /has sub-issue/);
+});
+
+test('board check lists the sub-issues of a spec with status, assignee and verdict, and leaves the verdict of the parent alone', t => {
+  const { run, writeIssue } = fixture(t);
+  const child = (number, status, nodes, assignee, changes) => ({ ...issue(status, nodes), number, repository: { nameWithOwner: 'test/example' },
+    assignees: { nodes: assignee ? [{ login: assignee }] : [] }, ...changes });
+  const spec = (...children) => ({ ...issue(), subIssues: { totalCount: children.length, nodes: children } });
+
+  writeIssue(spec(child(11, 'In progress', [], 'worker'), child(12, 'Ready', [predecessor('OPEN', null)])));
+  const result = run('check', '1', '--session', 'S1');
+  assert.equal(result.status, 0, 'Sub-issues never change the verdict of the parent');
+  const lines = result.stdout.split('\n');
+  assert.equal(lines.at(-3), '#11  In progress  worker  STARTABLE', result.stdout);
+  assert.equal(lines.at(-2), '#12  Ready  -  BLOCKED', result.stdout);
+
+  writeIssue(spec(child(13, 'Backlog', []), child(14, 'Ready', [], 'worker', { repository: { nameWithOwner: 'test/other' } })));
+  assert.match(run('check', '1', '--session', 'S1').stdout, /^#13 {2}Backlog {2}- {2}BLOCKED\ntest\/other#14 {2}Ready {2}worker {2}STARTABLE$/m);
+  writeIssue(issue());
+  assert.doesNotMatch(run('check', '1', '--session', 'S1').stdout, /#\d+ {2}/, 'No sub-issues, no rows');
+});
+
+test('board check shows the age of a claim and whether a linked PR is open', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const claimedAgo = ms => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' },
+    body: 'Claim\n\nAgent: claude, Session: S1', html_url: 'https://example.test/c1', created_at: new Date(Date.now() - ms).toISOString() }]));
+  const withPrs = prs => writeIssue({ ...issue(), closedByPullRequestsReferences: { nodes: prs } });
+
+  claimedAgo((2 * 24 + 4) * 3_600_000 + 30 * 60_000);
+  withPrs([]);
+  assert.match(run('check', '1', '--session', 'S1').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: none$/m);
+  withPrs([{ number: 123, state: 'OPEN', repository: { nameWithOwner: 'Test/Example' } }, { number: 99, state: 'MERGED', repository: { nameWithOwner: 'test/example' } }, { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/other' } }]);
+  assert.match(run('check', '1', '--session', 'S2').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: #123, test\/other#7$/m, 'Shown to other sessions too; foreign PRs are qualified');
+  claimedAgo(5 * 60_000 + 10_000);
+  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #123, test\/other#7$/m);
+  writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: 150, nodes: [{ number: 5, state: 'OPEN', repository: { nameWithOwner: 'test/example' } }] } });
+  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #5 \(first 1 of 150\)$/m, 'A cut list says so');
+  writeFileSync(join(checkout, 'issues-comments.json'), '[]');
+  assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');
 });
