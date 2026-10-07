@@ -98,7 +98,7 @@ test('Automated review requires the declared open PR and every issue backlink be
   };
   writePR();
   writeBacklink(1, []);
-  reject('status', '1', 'Automated review');
+  assert.match(reject('status', '1', 'Automated review').stdout, /needs the PR number: status ISSUE "Automated review" PR/);
   reject('field', '1', 'Status', 'Automated review');
   reject('status', '1', 'Automated review', '--help');
   reject('status', '1', 'Automated review', '0');

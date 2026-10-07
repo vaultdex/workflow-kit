@@ -641,7 +641,8 @@ const findBacklink = (comments, prUrl) => comments.find(comment => (comment.body
 /** Explicit scope works with Refs on release branches; native closing links remain a separate proof. */
 function verifyBacklinks() {
   const [prRef, ...extraIssues] = process.argv.slice(command === 'field' ? 6 : 5);
-  const positive = ref => /^\d+$/.test(ref ?? '') && Number.isSafeInteger(Number(ref)) && Number(ref) > 0;
+  assert.ok(prRef !== undefined, 'Automated review needs the PR number: status ISSUE "Automated review" PR [OTHER_ISSUE...]');
+  const positive = ref =>/^\d+$/.test(ref ?? '') && Number.isSafeInteger(Number(ref)) && Number(ref) > 0;
   assert.ok(positive(prRef) && extraIssues.every(ref => validBlocker(ref) && positive(ref.slice(ref.lastIndexOf('#') + 1))),
     'Automated review requires PR [OTHER_ISSUE...]; post and read back every issue backlink first.');
   const prNumber = Number(prRef);
