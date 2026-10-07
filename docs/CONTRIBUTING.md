@@ -349,8 +349,10 @@ backlink never closes an issue.
    Read all findings and every review, comment and thread from bots and humans,
    including every page of analyzer results such as Sonar issues and hotspots. A
    green quality gate does not mean zero findings, and a missing or stale analysis
-   is not clean. Don't re-request a review that is running or finished for the
-   current commit without a concrete reason. A reviewer the project lists as
+   is not clean. Never request a review by hand (no `@codex review` comment, no
+   re-request), not afterwards either. If a reviewer that is not optional has no trace on
+   the head, say so in the handoff comment (`Codex: keine Spur auf <Head>`); the handoff
+   stands. A reviewer the project lists as
    `"optionalReviewers"` ([setup](../SETUP.md#3-board-and-labels)) is never awaited,
    re-requested or replaced by a self-review: `wait` and `handoff` ignore its traces,
    while its findings, open threads and change requests count like any other.
