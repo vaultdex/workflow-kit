@@ -75,6 +75,7 @@ project does not depend on (CodeRabbit on a free plan that is mostly rate limite
 `"optionalReviewers": ["coderabbitai"]`: `board.mjs wait`, `reviews` and `handoff` never
 wait for it or call it stalled, and agents neither re-request nor replace its review.
 Its findings, open threads and change requests still count. The script keeps these settings too.
+Likewise `"requiredFields": ["Size"]` names Project fields that
 `board.mjs new` demands besides Priority.
 
 For first installation, add the setup issue to this Project, complete its
