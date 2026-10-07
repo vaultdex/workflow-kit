@@ -150,8 +150,11 @@ Run [board commands](README.md#board-commands) in the project with authenticated
   checkout differs). Run search and Explore subagents in the foreground
   (`run_in_background: false`) so exactly one report returns.
 - Every push restarts CI and reviews: finish fixes and formatting before pushing.
-  A stack is at most two layers deep unless the human decides otherwise: a correction in
-  the lower layer restarts CI and reviews above it.
+- Native stack depth has no local maximum. Use native stacks to continue dependent work
+  at the current stack tip. Do not create
+  artificial wait or summary issues solely for stack depth or merge-queue progress;
+  use native dependencies and existing issue, PR and chat progress. Real planning and
+  product tasks remain valid issues.
 - No routine setup reruns, broad audits, or new CI jobs and triggers without an
   estimate of the added usage; get approval when the budget is unknown.
 

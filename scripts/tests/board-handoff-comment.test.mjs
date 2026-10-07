@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
-import { codeBlock, fixture, handoffComment, handoffPr, issue, list, reference, task, test } from './board-fixture.mjs';
+import { codeBlock, handoffFixture, handoffComment, handoffPr, issue, list, reference, task, test } from './board-fixture.mjs';
 
 test('handoff rejects open acceptance without an issue reference and names each line', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
@@ -36,7 +36,7 @@ test('handoff rejects open acceptance without an issue reference and names each 
 
 
 test('handoff needs the driver handoff comment that names the current head', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   const mutations = join(checkout, 'mutations');
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
@@ -81,7 +81,7 @@ const retro = (...lines) => '<h2 dir="auto">Übergabe</h2>\n<p dir="auto">Head: 
   + lines.map(line => `<li>${line}</li>`).join('\n') + '\n</ul>';
 
 test('handoff needs a retro section whose every line ends with its resolution', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
   writeFileSync(join(checkout, 'handoff-fixture'), '');
@@ -173,7 +173,7 @@ test('handoff needs the Selbstprüfung section of the PR body to name every chec
 
 
 test('handoff blocks on open Sonar issues behind a passed quality gate and never reads an unreadable count as clean', t => {
-  const { checkout, run, writeIssue, env } = fixture(t);
+  const { checkout, run, writeIssue, env } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   const base = handoffPr(), commit = base.commits.nodes[0].commit;
   const sonar = { __typename: 'CheckRun', name: 'SonarCloud Code Analysis', status: 'COMPLETED', conclusion: 'SUCCESS',

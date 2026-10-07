@@ -250,25 +250,34 @@ Use GitHub's [stacked pull requests](https://docs.github.com/en/pull-requests/ge
 (public preview) so a dependent issue does not wait for the merge of its predecessor's
 PR. Stack only when `check` says STACKABLE; otherwise the issue stays BLOCKED. Nothing
 obliges you to stack, and humans still merge, the whole stack included, bottom layer first.
-No stacks across forks or repositories and none made of several parallel branches. In
-Economy, a stack is at most two layers deep (base PR plus yours) unless the human decides
-otherwise: every correction below restarts CI and reviews above.
+No stacks across forks or repositories and none made of several parallel branches.
+There is no local maximum depth: continue at the current tip when the native stack is
+linear and the issue is STACKABLE. Every correction below restarts CI and reviews above
+it; treat that as an Economy cost, not a reason to stop after an arbitrary number of
+layers or create a wait/summary issue solely for stack depth or merge-queue progress.
+Keep real planning and product work as issues; use native dependencies and stacks plus
+existing issue, PR and chat progress for coordination.
 
 1. **Branch.** Create the issue-linked branch from the head of the base PR's branch (`stack
-   base: … branch B` in the `check` output):
+   base: … branch B` in the `check` output). When a predecessor PR is already in a native
+   stack, `check` names the current top PR and its stack number; branch from that top:
    `gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base B`, then
    `git fetch origin` and `git switch --track origin/<agent>/ISSUE-topic` as in [Delivery](#delivery).
    On a base PR into `release/X.Y.Z` the stack's trunk is that release branch; that is allowed.
-2. **PR and stack.** Create your PR as Draft with base `B` (`gh pr create --draft --base B`),
-   then link both PRs: `gh stack link --base BASE_OF_BASE_PR BASE_PR YOUR_PR` (bottom first;
-   `BASE_OF_BASE_PR` is the `base` shown after `stack base`: without the flag the stack's bottom
-   targets the default branch and would retarget a PR on `release/X.Y.Z`; extension
-   `gh extension install github/gh-stack`). Without the extension, `gh api -X POST
-   repos/OWNER/REPO/stacks -F 'pull_requests[]=BASE_PR' -F 'pull_requests[]=YOUR_PR'` does the same.
+2. **PR and stack.** Create your PR as Draft with base `B` (`gh pr create --draft --base B`).
+   If `B` is already the tip of a native stack, append your PR with
+   `gh stack link STACK_NUMBER YOUR_PR` (the number is shown by `check`; extension
+   `gh extension install github/gh-stack`). Without the extension, call
+   `POST repos/OWNER/REPO/stacks/STACK_NUMBER/add` with `{"pull_requests":[YOUR_PR]}`.
+   If `B` is not already in a native stack, link the base and your PR bottom-first:
+   `gh stack link --base BASE_OF_BASE_PR BASE_PR YOUR_PR`; without the extension,
+   `gh api -X POST repos/OWNER/REPO/stacks -F 'pull_requests[]=BASE_PR' -F 'pull_requests[]=YOUR_PR'`.
+   `BASE_OF_BASE_PR` is the `base` shown after `stack base`; this preserves a
+   `release/X.Y.Z` trunk instead of retargeting to the default branch.
    Read it back with `gh api "repos/OWNER/REPO/stacks?pull_request=YOUR_PR"`; an empty result is
    no stack. If `gh stack` or the Stacks API is unavailable or fails (for example exit code 9, not
-   enabled for the repository), there is no stack: keep the PR Draft, record the error in the issue
-   and treat the issue as BLOCKED until `check` says STARTABLE.
+   enabled for the repository), keep the PR Draft, record the error in the issue and treat the issue
+   as BLOCKED until `check` says STARTABLE.
 3. **Body and link.** `Closes #N` stays in the PR body. Because the base is not the default branch,
    also run `board.mjs link ISSUE PR` and read the connection back, as for any
    [non-default base](#delivery). Post the [backlinks](#pr-backlinks) as usual.
