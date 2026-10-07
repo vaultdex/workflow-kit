@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 // Git for Windows stops at 260 characters; the long TEMP of an agent session pushes the clones of these fixtures
 // past it (#370). Every Git child of the tests inherits the setting.
 Object.assign(process.env, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.longpaths', GIT_CONFIG_VALUE_0: 'true' });
+// Other Windows tools (cmd, PowerShell Add-Type, git's loose objects) stop there too, so the tests and their
+// children also work in the short default temp directory instead of the agent session's long one (#373).
+if (process.platform === 'win32' && process.env.LOCALAPPDATA) process.env.TEMP = process.env.TMP = join(process.env.LOCALAPPDATA, 'Temp');
 
 /** spawnSync's result shape for an asynchronous child. stdin is closed at once, as spawnSync does without input. */
 export const run = (file, args = [], { input, ...options } = {}) => new Promise(resolve => {

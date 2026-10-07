@@ -2,11 +2,11 @@
 // Nutzen: Fehlende Installation verursacht keine Edit-/Stop-Schleifen; die Engine bleibt unveraendert.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { temporary } from './fixtures.mjs';
 
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const windows = process.platform === 'win32';
@@ -17,8 +17,7 @@ const commands = (name, start) => Object.entries(JSON.parse(readFileSync(join(ki
   .flatMap(([, values]) => values.flatMap(group => group.hooks ?? [group]))
   .filter(hook => (hook.command ?? hook.bash ?? '').includes('.impeccable/'));
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'impeccable hook '));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = temporary(t, 'impeccable hook ');
   return { root, env: { ...process.env, HOME: root, USERPROFILE: root } };
 }
 function run(hook, f, input = '{}') {
