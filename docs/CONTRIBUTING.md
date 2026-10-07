@@ -229,7 +229,7 @@ backlink never closes an issue.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
    (`board.mjs ready PR SHA`), set Automated review and wait again. Merge main only for conflicts or a real need.
-   After two correction pushes, collect new findings that neither block (P1,
+   After two correction pushes, collect new findings that neither block (P0/P1,
    security, data loss) nor regress against main in one follow-up issue instead of
    another push; every push restarts CI and reviews. `board.mjs reviews` and `wait` print
    `correction pushes after ready: N` (distinct heads pushed after the PR's first Ready,
