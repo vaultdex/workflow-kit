@@ -80,16 +80,16 @@ function mergeFixture(t) {
     writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ headRefName: 'claude/7-topic', isCrossRepository: false,
       headRepository: { nameWithOwner: 'Test/Example' }, ...headOf(first), ...changes })));
     writeFileSync(join(checkout, 'issues-comments.json'), '[]');
-    for (const file of ['calls', 'merges', 'pr-reads.json', 'compare.json', 'dependents.json', 'update-fails', 'delete-fails', 'delete-gone', 'auto-delete']) rmSync(join(checkout, file), { force: true });
+    for (const file of ['calls', 'merges', 'pr-reads.json', 'compare.json', 'dependents.json', 'update-fails', 'delete-fails', 'delete-gone', 'auto-delete', 'merge-403', 'merge-async-late', 'merge-async-fails', 'async-merges']) rmSync(join(checkout, file), { force: true });
   };
   const calls = () => existsSync(join(checkout, 'calls')) ? readFileSync(join(checkout, 'calls'), 'utf8').trim().split('\n') : [];
   const flag = name => writeFileSync(join(checkout, name), '');
   const json = (name, data) => writeFileSync(join(checkout, name), JSON.stringify(data));
-  return { run, show, calls, flag, json, first, second, headOf };
+  return { checkout, run, show, calls, flag, json, first, second, headOf };
 }
 
 test('merge merges a base that moved under the same files into the PR branch, waits for CI on the new head, then merges', t => {
-  const { run, show, calls, flag, json, first, second, headOf } = mergeFixture(t);
+  const { checkout, run, show, calls, flag, json, first, second, headOf } = mergeFixture(t);
   const running = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS', conclusion: null }] } } };
   // GitHub shows the previous head for one more read after the update, then the new one.
   const staleThenNew = (...overlays) => json('pr-reads.json', [{}, {}, ...overlays]);
@@ -123,6 +123,38 @@ test('merge merges a base that moved under the same files into the PR branch, wa
   const refused = run('merge', '7');
   assert.equal(refused.status, 2, refused.stdout + refused.stderr);
   assert.deepEqual(calls(), [`update-branch ${first}`]);
+
+  // A PR with stacked children: GitHub answers 403 to the update. Nothing is merged or pushed; the manual way is named.
+  show();
+  json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
+  writeFileSync(join(checkout, 'update-fails'), '403');
+  const stacked = run('merge', '7');
+  assert.equal(stacked.status, 1, stacked.stdout + stacked.stderr);
+  assert.match(stacked.stdout, /^blocker: .*`git merge origin\/\S+`.*`board\.mjs merge 7`/m);
+  assert.deepEqual(calls(), [`update-branch ${first}`]);
+});
+
+test('merge falls back to merge-async with the checked head when gh refuses a PR with stacked children, and reads the merge back', t => {
+  const { checkout, run, show, calls, flag, first } = mergeFixture(t);
+  const asyncMerges = () => readFileSync(join(checkout, 'async-merges'), 'utf8');
+  // The 403 is no reason for a second plain merge: merge-async once, the merge shows at once or on a later read.
+  for (const late of [false, true]) {
+    show();
+    flag('merge-403');
+    if (late) flag('merge-async-late');
+    const result = run('merge', '7', '--interval', '0');
+    assert.equal(result.status, 0, `late ${late}: ${result.stdout}${result.stderr}`);
+    assert.deepEqual(calls(), ['merge', 'merge-async', 'delete claude/7-topic']);
+    assert.equal(asyncMerges(), `merge_action=direct_merge merge_method=merge sha=${first}\n`);
+    assert.match(result.stdout, new RegExp(`^MERGED #7 head ${first} `, 'm'));
+  }
+  // merge-async refused too: an error, no third try.
+  show();
+  flag('merge-403');
+  flag('merge-async-fails');
+  const refused = run('merge', '7');
+  assert.equal(refused.status, 2, refused.stdout + refused.stderr);
+  assert.deepEqual(calls(), ['merge', 'merge-async']);
 });
 
 test('merge deletes the head branch only when nothing else needs it, and the merge stands when the delete fails', t => {
