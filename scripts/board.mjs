@@ -391,7 +391,8 @@ function create() {
   assert.ok(found, `new: ${project.repository} has no open milestone "${milestone}"`);
   const known = restAll(`repos/${project.repository}/labels`);
   // The REST API would silently create an unknown label.
-  const labels = options.labels.map(label => exact(known, label, 'name')?.name ?? assert.fail(`new: ${project.repository} has no label "${label}"`));
+  // A repeated label (any casing) is one label: GitHub stores it once, and the read-back compares exactly.
+  const labels = [...new Set(options.labels.map(label => exact(known, label, 'name')?.name ?? assert.fail(`new: ${project.repository} has no label "${label}"`)))];
   let viewer;
   if (start) {
     viewer = graphql('query{viewer{login}}').viewer?.login;

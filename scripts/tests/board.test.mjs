@@ -1463,8 +1463,8 @@ test('new checks every required value before creating, reads all values back and
   assert.match(refused('a field the project requires', ...base), /Zielrelease/);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', requiredFields: ['Size'] }));
 
-  // Without --start the issue lands in Backlog.
-  let result = run(...base);
+  // Without --start the issue lands in Backlog; a label given twice (other casing) is one label.
+  let result = run(...base, '--label', 'ENHANCEMENT');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(result.stdout, 'NEW https://github.com/test/example/issues/1 | milestone: 0.1.1 | labels: enhancement | Status: Backlog | Priority: Low | Size: XS\n');
   assert.deepEqual(read('created.json'), { title: 'Titel', body: 'Text', milestone: 4, labels: ['enhancement'] });
