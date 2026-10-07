@@ -153,6 +153,12 @@ Modellwahl stehen hier nicht.
      Eltern-Session. Sie hält vor dem Start von Drivern ihr Kit auf dem Pin-Stand
      (`git submodule update --init .vendor/workflow-kit`), damit neue Regeln für die
      Driver gelten.
+5a. **Selbstprüfung vor Ready.** Nennt das Projekt `"selfReview"` in `.github/workflow-project.json`
+   (zum Beispiel `ponytail-review` und `code-review`), laufen diese Prüfungen einmal je PR im
+   Vordergrund vor „Ready for Review“, und der PR-Text hat den Abschnitt `## Selbstprüfung` mit jedem Namen
+   und dem Ergebnis; Ergebnisse nennen Belege und unterscheiden geprüftes Verhalten von Mocks und Konfiguration.
+   `board.mjs handoff` und `merge` prüfen Abschnitt und Namen, nicht Ergebnis oder Qualität
+   ([Review loop](CONTRIBUTING.md#review-loop) Schritt 1).
 6. **Reibung statt Retro-Skill.** Driver rufen den Skill `retro` nicht auf; er kostet
    zu viele Tokens pro Issue. Sie schreiben höchstens 3 Reibungszeilen aus der eigenen
    Session (Fehlversuche, Wartezeiten, Ablehnungen) in den `Retro`-Abschnitt der
