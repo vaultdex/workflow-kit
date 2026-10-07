@@ -189,8 +189,8 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
   `<details><summary>Technische Details</summary>`. Vereinfachen heißt umformulieren,
   nicht löschen; Entscheidungen mit Quelle, Blocker, Teiltickets, Links und
   Abnahmekriterien bleiben.
-- Specs und längere Issues beginnen mit `## Kurz gesagt` (nach `## Menschliche
-  Mitwirkung nötig`, falls vorhanden): 2 bis 4 Sätze, was heute stört, was anders wird und
+- Specs und längere Issues beginnen mit dem Abschnitt „Kurz gesagt“ (nach `## Menschliche
+  Mitwirkung nötig`, falls vorhanden; die Überschriftenebene ist offen, das Formular erzeugt `###`): 2 bis 4 Sätze, was heute stört, was anders wird und
   wer es merkt. Eine Spec trägt außerdem den Titelpräfix `(Spec) ` und das Label `spec`;
   das Formular „Spec oder längere Aufgabe“ setzt beides.
 - PRs und Kommentare beginnen mit dem Ergebnis in einem Satz, Details danach. Das gilt
@@ -334,7 +334,8 @@ backlink never closes an issue.
    all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
 3. Wait for CI and every non-optional review with a trace on the current head with `board.mjs
-   wait PR` in the background (a driver subagent: foreground, see
+   wait PR --head SHA` (SHA: full id of the head you just pushed; the flag keeps it from ending
+   on the old head right after a push) in the background (a driver subagent: foreground, see
    [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
    status or review on the head commit, or, created after the head was pushed, a

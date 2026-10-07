@@ -2,6 +2,9 @@ name: Workflow Kit
 on:
   pull_request:
     branches: [main]
+    # Draft pushes run nothing; ready_for_review starts the run for the head that counts.
+    # converted_to_draft starts a skipped run that cancels a running one through the concurrency group.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,8 +14,10 @@ concurrency:
 jobs:
   verify:
     name: Workflow Kit checks
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    # Runs take 1 to 3 minutes since #202; board tests need about 8 s of that.
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v7.0.1
         env:
