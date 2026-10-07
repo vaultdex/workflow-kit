@@ -200,7 +200,8 @@ the installer, so the kit's current one is copied.
   requires, unless a comment with the PR's URL exists, and reads the comments back
   (a missing comment after the write exits 2; the write is not repeated).
 - `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
-  repository ready for review, but only for the commit you pushed. It rereads the PR
+  repository ready for review, but only for the commit you pushed. `SHA` must be the full
+  40-character commit id (`git rev-parse HEAD`); a short id exits 2 with that reason. It rereads the PR
   (default 6 reads, 5 s apart; both waits, before the write and for the read-back, together
   stay within 30 minutes, else exit 2) until GitHub reports `SHA` as the head, because the
   metadata can still show the previous push right after it and Draft-payload events
