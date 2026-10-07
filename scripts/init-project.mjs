@@ -78,7 +78,7 @@ const providers = ['.agent', '.agents', '.claude', '.opencode', '.pi'];
 const legacy = new Set(['/.agents/hooks/', ...providers.map(p => `/${p}/skills/ponytail*/`), '/.agents/hooks',
   ...providers.flatMap(p => [`/${p}/skills/ponytail*`, `/${p}/skills/impeccable`]),
   '/.claude/agents/impeccable-*.md', '/.codex/agents/impeccable_*.toml', '/.opencode/commands/impeccable.md']);
-const patterns = ['/.workflow-kit/', '/.impeccable/vendor/', '/.impeccable/setup-*/',
+const patterns = ['/.workflow-kit/', '/.scratch/','/.impeccable/vendor/', '/.impeccable/setup-*/',
   '.claude/settings.local.json', '**/.impeccable/config.local.json', '**/skills/impeccable/scripts/bin/'];
 const ignore = existsSync(safe('.gitignore')) ? text(safe('.gitignore')).split('\n').filter(line => !legacy.has(line)).join('\n') : '';
 const additions = patterns.filter(p => !ignore.split('\n').includes(p));

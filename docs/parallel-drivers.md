@@ -123,6 +123,9 @@ Modellwahl stehen hier nicht.
      seiner CI, Kit-Driver testen lokal nur gezielt.
    - Dateien: mit Edit und Write oder mit einem Node-Skript aus einer Datei ändern;
      Heredoc, Python und sed verlieren Backslashes.
+   - Scratch-Dateien (PR-Texte, Kommentare, Hilfsskripte) nur in `.scratch/` des Worktrees
+     (von Git ignoriert) oder im Scratchpad der Session, nie im Repo-Baum. Stagen:
+     nur die Pfade des Issues, nicht `git add -A`.
    - Suchen: auf Pfade eingrenzen oder erst mit `-l` die Dateien finden.
    - Ziel-Stand: Suchen und Lesen laufen gegen den Stand des Ziel-Branches, bei abweichendem
      Checkout mit `git grep … origin/<Ziel-Branch>`.

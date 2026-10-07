@@ -76,11 +76,12 @@ test('discovery files become trackable while custom ignores and private state st
   const lines = readFileSync(ignore, 'utf8').split('\n');
   for (const removed of ['/.agents/hooks', '/.claude/skills/ponytail*', '/.pi/skills/impeccable', '/.codex/agents/impeccable_*.toml'])
     assert.ok(!lines.includes(removed), removed);
-  for (const kept of ['/custom-cache/', '/.claude/skills/private/', '/.workflow-kit/', '.claude/settings.local.json', '**/skills/impeccable/scripts/bin/'])
+  for (const kept of ['/custom-cache/', '/.claude/skills/private/', '/.workflow-kit/', '/.scratch/', '.claude/settings.local.json', '**/skills/impeccable/scripts/bin/'])
     assert.ok(lines.includes(kept), kept);
   const once = readFileSync(ignore);
   succeeds(f.run('--existing'));
   assert.deepEqual(readFileSync(ignore), once);
+  assert.equal(lines.filter(line => line === '/.scratch/').length, 1);
 });
 
 test('search ignore is created or extended without losing project lines', t => {
