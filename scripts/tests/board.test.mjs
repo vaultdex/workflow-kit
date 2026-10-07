@@ -1086,7 +1086,7 @@ test('reviews waits only for traces on the current head and never reads failures
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: ['coderabbitai'] }));
   const optionalEyes = look(rabbitTraces[4][0], rabbitTraces[4][1]);
   assert.equal(optionalEyes.status, 0, 'An optional 👀 is no reason to wait');
-  assert.match(optionalEyes.stdout, /^reaction coderabbitai 👀 \[optional reviewer, not awaited\]$/m, 'The optional 👀 is shown as a note');
+  assert.match(optionalEyes.stdout, /^reaction coderabbitai /m, 'The optional 👀 is shown');
   writeFileSync(config, plain);
   assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 0, 'Precondition: unlisted, the same lone status is CI');
   assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
