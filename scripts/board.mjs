@@ -847,7 +847,9 @@ function retroReasons(bodyHtml) {
   const lines = [...(section ?? '').matchAll(/<li[^>]*>([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>])/g)].map(([, line]) => [line, text(line)]);
   if (!lines.length) return ['the handoff comment needs a "Retro" section with one list line per finding, each ending with its resolution, or the single line "Keine Funde" (README: Handoff comment)'];
   if (lines.length === 1 && /^keine funde\.?$/i.test(lines[0][1])) return [];
-  return lines.filter(([html, line]) => !(/<a [^>]*class="issue-link[^>]*>[^<]*<\/a>\s*$/.test(html) || /\bbehoben in [0-9a-f]{7,40}$/i.test(line)
+  // The last element must be an issue link (GitHub renders a pull request reference the same way, but with /pull/N); a loose list wraps the line in <p>.
+  const endsWithIssue = html => { const anchor = html.match(/(<a [^>]*>)[^<]*<\/a>\s*(?:<\/p>\s*)?$/)?.[1] ?? ''; return anchor.includes('class="issue-link') && /href="[^"]*\/issues\/\d+"/.test(anchor); };
+  return lines.filter(([html, line]) => !(endsWithIssue(html) || /\bbehoben in [0-9a-f]{7,40}$/i.test(line)
     || /persönlich gemeldet$/i.test(line) || /\bkein Handlungsbedarf: \S/i.test(line)))
     .map(([, line]) => `retro line without a resolution (end it with an issue link, "behoben in <SHA>", "persönlich gemeldet" or "kein Handlungsbedarf: <Grund>"): ${line}`);
 }

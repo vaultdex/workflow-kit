@@ -238,7 +238,7 @@ the heading `Retro` (any level, usually `###`), one list line per finding, and, 
 heading, the review findings with their disposition and, if a reviewer was unavailable or
 stalled, the reviewer, cause and evidence. Every retro line ends with exactly one resolution:
 
-- an issue link: `#N` or `OWNER/REPO#N` (the issue that owns the fix),
+- an issue link: `#N` or `OWNER/REPO#N` (the issue that owns the fix; a pull request link does not count),
 - `behoben in <SHA>`,
 - `persönlich gemeldet` (memory, shell profile: the human changes those),
 - `kein Handlungsbedarf: <Grund>`.
