@@ -78,8 +78,8 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
   }
   assert.equal(mutations(), 0);
 
-  const short = run('ready', '7', NEW.slice(0, 7), ...quick);
-  assert.equal(short.status, 2, 'A short commit id is rejected');
+  const short = run('ready', '7', NEW.slice(0, 6), ...quick);
+  assert.equal(short.status, 2, 'A commit id under 7 characters is rejected');
   assert.notEqual(short.stderr, run('ready', 'x', NEW).stderr, 'The refusal says more than the general usage line');
   assert.equal(mutations(), 0);
 
@@ -116,10 +116,19 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
   assert.equal(result.status, 2, 'A write without a matching read-back is no success');
   assert.equal(mutations(), 1, 'The mutation is not repeated blindly');
 
-  assert.equal(run('ready', '7', 'not-a-sha').status, 2, 'Only a full commit SHA is accepted');
+  assert.equal(run('ready', '7', 'not-a-sha').status, 2, 'Only a commit SHA is accepted');
   const missing = run('ready', '7');
   assert.equal(missing.status, 2);
-  assert.match(missing.stderr, /full 40-character commit id.*or --local/, 'A missing SHA names the way out, not just the usage line');
+  assert.match(missing.stderr, /commit id of 7 to 40 characters.*or --local/, 'A missing SHA names the way out, not just the usage line');
+
+  // The 7-character form git log shows acts like the full id; that of another commit is still refused.
+  prepare();
+  result = run('ready', '7', NEW.slice(0, 7), ...quick);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(mutations(), 1);
+  prepare();
+  assert.equal(run('ready', '7', OLD.slice(0, 7), ...quick).status, 1, 'A short id of another commit is refused');
+  assert.equal(mutations(), 0);
 });
 
 test('ready refuses an unknown flag or extra word before any write', t => {

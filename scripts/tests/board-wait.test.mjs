@@ -36,9 +36,12 @@ test('wait --head keeps waiting while the PR still shows the previous head, and 
   assert.equal(run('wait', '7', '--head', pushed).status, 0, 'The expected head is DONE');
   show(old, { state: 'CLOSED' });
   assert.equal(run('wait', '7', '--head', pushed).status, 1, 'A closed PR ends the wait whatever its head');
-  const short = run('wait', '7', '--head', 'bbbbbbb');
-  assert.equal(short.status, 2, 'A short id is refused');
-  assert.match(short.stderr, /full 40-character commit id/, 'and the reason is named, not just the usage line');
+  show(pushed);
+  assert.equal(run('wait', '7', '--head', 'bbbbbbb').status, 0, 'The 7-character id of the head is DONE');
+  assert.match(runBriefly(3000, 'wait', '7', '--head', 'ccccccc'), /^WAITING\nwaiting: PR still shows head bbbbbbb, expected ccccccc/, 'a short id of another commit keeps waiting');
+  const short = run('wait', '7', '--head', 'bbbbbb');
+  assert.equal(short.status, 2, 'Fewer than 7 characters are refused');
+  assert.match(short.stderr, /commit id of 7 to 40 characters/, 'and the reason is named, not just the usage line');
   assert.equal(run('reviews', '7', '--head', pushed).status, 2, '--head belongs to wait');
 });
 
