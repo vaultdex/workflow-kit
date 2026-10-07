@@ -5,7 +5,9 @@
   ],
   "dependencyDashboard": false,
   "gitIgnoredAuthors": ["41898282+github-actions[bot]@users.noreply.github.com"],
-  "automerge": false,
+  "automerge": true,
+  "automergeType": "pr",
+  "platformAutomerge": false,
   "git-submodules": {
     "enabled": true
   },
