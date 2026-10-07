@@ -336,8 +336,11 @@ function pr(argv, input, stdout, stderr, exit) {
   fs.appendFileSync('merges', argv.slice(2).join(' ') + '\n');
   fs.appendFileSync('calls', 'merge\n');
   if (fs.existsSync('merge-fails')) { stderr('gh: Head branch was modified\n'); exit(1); }
-  // merge-403: the refusal of a PR with stacked children.
-  if (fs.existsSync('merge-403')) { stderr('gh: Forbidden (HTTP 403)\n'); exit(1); }
+  // merge-403: the refusal of a PR with stacked children; the file holds gh's text, empty means the GraphQL text seen on GitHub (#321).
+  if (fs.existsSync('merge-403')) {
+    stderr((fs.readFileSync('merge-403', 'utf8') || 'GraphQL: This pull request is part of a stack and must be merged using the asynchronous merge REST API. For more information, see https://docs.github.com/rest/pulls/pulls#merge-a-pull-request-asynchronously (mergePullRequest)') + '\n');
+    exit(1);
+  }
   if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));
 }
 

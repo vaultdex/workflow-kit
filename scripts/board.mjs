@@ -1627,7 +1627,7 @@ function deleteHeadBranch(pr) {
  * thread). When the base moved under files the PR changes too (#190), the base is merged into the PR branch first and the
  * gate runs again on the new head after its CI; a base that moved without overlap does not hold the merge. Then exactly the
  * checked head: `--match-head-commit` needs the full object id, and it also refuses a push that lands after the check, so
- * no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR, except the 403 of a PR with stacked children (#321),
+ * no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR, except the stack refusal of a PR with stacked children (#321),
  * which goes once to merge-async with the same head and is read back until merged. Afterwards the head branch goes (see deleteHeadBranch).
  */
 async function merge() {
@@ -1652,10 +1652,12 @@ async function merge() {
     execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
       { encoding: 'utf8', env: gh.env });
   } catch (error) {
-    // A PR with stacked children (#321) is refused with 403, but accepted by merge-async: same merge, same head, the answer is 202 and the merge follows in the background.
-    // ponytail: gh prints no fixed text for it (gh pr merge goes through GraphQL), so 403, "forbidden" and "stack" count; narrow it once a real refusal is captured.
-    if (!/\b403\b|forbidden|\bstack/i.test(`${error.stderr}${error.stdout}`)) throw error;
-    console.log('note: gh pr merge was refused (403, typical for a PR with stacked children); merging the same head with merge-async');
+    // A PR with stacked children (#321) is refused, but accepted by merge-async: same merge, same head, the answer is 202 and the merge follows in the background.
+    // GitHub's GraphQL text is "part of a stack and must be merged using the asynchronous merge REST API"; a REST merge answers HTTP 403.
+    // ponytail: a bare HTTP 403 (e.g. a token without permission) also tries merge-async once, which then ends as ERROR; add a stack qualifier when a real 403 text is captured.
+    const text = `${error.stderr}${error.stdout}`;
+    if (!/part of a stack|asynchronous merge REST API|HTTP 403/i.test(text)) throw error;
+    console.log(`note: gh pr merge was refused (${/HTTP 403/i.test(text) ? 'HTTP 403' : 'part of a stack'}); merging the same head with merge-async`);
     execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/merge-async`, '-X', 'PUT', '-f', 'merge_action=direct_merge', '-f', 'merge_method=merge', '-f', `sha=${headRefOid}`],
       { encoding: 'utf8', env: gh.env });
     asynchronous = true;

@@ -429,7 +429,7 @@ backlink never closes an issue.
    command applies the review gates of `handoff` (CI, every review with a trace on the head
    finished, no `blocker:`, no open thread, determined merge state) and refuses while a
    reviewer is still running. It merges exactly the checked head by its full commit id
-   (`gh pr merge --merge --match-head-commit`, or `merge-async` when GitHub answers 403 for a PR with stacked children)
+   (`gh pr merge --merge --match-head-commit`, or `merge-async` when GitHub refuses a PR with stacked children as "part of a stack" or HTTP 403)
    and reads the merge back. When the base moved
    under files the PR changes too, it first merges the base into the PR branch and waits for CI
    again; if GitHub refuses that update with 403, it names the manual way
