@@ -143,8 +143,13 @@ test('a native stack selects its tip for new work and the immediate lower layer 
     number: 88, open: true, base: { ref: 'release/0.1.1' }, pull_requests: prs.map(pr => member(pr)), ...changes,
   }]));
   const check = () => run('check', '1');
+  const checkWithSession = () => run('check', '1', '--session', 'resume1');
   const issueWith = (...blockers) => ({ ...issue('Ready', blockers), closedByPullRequestsReferences: {
-    totalCount: 1, nodes: [{ number: 1351, state: 'OPEN', repository: { nameWithOwner: 'test/example' }, headRefName: ownDraft.headRefName }],
+    totalCount: 3, nodes: [
+      { number: 1351, state: 'OPEN', repository: { nameWithOwner: 'test/example' }, headRefName: ownDraft.headRefName },
+      { number: 1300, state: 'CLOSED', repository: { nameWithOwner: 'test/example' } },
+      { number: 1200, state: 'MERGED', repository: { nameWithOwner: 'test/example' } },
+    ],
   } });
 
   setStack([bottom, middle]);
@@ -188,6 +193,30 @@ test('a native stack selects its tip for new work and the immediate lower layer 
   assert.equal(resumed.status, 4, resumed.stdout + resumed.stderr);
   assert.match(resumed.stdout, /^stack base: PR #1345 in stack #88/m, 'Resume uses own PR immediate lower layer, not foreign layer above it');
   assert.doesNotMatch(resumed.stdout, /PR #1351 is still Draft/);
+
+  const ownLink = number => ({ number, state: 'OPEN', repository: { nameWithOwner: 'test/example' } });
+  writeIssue({ ...issue('Ready', [basePredecessor]), closedByPullRequestsReferences: {
+    totalCount: 2, nodes: [ownLink(1351), ownLink(1352)],
+  } });
+  const ambiguous = checkWithSession();
+  assert.equal(ambiguous.status, 2, ambiguous.stdout + ambiguous.stderr);
+  assert.match(ambiguous.stdout, /multiple open PRs/);
+  assert.doesNotMatch(ambiguous.stdout, /^stack base:/m, 'Ambiguous own PR links must not be treated as new work at the tip');
+
+  const partial = { ...issue('Ready', [basePredecessor]), closedByPullRequestsReferences: {
+    totalCount: 2, nodes: [ownLink(1351)],
+  } };
+  writeIssue(partial);
+  const incomplete = checkWithSession();
+  assert.equal(incomplete.status, 2, incomplete.stdout + incomplete.stderr);
+  assert.doesNotMatch(incomplete.stdout, /^stack base:/m);
+
+  const missingLinks = issue('Ready', [basePredecessor]);
+  delete missingLinks.closedByPullRequestsReferences;
+  writeIssue(missingLinks);
+  const missing = checkWithSession();
+  assert.equal(missing.status, 2, missing.stdout + missing.stderr);
+  assert.doesNotMatch(missing.stdout, /^stack base:/m);
 
   writeFileSync(join(checkout, 'fail-stacks'), '');
   writeIssue(issue('Ready', [basePredecessor]));

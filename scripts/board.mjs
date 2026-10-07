@@ -157,12 +157,25 @@ function predecessorReasons({ totalCount, nodes }) {
   return { blocked, unknown, open };
 }
 
-/** The one current PR of an issue, when its complete linked-PR list proves it has exactly one open delivery. */
+/** The current local PR of an issue, or why linked-PR data cannot safely identify one. */
 function currentIssuePr(issue) {
   const linked = issue.closedByPullRequestsReferences;
-  if (linked?.totalCount !== 1 || linked.nodes?.length !== 1) return undefined;
-  const [pr] = linked.nodes;
-  return pr?.state === 'OPEN' && pr.repository?.nameWithOwner?.toLowerCase() === project.repository.toLowerCase() ? pr.number : undefined;
+  if (!Number.isSafeInteger(linked?.totalCount) || linked.totalCount < 0 || !Array.isArray(linked.nodes)
+    || linked.nodes.length !== linked.totalCount || linked.nodes.some(pr => !pr)) {
+    return { unknown: 'the linked PRs of this issue are not completely readable' };
+  }
+  const open = [];
+  for (const pr of linked.nodes) {
+    if (!['OPEN', 'CLOSED', 'MERGED'].includes(pr.state)) return { unknown: 'an issue-linked PR has unreadable state' };
+    if (pr.state !== 'OPEN') continue;
+    const repository = pr.repository?.nameWithOwner;
+    if (typeof repository !== 'string') return { unknown: `the repository of open PR #${pr.number ?? '?'} is unreadable` };
+    if (repository.toLowerCase() !== project.repository.toLowerCase()) continue;
+    if (!Number.isSafeInteger(pr.number) || pr.number < 1) return { unknown: 'an open issue-linked PR has unreadable number' };
+    open.push(pr);
+  }
+  if (open.length > 1) return { unknown: `the issue has multiple open PRs in ${project.repository}` };
+  return { number: open[0]?.number };
 }
 
 function readStackPr(prNumber) {
@@ -400,7 +413,7 @@ const ago = ms => {
 };
 
 /** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
-function check(issue = readIssue(), claims, currentPrNumber = currentIssuePr(issue)) {
+function check(issue = readIssue(), claims, currentIssue = currentIssuePr(issue)) {
   const { status, blocked, unknown, predecessors } = issueReasons(issue);
   const notes = [];
   let claim;
@@ -414,16 +427,22 @@ function check(issue = readIssue(), claims, currentPrNumber = currentIssuePr(iss
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;
   if (heldOnlyByOpenPredecessors(blocked, predecessors) && !unknown.length) {
-    const stack = stackBase(predecessors.open, currentPrNumber);
-    if (stack.pr) {
-      stackedOn = stack.pr;
-      notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
+    const current = typeof currentIssue === 'number' ? { number: currentIssue } : currentIssue;
+    if (current?.unknown) {
+      unknown.push(current.unknown);
       blocked.length = 0;
-    } else if (stack.unknown.length && !stack.refused.length) {
-      unknown.push(...stack.unknown);
-      blocked.length = 0;
-    // A definitive refusal stays BLOCKED, whatever else is unreadable: a retry cannot lift it.
-    } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
+    } else {
+      const stack = stackBase(predecessors.open, current?.number);
+      if (stack.pr) {
+        stackedOn = stack.pr;
+        notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
+        blocked.length = 0;
+      } else if (stack.unknown.length && !stack.refused.length) {
+        unknown.push(...stack.unknown);
+        blocked.length = 0;
+      // A definitive refusal stays BLOCKED, whatever else is unreadable: a retry cannot lift it.
+      } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
+    }
   }
   const plain = verdictOf({ blocked, unknown });
   const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;
