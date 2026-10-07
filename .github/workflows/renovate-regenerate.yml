@@ -36,7 +36,7 @@ jobs:
       # between makes the final push fail instead of running that commit. The checkout action receives the
       # token as its default input to fetch and, with persist-credentials: false, drops it again; no `run`
       # step (so no script) sees it except the last two.
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         env:
           GIT_CONFIG_COUNT: '1'
           GIT_CONFIG_KEY_0: init.defaultBranch
@@ -73,7 +73,7 @@ jobs:
           cp scripts/ponytail/adaptations.patch "$RUNNER_TEMP/branch-adaptations.patch"
           git archive origin/main scripts .node-version | tar -x
           cp "$RUNNER_TEMP/branch-adaptations.patch" scripts/ponytail/adaptations.patch
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: env.SKIP != 'true'
         with:
           node-version-file: .node-version
