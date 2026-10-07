@@ -220,8 +220,13 @@ the installer, so the kit's current one is copied.
   only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; gh
   refusal or a read-back that differs: `ERROR`, exit 2). It does not read the issue, claims or the
   [handoff comment](#handoff-comment).
-- `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
-  ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
+- `wait PR`: repeats `reviews` (first after 60 s, then at longer intervals up to 5 minutes, again from 60 s
+  when what it awaits changes; twice as long below 1000 quota points), prints `WAITING` lines on change and
+  ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both end
+  with a `quota: …` line (points left, points this run used, reset time). When GitHub's shared GraphQL
+  quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), these three sleep until the reset and
+  say so on stderr (`rate limited until …`); every other command stops with the reset time
+  ([parallel drivers](docs/parallel-drivers.md)). Both take
   `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3): for that long after
   the PR became ready (Ready event, or creation as non-draft) and after each push of the
   head (read from the branch's push log, so a reused commit counts too), whichever is later, they keep

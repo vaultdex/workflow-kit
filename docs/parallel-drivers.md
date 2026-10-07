@@ -25,6 +25,18 @@ Repository-CI ([vaultdex/Vaultdex#980](https://github.com/vaultdex/Vaultdex/issu
 **Sonar.** Null offene Sonar-Issues prüft `board.mjs handoff` bereits mechanisch
 ([#134](https://github.com/vaultdex/workflow-kit/issues/134)); nichts weiter zu tun.
 
+**GitHub-Kontingent.** Das GraphQL-Kontingent (5.000 Punkte pro Stunde) gilt für das ganze
+Konto und wird von allen Drivern gemeinsam verbraucht; ist es leer, scheitert jeder
+`board.mjs`-Befehl bis zum Reset. Gemessene Kosten: eine Lesung von `reviews`/`wait` kostet
+2 Punkte, `check` 4, `next` 8. `wait` fragt zuerst nach 60 s, dann mit wachsendem Abstand bis
+5 Minuten (bei Neuigkeiten wieder von vorn), also etwa 20 bis 40 Punkte pro Stunde und Driver
+statt 120 bei festem Minutentakt. Als Budget gilt: Zahl der Driver mal 40 Punkte, dazu der eigene
+Verbrauch der Agents; höchstens 20 parallele `wait` (rund 800 Punkte pro Stunde, ein Sechstel
+des Kontingents). `wait`, `reviews` und `handoff` melden den Rest in einer Zeile
+(`quota: …`), schlafen bei einer Sperre oder bei weniger als 300 (`wait`) beziehungsweise 50
+Punkten bis zum Reset (`rate limited until …`) und fragen danach weiter; alle anderen Befehle
+brechen mit der Reset-Zeit ab. Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
+
 **Review-Bots im Quota.** Ist ein Reviewer wegen Quota nicht verfügbar, gilt der
 bestehende Schritt „confirmed unavailable“ im [Review loop](CONTRIBUTING.md#review-loop):
 Reviewer, Ursache und Beleg in der PR festhalten und die Einschränkung im
