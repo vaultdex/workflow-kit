@@ -116,6 +116,10 @@ refuses and prints the difference when the body changed since you read it, and r
 conflict when the read-back after the write is not what was written. On a conflict read the
 body again, merge both changes and write again. A small window between the read and the write
 remains, because GitHub has no conditional write; the read-back catches every overwrite before it.
+To change one passage only, use `board.mjs body-replace ISSUE --from FILE --to FILE`: `FILE` after
+`--from` holds the old text, `FILE` after `--to` the new text. The command replaces exactly one
+match in the body it just read and refuses when the text is missing or occurs more than once
+(then take more surrounding text); the guard and read-back are the same as for `body`.
 
 **Metadata.** Every issue, including Backlog items and follow-ups, gets one
 repository milestone, a Project Priority and area/type labels when it is created,

@@ -157,6 +157,13 @@ the installer, so the kit's current one is copied.
   a `-`/`+` diff (exit 1, nothing written); a read-back that differs from `FILE` reports
   that another session overwrote it (exit 1, the write is not repeated); API and file
   errors exit 2. See [Changing a body](docs/CONTRIBUTING.md#issues).
+- `body-replace ISSUE --from FILE --to FILE`: replace exactly one occurrence of the text in
+  `FILE` after `--from` with the text after `--to` (plain text, no regular expressions, one
+  replacement per call; line endings and trailing whitespace are ignored like in `body`;
+  `--to` may be empty). The body read at that moment is the base, then the write and read-back
+  of `body` apply. No match or several matches are refused with the reason (exit 1, nothing
+  written; several matches are listed by line); an empty `--from` text, unreadable files and API
+  errors exit 2.
 - `link ISSUE PR`: connect the issue natively to the PR (the GraphQL
   `addCloseIssueReferences` mutation behind a closing keyword, which acts only on the
   default branch) and read `closingIssuesReferences` back. A Draft PR works; an existing

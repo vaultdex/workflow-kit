@@ -728,14 +728,15 @@ function diffText(before, after) {
   return [...old.slice(start, endOld).map(line => `- ${line}`), ...now.slice(start, endNow).map(line => `+ ${line}`)].join('\n');
 }
 
+const lines = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n').trimEnd();
+
 /**
  * Replace an issue body only if it still is the one the change is based on, and prove the write afterwards.
  * GitHub has no conditional write for issue bodies: the window between the read and the write stays, which the
  * read-back closes for every overwrite that happens before it. Another session's change is reported, never lost silently.
+ * `change(before, refuse)` turns the body just read into the new one; it returns undefined after calling `refuse`.
  */
-function body() {
-  const lines = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n').trimEnd();
-  const [fresh, base] = [value, process.argv[5]].map(lines);
+function writeBody(change) {
   const current = () => {
     const issue = rest(`repos/${project.repository}/issues/${number}`);
     // The Issues API also serves pull requests under their number; a PR description is no issue body to replace.
@@ -747,7 +748,8 @@ function body() {
     process.exitCode = 1;
   };
   const before = current();
-  if (before !== base) return refuse(`the body of #${number} changed since you read it (diff: your base, then the current body); read it again, merge, write again`, diffText(base, before));
+  const fresh = change(before, refuse);
+  if (fresh === undefined) return;
   if (before === fresh) return console.log(`BODY #${number} already has this text`);
   // The text already read and compared goes over stdin: gh would take a file named "-" for stdin and write an empty body.
   execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}`, '-X', 'PATCH', '-F', 'body=@-'],
@@ -755,6 +757,28 @@ function body() {
   const after = current();
   if (after !== fresh) return refuse(`the body of #${number} is not what was written: another session overwrote it meanwhile (diff: what you wrote, then the current body); read it, merge, write again`, diffText(fresh, after));
   console.log(`BODY #${number} written and read back`);
+}
+
+function body() {
+  const [fresh, base] = [value, process.argv[5]].map(lines);
+  writeBody((before, refuse) => before === base ? fresh
+    : refuse(`the body of #${number} changed since you read it (diff: your base, then the current body); read it again, merge, write again`, diffText(base, before)));
+}
+
+/** Replace exactly one occurrence of the --from text with the --to text; the body just read is the base. No regular expressions. */
+function bodyReplace() {
+  const [from, to] = ['--from', '--to'].map(flag => lines(process.argv[process.argv.indexOf(flag) + 1]));
+  assert.ok(from !== '', 'The --from text is empty');
+  writeBody((before, refuse) => {
+    // Every start position counts, so "aa" in "aaa" is two matches, not one.
+    const starts = [];
+    for (let at = before.indexOf(from); at !== -1; at = before.indexOf(from, at + 1)) starts.push(at);
+    if (starts.length === 1) return before.slice(0, starts[0]) + to + before.slice(starts[0] + from.length);
+    const lineOf = at => before.slice(0, at).split('\n').length;
+    return refuse(starts.length === 0
+      ? `the --from text is not in the body of #${number}; read the body again`
+      : `the --from text occurs ${starts.length} times in the body of #${number} (from line ${starts.map(lineOf).join(', from line ')}); take more surrounding text so it matches once`, '');
+  });
 }
 
 /** Connect the issue natively to the PR (what a closing keyword does only on the default branch), post the backlink comment `status` requires, and read both back. */
@@ -1050,14 +1074,14 @@ function sub() {
 }
 
 const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait, handoff, merge, ready, link, body };
+  reviews: reviewsOnce, wait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
   + ' | merge PR [--stall MINUTES] [--grace MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
-  + ' | link ISSUE PR | body ISSUE FILE BASE_FILE';
+  + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
@@ -1070,6 +1094,7 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (command === 'merge' && value && !value.startsWith('--'))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
+  || (command === 'body-replace' && !(process.argv.length === 8 && value === '--from' && process.argv[6] === '--to' && process.argv[5] && process.argv[7]))
   || (['block', 'sub'].includes(command) && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
@@ -1086,7 +1111,7 @@ try {
 } catch (error) {
   console.log = print;
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'merge', 'ready', 'link', 'body', 'field', 'status', 'priority'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'merge', 'ready', 'link', 'body', 'body-replace', 'field', 'status', 'priority'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
   console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;
