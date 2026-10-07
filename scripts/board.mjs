@@ -522,8 +522,8 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title detailsUrl checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
-      ...on StatusContext{context state description}}}}}}}
-  reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
+      ...on StatusContext{context state description creator{login}}}}}}}}
+  reviewRequests(first:100){totalCount nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
     requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}}`;
 // ponytail: checks, check suites, review requests and opinionated reviews stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
@@ -603,6 +603,19 @@ function verifyBacklinks() {
 }
 const login = user => user?.login?.replace(/\[bot\]$/, '');
 const isBot = user => user?.type === 'Bot';
+// "optionalReviewers" lists bot logins or app slugs whose traces are shown but never awaited, stalled or counted as red
+// (a review bot on a free plan that is rate limited most of the time). Their open threads and change requests still block.
+const reviewerKey = name => name?.trim().toLowerCase().replace(/^(@|app\/)/, '').replace(/\[bot\]$/, '');
+// Read on use, so a malformed list is an ERROR of the review commands, not a crash of every command.
+const optionalReviewers = () => {
+  const list = project.optionalReviewers ?? [];
+  assert.ok(Array.isArray(list) && list.every(name => typeof name === 'string' && name.trim()),
+    'optionalReviewers must be a list of non-empty bot logins or app slugs');
+  return new Set(list.map(reviewerKey));
+};
+let optional;
+const isOptional = name => (optional ??= optionalReviewers()).has(reviewerKey(name));
+const isOptionalCheck = check => isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 const readPr = prNumber => graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
@@ -675,6 +688,7 @@ function baseMovement(pr) {
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
 function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption()) {
+  isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
   if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', lines, pr };
@@ -718,6 +732,11 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const check of current) {
     const label = check.name ?? check.context;
     const pending = check.__typename === 'CheckRun' ? check.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(check.state);
+    // An optional reviewer's check is shown and never decides: not awaited, not red.
+    if (isOptionalCheck(check)) {
+      lines.push(`check ${label}: ${pending ? 'pending' : check.conclusion ?? check.state}${check.title || check.description ? ` (${check.title || check.description})` : ''} [optional reviewer, not awaited]`);
+      continue;
+    }
     // CI never stalls: a running check is not success however long it takes.
     if (pending) { waiting.push({ text: `check ${label}`, since: Infinity }); continue; }
     const result = check.conclusion ?? check.state;
@@ -725,11 +744,11 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // Descriptions carry results such as "Review rate limited" behind a green state.
     lines.push(`check ${label}: ${result}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);
   }
-  if (!contexts.nodes.length) waiting.push({ text: 'first CI check', since: Infinity });
+  if (contexts.nodes.every(isOptionalCheck)) waiting.push({ text: 'first CI check', since: Infinity });
   // An Actions suite without runs is a triggered workflow about to report. Other apps (Sonar, CodeRabbit,
   // Renovate …) open a suite on every push and often never run it, so they count only when the project
   // lists them in "awaitApps" (analyzers such as SonarCloud create their run only when finished). Both may stall.
-  const awaited = new Set(['github-actions', ...project.awaitApps ?? []]);
+  const awaited = new Set(['github-actions', ...project.awaitApps ?? []].filter(slug => !isOptional(slug)));
   // A suite of a NEWER run of the same workflow replaces an empty one (Draft then Ready cancels the first run before it
   // reports). The replacing suite then answers for the workflow with its own status and conclusion, runs or not: its
   // check runs alone would show only the jobs reported so far. Another workflow or app never replaces it.
@@ -797,7 +816,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const draftStart = convertEvent || (Number.isFinite(readyEvent) ? Date.parse(pr.createdAt) : -Infinity);
   assert.ok(!Number.isNaN(draftStart), 'The PR creation time is unreadable');
   const readyBoundary = Math.max(readyEvent, draftStart + 10_000);
-  const runs = contexts.nodes.filter(orderable);
+  const runs = contexts.nodes.filter(check => orderable(check) && !isOptionalCheck(check));
   const startedAt = check => Date.parse(check.checkSuite?.createdAt);
   const flowOf = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id]);
   const sinceReady = check => startedAt(check) >= readyBoundary;
@@ -838,7 +857,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const answeredAfter = (author, since, own, kind) => results.some(([who, time, id, resultKind]) =>
     who === author && (id === null || id !== own) && Date.parse(time) > since && (resultKind === 'any' || resultKind === kind));
   const short = pr.headRefOid.slice(0, 7);
-  for (const comment of comments.filter(comment => isBot(comment.user) && after(comment.updated_at))) {
+  for (const comment of comments.filter(comment => isBot(comment.user) && !isOptional(comment.user.login) && after(comment.updated_at))) {
     // Summary comments (Codex) name the head in a table row that says Running until the review completes;
     // a result the same bot posts elsewhere ends it too.
     for (const row of comment.body.split('\n').filter(row => row.includes('Running') && row.includes(short))) {
@@ -852,7 +871,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at]),
     // 👍 is Codex's "no findings"; a later 👀 is its own open trace below.
     ...reactions.map(reaction => [login(reaction.user), reaction.created_at])];
-  for (const reaction of reactions.filter(reaction => isBot(reaction.user) && after(reaction.created_at))) {
+  for (const reaction of reactions.filter(reaction => isBot(reaction.user) && !isOptional(reaction.user.login) && after(reaction.created_at))) {
     // 👀 announces a review; a later comment, head review or final reaction by the same bot is its result.
     const answered = activity.some(([author, time]) => author === login(reaction.user) && Date.parse(time) > Date.parse(reaction.created_at));
     if (reaction.content === 'eyes' && !answered) waiting.push({ text: `${login(reaction.user)} reacted 👀`, since: Date.parse(reaction.created_at) });
@@ -860,7 +879,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // GitHub drops a request once the review arrives, so every remaining request is an outstanding review.
   assert.equal(pr.reviewRequests.nodes.length, pr.reviewRequests.totalCount, 'Not every review request is readable');
   const reviewerName = reviewer => reviewer?.login ?? reviewer?.name;
-  for (const { requestedReviewer: reviewer } of pr.reviewRequests.nodes) {
+  for (const { requestedReviewer: reviewer } of pr.reviewRequests.nodes.filter(({ requestedReviewer }) => !(requestedReviewer?.__typename === 'Bot' && isOptional(requestedReviewer.login)))) {
     // A request added later starts its own clock.
     const requested = pr.requestEvents.nodes.filter(event => reviewerName(event.requestedReviewer) === reviewerName(reviewer))
       .map(event => Date.parse(event.createdAt));

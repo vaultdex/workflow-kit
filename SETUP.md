@@ -16,7 +16,8 @@ differ from this checkout. Resolve only missing choices in one compact round:
 - **Board:** an existing GitHub Project number under the same owner, or a copy of
   the kit's template board?
 - **Tools:** which agents (Codex, Claude Code, Cursor, Copilot, OpenCode/Pi) and
-  reviewers (CodeRabbit, Codex)? Which updater: the existing Renovate or
+  reviewers (CodeRabbit, Codex), and which of them are optional
+  (`"optionalReviewers"`, see [section 3](#3-board-and-labels))? Which updater: the existing Renovate or
   Dependabot, never both? Optional Sonar?
 - **Start policy:** does every start need an explicit human request (the
   default), or does a human placing an issue in Ready count (`"start": "ready"`)?
@@ -68,8 +69,13 @@ The script preserves an existing policy rather than choosing one.
 
 If an analyzer reports through a GitHub App that creates its check only when it
 finishes (SonarCloud), list the app slug in `"awaitApps"`, for example
-`"awaitApps": ["sonarqubecloud"]`, so `board.mjs wait` waits for it. The script
-keeps this setting too. Likewise `"requiredFields": ["Size"]` names Project fields that
+`"awaitApps": ["sonarqubecloud"]`, so `board.mjs wait` waits for it. A review bot the
+project does not depend on (CodeRabbit on a free plan that is mostly rate limited) goes in
+`"optionalReviewers"`, a list of bot logins or app slugs, for example
+`"optionalReviewers": ["coderabbitai"]`: `board.mjs wait`, `reviews` and `handoff` never
+wait for it or call it stalled, and agents neither re-request nor replace its review.
+Its findings, open threads and change requests still count. The script keeps these settings too.
+Likewise `"requiredFields": ["Size"]` names Project fields that
 `board.mjs new` demands besides Priority.
 
 For first installation, add the setup issue to this Project, complete its

@@ -329,7 +329,7 @@ backlink never closes an issue.
    revision) and set Automated review with the PR number and
    all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
-3. Wait for CI and every review with a trace on the current head with `board.mjs
+3. Wait for CI and every non-optional review with a trace on the current head with `board.mjs
    wait PR` in the background (a driver subagent: foreground, see
    [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
@@ -346,7 +346,10 @@ backlink never closes an issue.
    including every page of analyzer results such as Sonar issues and hotspots. A
    green quality gate does not mean zero findings, and a missing or stale analysis
    is not clean. Don't re-request a review that is running or finished for the
-   current commit without a concrete reason.
+   current commit without a concrete reason. A reviewer the project lists as
+   `"optionalReviewers"` ([setup](../SETUP.md#3-board-and-labels)) is never awaited,
+   re-requested or replaced by a self-review: `wait` and `handoff` ignore its traces,
+   while its findings, open threads and change requests count like any other.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
    (`board.mjs ready PR SHA`), set Automated review and wait again. When `reviews` or `wait` print
@@ -378,10 +381,11 @@ backlink never closes an issue.
    A fixable finding that no issue covers yet becomes an issue first; a comment alone
    is no record. `board.mjs handoff` refuses a missing section or a line without a resolution.
 6. Run `board.mjs handoff ISSUE PR` for the fully delivered issue only when CI
-   passes, every review with a trace on the current head has finished or stalled,
+   passes, every non-optional review with a trace on the current head has finished or stalled,
    each finding is fixed or linked to a follow-up, the
-   final proof has passed, the retro is recorded and no prerequisite is open. If a
-   reviewer is confirmed unavailable (quota, outage) or stalled, record the
+   final proof has passed, the retro is recorded and no prerequisite is open. Name an
+   optional reviewer in the handoff only when it found something. If a
+   reviewer that is not optional is confirmed unavailable (quota, outage) or stalled, record the
    reviewer, cause and evidence in the PR and hand off with that limitation stated
    in the handoff comment. Post that [handoff comment](../README.md#handoff-comment)
    on the PR for the current head (a `Head: <SHA>` line); `board.mjs handoff` refuses without it.

@@ -3,5 +3,8 @@
   "owner": "vaultdex",
   "number": 5,
   "id": "PVT_kwDOE1inYs4BkIaa",
-  "url": "https://github.com/orgs/vaultdex/projects/5"
+  "url": "https://github.com/orgs/vaultdex/projects/5",
+  "optionalReviewers": [
+    "coderabbitai"
+  ]
 }
