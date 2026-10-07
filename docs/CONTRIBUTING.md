@@ -276,7 +276,14 @@ backlink never closes an issue.
    Check off every fulfilled acceptance box in the issue body (`board.mjs body`) before the handoff; a part
    moved to a follow-up stays unchecked and links that issue (`- [ ] … → #12`). `board.mjs handoff`
    refuses while an open `- [ ]` line has no issue reference.
-7. After the human merges, confirm the delivered scope is accepted and the issue is
+7. A human merges. An agent that was given merge authority (for example by the chief of
+   staff) merges only with `board.mjs merge PR`, never with a plain `gh pr merge`: the
+   command applies the review gates of `handoff` (CI, every review with a trace on the head
+   finished, no `blocker:`, no open thread, determined merge state) and refuses while a
+   reviewer is still running. It merges exactly the checked head by its full commit id
+   (`gh pr merge --merge --match-head-commit`) and reads the merge back. Codex is the only
+   required review bot; CodeRabbit is optional and is neither awaited nor re-requested.
+8. After the merge, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
 
 Update the affected docs (behavior, API, operations, workflow) in the same PR, and

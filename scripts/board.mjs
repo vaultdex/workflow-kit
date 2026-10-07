@@ -1,5 +1,5 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run in the project: board.mjs next | check | status | priority | field | block | sub | reviews | wait (see usage below).
+// Run in the project: board.mjs next | check | status | priority | field | block | sub | reviews | wait | merge (see usage below).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -787,38 +787,52 @@ function handoffIssue(issue, viewer) {
 const hasHandoffComment = (comments, viewer, headRefOid) => comments.some(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
   && /^## Übergabe\s*$/m.test(comment.body ?? '') && new RegExp(`^Head:\\s*${headRefOid.slice(0, 7)}`, 'im').test(comment.body ?? ''));
 
-/** Read all PR gates and native links, optionally requiring the previously checked head. */
-function handoffPr(issueId, viewer, expectedHead) {
-  const reasons = [];
-  const pr = readPr(Number(value));
+/**
+ * The PR gate handoff and merge share: an open non-draft PR whose CI and every traced review have finished, without
+ * blockers or open threads, and with a determined merge state. Prints the verdict and sets the exit code; returns the
+ * review result only when it holds. `extra` adds the caller's own reasons (it runs only once the shared gate holds).
+ */
+function finishedPr(prNumber, action, expectedHead, extra = () => []) {
+  const pr = readPr(prNumber);
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
   if (pr.state !== 'OPEN' || pr.isDraft) {
-    console.log('FAILED\nblocker: handoff needs an open non-draft PR');
+    console.log(`FAILED\nblocker: ${action} needs an open non-draft PR`);
     process.exitCode = 1;
     return;
   }
-  const result = reviews(stallOption(), Date.now(), Number(value), pr);
+  const result = reviews(stallOption(), Date.now(), prNumber, pr);
   console.log(result.lines.join('\n'));
   if (!result.done || result.failed) {
     process.exitCode = result.failed ? 1 : 3;
     console.log(result.failed ? 'FAILED' : 'WAITING');
     return;
   }
-  if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, 'PR head changed during handoff');
+  if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, `PR head changed during ${action}`);
+  const reasons = [];
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
-    reasons.push('resolve review blockers and threads before handoff');
+    reasons.push(`resolve review blockers and threads before ${action}`);
   }
-  if (!hasHandoffComment(result.comments, viewer, result.pr.headRefOid)) {
-    reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${result.pr.headRefOid.slice(0, 7)}" line, the retro result and the findings list (README: Handoff comment)`);
-  }
+  reasons.push(...extra(result));
   if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
     console.log('WAITING\nwaiting: PR mergeability is not determined');
     process.exitCode = 3;
     return;
   }
-  if (!reasons.length && !connectedIssues(result.pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
   if (reasons.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    process.exitCode = 1;
+    return;
+  }
+  return result;
+}
+
+/** Read all PR gates and native links, optionally requiring the previously checked head. */
+function handoffPr(issueId, viewer, expectedHead) {
+  const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => hasHandoffComment(comments, viewer, pr.headRefOid) ? [] :
+    [`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line, the retro result and the findings list (README: Handoff comment)`]);
+  if (!result) return;
+  if (!connectedIssues(result.pr).has(issueId)) {
+    console.log(`FAILED\nblocker: PR #${value} is not natively linked to issue #${number}`);
     process.exitCode = 1;
     return;
   }
@@ -841,6 +855,24 @@ function handoff() {
   })) return;
   assert.equal(projectItem(readIssue())?.status?.name, 'Human review', 'Human review status read-back differs');
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
+}
+
+/**
+ * Merge for agents with merge authority: the same gate as handoff (CI, every traced review finished, no blocker or open
+ * thread), then exactly the checked head. `--match-head-commit` needs the full object id, and it also refuses a push that
+ * lands after the check, so no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR.
+ */
+function merge() {
+  const result = finishedPr(number, 'merge');
+  if (!result) return;
+  const { headRefOid } = result.pr;
+  assert.match(headRefOid, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
+  execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
+    { encoding: 'utf8', env: gh.env });
+  const { state, mergeCommit } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    pullRequest(number:$number){state mergeCommit{oid}}}}`, { owner, name, number }).repository.pullRequest;
+  assert.equal(state, 'MERGED', `Merge read-back shows #${number} as ${state}`);
+  console.log(`MERGED #${number} head ${headRefOid} merge commit ${mergeCommit?.oid}`);
 }
 
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
@@ -972,11 +1004,12 @@ function sub() {
 }
 
 const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait, handoff, ready, link, body };
+  reviews: reviewsOnce, wait, handoff, merge, ready, link, body };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
+  + ' | merge PR [--stall MINUTES] [--grace MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
@@ -986,9 +1019,10 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
   // A misspelled flag must not silently turn the session check off.
   || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^\w[\w.-]*$/.test(process.argv[5])))
-  || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
+  || (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
-  || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
+  || (command === 'merge' && value && !value.startsWith('--'))
+  || (command === 'ready' &&(!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
   || (['block', 'sub'].includes(command) && !validBlocker(value ?? ''))) {
   console.error(usage);
@@ -998,7 +1032,7 @@ try {
   await commands[command]();
 } catch (error) {
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link', 'body'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'merge', 'ready', 'link', 'body'].includes(command)) throw error;
   console.log(`${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${String(error.stderr || error.message).trim()}`);
   process.exitCode = 2;
 }
