@@ -1904,10 +1904,10 @@ function ready() {
     // GitHub reports the canonical spelling; the configured OWNER/REPO may differ in case.
     if (pr.isCrossRepository || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) return refuse(`PR #${number} does not come from a branch of ${project.repository}`);
     if (!pr.isDraft) {
-      if (pr.headRefOid !== value.toLowerCase()) return refuse(`PR #${number} is already ready with head ${pr.headRefOid.slice(0, 7)}, not ${value.slice(0, 7)}`);
+      if (!pr.headRefOid.startsWith(value.toLowerCase())) return refuse(`PR #${number} is already ready with head ${pr.headRefOid.slice(0, 7)}, not ${value.slice(0, 7)}`);
       return console.log(`READY #${number} head ${pr.headRefOid} (already ready)`);
     }
-    if (pr.headRefOid === value.toLowerCase()) break;
+    if (pr.headRefOid.startsWith(value.toLowerCase())) break;
     if (attempt >= attempts) return refuse(`PR #${number} still reports head ${pr.headRefOid.slice(0, 7)} after ${attempts} reads; expected ${value.slice(0, 7)}`);
     sleep(interval);
   }
@@ -1948,12 +1948,12 @@ const quotaLine = () => quota && `quota: ${quota.remaining} left, ${spent} point
 
 /**
  * Right after a push GitHub still reports the previous head, so a plain `wait` can end DONE for it. With `--head SHA`
- * (the full id just pushed) an open PR keeps waiting until it shows exactly that head.
+ * (the id just pushed, 7 to 40 characters, compared as a prefix) an open PR keeps waiting until it shows that head.
  * ponytail: a head that never matches (wrong id, someone else pushed on top) waits on; stop it by hand.
  */
 function lookAtHead(pr, threads) {
   const expected = headOption()?.toLowerCase();
-  if (!expected || pr.state !== 'OPEN' || pr.headRefOid === expected) return reviews(stallOption(), Date.now(), number, pr, undefined, threads ?? (current => unresolvedThreads(current.number, current.reviewThreads)));
+  if (!expected || pr.state !== 'OPEN' || pr.headRefOid.startsWith(expected)) return reviews(stallOption(), Date.now(), number, pr, undefined, threads ?? (current => unresolvedThreads(current.number, current.reviewThreads)));
   return { done: false, lines: [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`,
     `waiting: PR still shows head ${pr.headRefOid.slice(0, 7)}, expected ${expected.slice(0, 7)}`] };
 }
@@ -2152,13 +2152,12 @@ if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFini
   process.exit(2);
 }
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
-if (command === 'ready' && Number.isSafeInteger(number) && !/^[0-9a-f]{40}$/i.test(value ?? '')) {
-  // A short id is what git log shows; naming the reason saves the trip through the usage line.
-  console.error(`ready needs the full 40-character commit id (git rev-parse HEAD) or --local, not ${value ? `"${value}"` : 'nothing'}`);
+if (command === 'ready' && Number.isSafeInteger(number) && !/^[0-9a-f]{7,40}$/i.test(value ?? '')) {
+    console.error(`ready needs a commit id of 7 to 40 characters (git rev-parse HEAD) or --local, not ${value ? `"${value}"` : 'nothing'}`);
   process.exit(2);
 }
-if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' && headOption() !== undefined && !/^[0-9a-f]{40}$/i.test(headOption())) {
-  console.error(`wait --head needs the full 40-character commit id (git rev-parse HEAD), not ${headOption() ? `"${headOption()}"` : 'nothing'}`);
+if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' && headOption() !== undefined && !/^[0-9a-f]{7,40}$/i.test(headOption())) {
+  console.error(`wait --head needs a commit id of 7 to 40 characters (git rev-parse HEAD), not ${headOption() ? `"${headOption()}"` : 'nothing'}`);
   process.exit(2);
 }
 if (!commands[command] || (!['next', 'new', 'quota-wait'].includes(command) && !Number.isSafeInteger(number))
@@ -2172,12 +2171,12 @@ if (!commands[command] || (!['next', 'new', 'quota-wait'].includes(command) && !
   || (['handoff', 'merge'].includes(command) && !(numberOption('--interval', 3) >= 0 && numberOption('--interval', 3) <= 60))
   // wait: a fixed pause between reads instead of the growing one (60 to 300 s).
   || (command === 'wait' && !(numberOption('--interval', 60) >= 0 && numberOption('--interval', 60) <= 300))
-  // --head is the full id of the pushed commit (git rev-parse HEAD), as for ready; a short or missing one would wait on a head that never matches.
-  || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{40}$/i.test(headOption())))
+  // --head is the id of the pushed commit (git rev-parse HEAD, 7 to 40 characters), as for ready; a missing one would wait on a head that never matches.
+  || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{7,40}$/i.test(headOption())))
   // 0 = no limit; a missing or non-numeric value must not silently mean that.
   || (process.argv.includes('--max-minutes') && (!['wait', 'merge', 'quota-wait'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
-  || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
+  || (command === 'ready' && (!/^[0-9a-f]{7,40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
   || (command === 'body-replace' && !(process.argv.length === 8 && value === '--from' && process.argv[6] === '--to' && process.argv[5] && process.argv[7]))
   || (['block', 'sub'].includes(command) && !validBlocker(value ?? ''))) {

@@ -352,14 +352,14 @@ backlink never closes an issue.
    section **Selbstprüfung**; `handoff` and `merge` check that each name appears there, but do not judge
    whether a check ran or whether its result was good.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
-   Then mark it Ready for Review with `board.mjs ready PR SHA` (the full 40-character id of the commit you just
+   Then mark it Ready for Review with `board.mjs ready PR SHA` (the id of the commit you just
    pushed, or `--local` for the checkout's own head: it waits until GitHub reports that head, so CI starts for the right
    revision) and set Automated review with the PR number and
    all delivered issues ([PR backlinks](#pr-backlinks); `status` sets a missing
    backlink itself, no `link` call needed). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
 3. Wait for CI and every non-optional review with a trace on the current head with `board.mjs
-   wait PR --head SHA` (SHA: full id of the head you just pushed; the flag keeps it from ending
+   wait PR --head SHA` (SHA: 7 to 40 characters of the head you just pushed; the flag keeps it from ending
    on the old head right after a push) in the background (a driver subagent: foreground, see
    [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
