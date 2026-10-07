@@ -64,6 +64,11 @@ if (!path.startsWith('graphql')) {
     process.stdout.write(JSON.stringify(items.slice((page - 1) * 100, page * 100)));
     process.exit(0);
   }
+  if (parts[3] === 'stacks') {
+    // The stack read-back: by default PR 5 and PR 7 are linked in one open stack.
+    process.stdout.write(fs.existsSync('stacks.json') ? fs.readFileSync('stacks.json') : JSON.stringify([{ open: true, pull_requests: [{ number: 5 }, { number: 7 }] }]));
+    process.exit(0);
+  }
   if (parts[3] === 'compare') {
     // The upper head against the base head: ahead unless the test says the base moved on.
     process.stdout.write(fs.existsSync('compare.json') ? fs.readFileSync('compare.json') : JSON.stringify({ status: 'ahead' }));
@@ -498,6 +503,13 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
     assert.match(result.stdout, /does not contain the current head ba5e000 of PR #5/);
   }
   rmSync(join(checkout, 'compare.json'));
+  for (const stacks of [[], [{ open: true, pull_requests: [{ number: 7 }] }], [{ open: false, pull_requests: [{ number: 5 }, { number: 7 }] }]]) {
+    writeFileSync(join(checkout, 'stacks.json'), JSON.stringify(stacks));
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /not linked as a stack on GitHub/);
+  }
+  rmSync(join(checkout, 'stacks.json'));
   // The upper head moves after the proof was gathered (4th PR read, inside the guarded write): the proof belongs to the old head.
   writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([{}, {}, {}, { headRefOid: 'abcdef9999' }]));
   const moved = run('handoff', '1', '7');

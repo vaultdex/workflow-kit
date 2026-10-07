@@ -842,6 +842,11 @@ function handoffIssue(issue, viewer, reviewedHead) {
       pullRequest(number:$number){baseRefName headRefOid isCrossRepository headRepository{nameWithOwner}}}}`, { owner, name, number: Number(value) }).repository;
     if (reviewedHead && pr?.headRefOid !== reviewedHead) reasons.push(`PR #${value} changed its head from ${reviewedHead.slice(0, 7)} during handoff; read it again`);
     if (pr?.isCrossRepository !== false || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) reasons.push(`PR #${value} comes from a fork or another repository: stacks stay inside ${project.repository}`);
+    // An aligned branch chain is no stack: GitHub must list both PRs in one open stack (the read-back of the docs, step 2).
+    const stacks = rest(`repos/${project.repository}/stacks?pull_request=${Number(value)}`);
+    if (!Array.isArray(stacks) || !stacks.some(stack => stack.open !== false && [stackedOn.number, Number(value)].every(prNumber => stack.pull_requests?.some(member => member.number === prNumber)))) {
+      reasons.push(`PR #${value} and PR #${stackedOn.number} are not linked as a stack on GitHub (GET repos/${project.repository}/stacks?pull_request=${value} lists none): link them (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
+    }
     // Proof of the upper head only counts when that head contains the base PR's current head (a later push below leaves the branch name unchanged).
     if (!reasons.length && pr?.baseRefName === stackedOn.headRefName) {
       const { status } = rest(`repos/${project.repository}/compare/${stackedOn.headRefOid}...${pr.headRefOid}`);

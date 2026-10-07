@@ -207,12 +207,20 @@ otherwise: every correction below restarts CI and reviews above.
    repeat with `--force`.
 5. **Corrections below.** When the lower layer's owner changes the base branch, you rebase only your
    branch onto the new base head (`git rebase --onto NEW_BASE_HEAD OLD_BASE_HEAD <your branch>`) and
-   push it with the lease. When the base PR is merged, GitHub retargets and rebases your layer itself:
-   fetch, then check the base branch and CI on the new head before anything else. If the base PR is
-   closed without merge, your layer stops: run `check` again and report; don't retarget your PR on your own.
+   push it with the lease. When the base PR is merged, GitHub retargets your PR and rewrites your branch
+   itself (new SHAs, same content); don't retarget a stacked PR yourself, `gh pr edit --base` fails while it
+   is part of a stack. Local commits on top of the old history make the next push non-fast-forward, and
+   the lease fails. So before the next push, rebase your local work onto the rewritten remote branch and
+   never push the old history: `git branch backup/<branch> HEAD`, then `git pull --rebase` (the branch
+   needs its upstream; the fork-point logic drops your commits that GitHub rewrote and replays only the
+   local ones, so no `reset --hard` is needed), then `git diff --stat backup/<branch> HEAD`, which must
+   show nothing but what the base branch gained meanwhile, then a plain `git push` and `git branch -D
+   backup/<branch>`. After that check the base branch and CI on the new head. If the base PR is closed
+   without merge, your layer stops: run `check` again and report; don't retarget your PR on your own.
 6. **Handoff.** Your layer may go to Human review before the base PR is merged. `board.mjs handoff`
-   then requires your PR to come from this repository, to target the base PR's branch and to contain
-   that branch's current head (after a push below, rebase first and let CI run again). The handoff
+   then requires your PR to come from this repository, to be linked with the base PR as a stack on GitHub
+   (the Stacks API read-back from step 2, not just an aligned branch chain), to target the base PR's branch
+   and to contain that branch's current head (after a push below, rebase first and let CI run again). The handoff
    comment names the merge order (base PR first, then yours).
 
 ### PR backlinks
