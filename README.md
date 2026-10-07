@@ -448,7 +448,6 @@ a commit by anyone else is left alone; the same command applies.
 Renovate merges its pull requests itself once every check on the head is green, all updates
 including skills and hooks ([#244](https://github.com/vaultdex/workflow-kit/issues/244)). The
 risk is accepted: vendored skills and hooks steer agents or load executable code, and nobody
-reads them before the merge. `platformAutomerge` is off because `main` has no branch protection
-with required checks, so GitHub's auto-merge would merge at once without waiting for the CI.
-Renovate treats a head without any check as pending, so it waits for the regenerated commit's
-CI run.
+reads them before the merge. `platformAutomerge` is off; `main` is protected by the "Reviewed
+main" ruleset requiring the "Workflow Kit checks" verification. Renovate treats a head without
+any check as pending, so it waits for the regenerated commit's CI run.
