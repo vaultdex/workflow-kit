@@ -28,7 +28,10 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
     const fixture = (name, ...files) => { const dir = join(temp, name); mkdirSync(dir); git(dir, 'init', '--quiet'); for (const file of files) writeFileSync(join(dir, file), 'x'); return dir; };
 
     const kit = fixture('kit', 'AGENT_RULES.md');
-    git(kit, 'add', '.'); git(kit, 'commit', '--quiet', '-m', 'kit');
+    // Checkout code the handler must not run: a team-wide relative core.hooksPath reaches the kit's own .githooks.
+    mkdirSync(join(kit, '.githooks'));
+    writeFileSync(join(kit, '.githooks/post-checkout'), '#!/bin/sh\necho ran > "$HOOK_MARKER"\n');
+    git(kit, 'add', '.'); git(kit, 'update-index', '--chmod=+x', '.githooks/post-checkout'); git(kit, 'commit', '--quiet', '-m', 'kit');
     const origin = fixture('origin', 'README.md');
     git(origin, 'submodule', '--quiet', 'add', kit.replaceAll('\\', '/'), '.vendor/workflow-kit');
     git(origin, 'add', '.'); git(origin, 'commit', '--quiet', '-m', 'consumer');
@@ -36,12 +39,19 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
     git(plain, 'add', '.'); git(plain, 'commit', '--quiet', '-m', 'plain');
     let count = 0;
     const clone = () => { const dir = join(temp, 'clone' + count++); git(temp, 'clone', '--quiet', origin, dir); return dir; };
+    const marker = join(temp, 'hook-ran').replaceAll('\\', '/');
+    const nested = { ...local, HOOK_MARKER: marker, GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_1: 'core.hooksPath', GIT_CONFIG_VALUE_1: '.githooks' };
+    // Precondition: without the handler's protection that hook does run during the init.
+    const bare = clone();
+    execFileSync('git', ['submodule', '--quiet', 'update', '--init', '--checkout', '.vendor/workflow-kit'], { cwd: bare, env: { ...process.env, ...nested } });
+    assert.ok(existsSync(marker), 'the fixture hook runs when nothing disables hooks');
+    rmSync(marker);
 
     for (const [file, key] of variants) {
       const commands = new Set(handlers(file, key));
       assert.ok(commands.size, `${file} carries the kit init handler`);
       for (const command of commands) {
-        const trial = (cwd) => run(kind, [...args, command], cwd, local);
+        const trial = (cwd) => run(kind, [...args, command], cwd, nested);
         const [first, second] = [clone(), clone()];
         assert.ok(!existsSync(join(first, '.vendor/workflow-kit/AGENT_RULES.md')), 'fresh clone starts without the kit');
 
@@ -49,6 +59,7 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
         assert.equal(result.status, 0, result.stderr);
         assert.equal(result.stdout, '', 'a successful init prints nothing');
         assert.ok(existsSync(join(first, '.vendor/workflow-kit/AGENT_RULES.md')), `${file} initializes the kit`);
+        assert.ok(!existsSync(marker), `${file} runs no hook from the checkout`);
 
         const rules = join(first, '.vendor/workflow-kit/AGENT_RULES.md');
         rmSync(rules);
