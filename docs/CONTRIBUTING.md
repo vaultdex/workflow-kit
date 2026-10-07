@@ -119,9 +119,13 @@ remains, because GitHub has no conditional write; the read-back catches every ov
 
 **Metadata.** Every issue, including Backlog items and follow-ups, gets one
 repository milestone, a Project Priority and area/type labels when it is created,
-and keeps them after closing. Set the real fields (`gh issue create --milestone …
---label …`, then `board.mjs priority` and `board.mjs field` (several NAME VALUE pairs per call) for other
-single-select fields), not text in the body. Priority reflects
+and keeps them after closing. Set the real fields, not text in the body. The standard way is one call,
+`board.mjs new --title … --body-file FILE --milestone … --label … --priority … [--field NAME=VALUE …]`
+([README](../README.md#board-commands)): it checks every value before creating the issue, sets the Status Backlog,
+and reads everything back. Add `--start --agent claude|codex --session ID` only when a human request covers the
+[start](#starting-work); it then runs Ready, assignee, claim comment and In progress. The branch and the first
+`check` stay separate steps of [Start or resume](../AGENT_RULES.md#start-or-resume). For an existing issue use
+`board.mjs priority` and `board.mjs field` (several NAME VALUE pairs per call). Priority reflects
 impact and urgency (Urgent, High, Medium, Low). If unsure, give a provisional one
 and state its basis. Don't reprioritize others' active work. Confirmed production,
 security or data-loss fixes use the milestone `Hotfixes · laufend`. Labels describe

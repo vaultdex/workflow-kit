@@ -135,6 +135,17 @@ Git and the update may reset it. A hook copy with CRLF line endings differs from
 - `next`, `check ISSUE [--session ID]` (shows the age and open PR of a claim and one line per native sub-issue; information only), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
+- `new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]`:
+  create an issue with its required metadata in one call and print one line, `NEW URL | milestone | labels |
+  Status | Priority | …`, of the values read back. Title, body file, an open milestone, one label that exists
+  (the REST API would create an unknown one), a Priority and every field named in the optional
+  `"requiredFields"` of `.github/workflow-project.json` (for example `["Size"]`) are required; `Status`
+  and `Priority` are not `--field` values. Everything is validated against the Project and repository before
+  the issue exists, so a missing or invalid value creates nothing (`ERROR - reason`, exit 2). The Status is Backlog;
+  `--start` (only under a human start request, [Starting work](docs/CONTRIBUTING.md#starting-work)) assigns the
+  authenticated user, sets Ready, posts `Agent: …, Session: …`, reads the claim back and ends on In progress; it
+  refuses a body whose `Wartet bis:` line holds the issue. A failure after the issue exists names its URL and
+  the failed step: finish by hand, never create it again. Branch and `check` stay separate.
 - `field ISSUE NAME VALUE [NAME VALUE ...]`: any single-select fields, all read back together after writing.
   Every pair is checked against the field definitions before the first write: one invalid pair writes
   nothing and names the valid options. `field`, `status` and `priority` report failures as one

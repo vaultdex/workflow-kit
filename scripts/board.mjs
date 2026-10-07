@@ -1,5 +1,5 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run in the project: board.mjs next | check | status | priority | field | block | sub | reviews | wait (see usage below).
+// Run in the project: board.mjs next | check | status | priority | field | new | block | sub | reviews | wait (see usage below).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -8,7 +8,8 @@ import { externalTool } from './checkout-root.mjs';
 const [command, ref, value] = process.argv.slice(2);
 const project = JSON.parse(readFileSync('.github/workflow-project.json', 'utf8'));
 const [owner, name] = project.repository.split('/');
-const number = Number(String(ref).replace(/^#/, ''));
+// `new` has no issue yet and assigns the number it creates.
+let number = Number(String(ref).replace(/^#/, ''));
 const gh = externalTool('gh', process.cwd());
 
 function graphql(query, variables = {}) {
@@ -308,14 +309,23 @@ function fieldPairs() {
   if (args[0].toLowerCase() === 'status' && args[1].toLowerCase() === 'automated review') return [args.slice(0, 2)];
   assert.ok(args.length % 2 === 0, 'field takes NAME VALUE pairs: field ISSUE NAME VALUE [NAME VALUE ...]');
   const pairs = Array.from({ length: args.length / 2 }, (_, index) => args.slice(index * 2, index * 2 + 2));
-  assert.equal(new Set(pairs.map(([fieldName]) => fieldName.toLowerCase())).size, pairs.length, 'Each field may appear once per call');
   return pairs;
+}
+
+/** Resolve NAME VALUE pairs against the Project's fields; nothing is written. */
+function planFields(pairs) {
+  assert.equal(new Set(pairs.map(([fieldName]) => fieldName.toLowerCase())).size, pairs.length, 'Each field may appear once per call');
+  return pairs.map(([fieldName, optionName]) => resolveOption(fieldName, optionName));
 }
 
 /** Any single-select fields: every pair is validated before the first write, then all are read back together so a silent API no-op cannot pass. */
 function setField() {
   const issue = readIssue();
-  const plans = fieldPairs().map(([fieldName, optionName]) => resolveOption(fieldName, optionName));
+  console.log(applyFields(issue, planFields(fieldPairs())).join('\n'));
+}
+
+/** Write resolved plans on the issue and read them all back; returns one confirmation line per plan. */
+function applyFields(issue, plans) {
   for (const plan of plans) guardOption(issue, plan);
   // Confirmation lines come after the read-back, so a failed call never shows a write as confirmed.
   const written = plans.map(plan => writeOption(issue, plan));
@@ -329,7 +339,96 @@ function setField() {
     const stored = values.find(entry => entry?.field?.name === fieldName)?.name;
     assert.equal(stored, option.name, `Read-back of ${fieldName} shows ${stored ?? 'no value'}`);
   }
-  console.log(written.join('\n'));
+  return written;
+}
+
+/** Flags of `new`; unknown or repeated single flags are errors, never ignored. */
+function newOptions(args) {
+  const given = {}, single = ['--title', '--body-file', '--milestone', '--priority', '--agent', '--session'];
+  for (let index = 0; index < args.length; index++) {
+    const flag = args[index];
+    if (flag === '--start') { given[flag] = [true]; continue; }
+    assert.ok([...single, '--label', '--field'].includes(flag), `new: unknown option ${flag}`);
+    const text = args[++index];
+    assert.ok(text !== undefined && !text.startsWith('--'), `new: ${flag} needs a value`);
+    (given[flag] ??= []).push(text);
+  }
+  for (const flag of single) assert.ok((given[flag]?.length ?? 0) <= 1, `new: ${flag} may appear once`);
+  const [title, bodyFile, milestone, priority, agent, session] = single.map(flag => given[flag]?.[0]);
+  const start = Boolean(given['--start']);
+  const fields = (given['--field'] ?? []).map(pair => {
+    const split = pair.indexOf('=');
+    assert.ok(split > 0 && split < pair.length - 1, `new: --field wants NAME=VALUE, got "${pair}"`);
+    return [pair.slice(0, split), pair.slice(split + 1)];
+  });
+  return { title, bodyFile, milestone, priority, agent, session, start, fields, labels: given['--label'] ?? [] };
+}
+
+/**
+ * Create an issue with everything the workflow requires and read every value back. All inputs are checked before the
+ * issue exists (Project fields, milestone, labels, start prerequisites); a failure after it names the issue so it is
+ * finished by hand, never created twice. `--start` then runs the start steps: Ready, assignee, claim, In progress.
+ */
+function create() {
+  const options = newOptions(process.argv.slice(3));
+  const { title, bodyFile, milestone, priority, agent, session, start } = options;
+  for (const [flag, text] of [['--title', title], ['--body-file', bodyFile], ['--milestone', milestone], ['--priority', priority]]) assert.ok(text, `new: ${flag} is required`);
+  assert.ok(options.labels.length, 'new: at least one --label is required');
+  if (start) {
+    assert.ok(['claude', 'codex'].includes(agent) && /^\w[\w.-]*$/.test(session ?? ''), 'new: --start needs --agent claude|codex and --session ID (the claim comment)');
+  } else assert.ok(!agent && !session, 'new: --agent and --session belong to --start');
+  const text = readFileSync(bodyFile, 'utf8').replaceAll('\r\n', '\n').trimEnd();
+  assert.ok(text, `new: ${bodyFile} is empty`);
+  // Status is set by the command: Backlog, or Ready then In progress with --start.
+  const pairs = [['Status', start ? 'Ready' : 'Backlog'], ['Priority', priority], ...options.fields];
+  assert.ok(!options.fields.some(([fieldName]) => ['status', 'priority'].includes(fieldName.toLowerCase())), 'new: Status and Priority are not --field values (use --priority; --start sets Status)');
+  for (const required of project.requiredFields ?? []) {
+    assert.ok(pairs.some(([fieldName]) => fieldName.toLowerCase() === required.toLowerCase()), `new: the project requires ${required}: add --field ${required}=VALUE`);
+  }
+  const plans = planFields(pairs), progress = start ? planFields([['Status', 'In progress']]) : [];
+  const exact = (list, wanted, key) => list.find(item => item[key].toLowerCase() === wanted.toLowerCase());
+  const found = exact(restAll(`repos/${project.repository}/milestones`), milestone, 'title');
+  assert.ok(found, `new: ${project.repository} has no open milestone "${milestone}"`);
+  const known = restAll(`repos/${project.repository}/labels`);
+  // The REST API would silently create an unknown label.
+  const labels = options.labels.map(label => exact(known, label, 'name')?.name ?? assert.fail(`new: ${project.repository} has no label "${label}"`));
+  let viewer;
+  if (start) {
+    viewer = graphql('query{viewer{login}}').viewer?.login;
+    assert.ok(viewer, 'Cannot verify the authenticated GitHub user');
+    const waits = waitReasons(text);
+    assert.ok(!waits.blocked.length && !waits.unknown.length, `new: the issue would not be startable: ${[...waits.blocked, ...waits.unknown].join('; ')}`);
+  }
+  const created = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues`, '-X', 'POST', '--input', '-'],
+    { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: JSON.stringify({ title, body: text, milestone: found.number, labels, ...start && { assignees: [viewer] } }) }));
+  assert.ok(Number.isSafeInteger(created?.number) && created.html_url, 'GitHub did not report the new issue');
+  number = created.number;
+  let step = 'reading it back';
+  try {
+    const stored = rest(`repos/${project.repository}/issues/${number}`);
+    assert.equal(stored.milestone?.title, found.title, `Read-back of the milestone shows ${stored.milestone?.title ?? 'none'}`);
+    assert.deepEqual(stored.labels.map(label => label.name).sort(), [...labels].sort(), 'Read-back of the labels differs');
+    if (start) assert.ok(stored.assignees.some(assignee => assignee.login.toLowerCase() === viewer.toLowerCase()), 'Read-back of the assignee differs');
+    step = 'setting the Project fields';
+    applyFields(readIssue(), plans);
+    let claim;
+    if (start) {
+      step = 'posting the claim comment';
+      execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}/comments`, '-X', 'POST', '-F', 'body=@-'],
+        { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `Agent: ${agent}, Session: ${session}\n` });
+      const read = claimReasons({ number }, session);
+      assert.ok(!read.blocked.length && read.claim?.session === session, 'Claim comment read-back differs');
+      claim = read.claim.comment.html_url;
+      step = 'setting In progress';
+      applyFields(readIssue(), progress);
+    }
+    // Later plans replace earlier ones of the same field (Status: Ready, then In progress).
+    const values = Object.entries(Object.fromEntries([...plans, ...progress].map(plan => [plan.fieldName, plan.option.name])));
+    console.log([`NEW ${created.html_url}`, `milestone: ${found.title}`, `labels: ${labels.join(', ')}`,
+      ...values.map(([fieldName, value]) => `${fieldName}: ${value}`), ...start ? [`assignee: ${viewer}`, `claim: ${claim}`] : []].join(' | '));
+  } catch (error) {
+    throw new Error(`${created.html_url} was created, but ${step} failed: ${String(error.stderr || error.message).trim()}; finish by hand with board.mjs field/status, do not create it again`, { cause: error });
+  }
 }
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
@@ -1017,16 +1116,17 @@ function sub() {
   console.log(`${project.repository}#${number} has sub-issue ${childOwner}/${childName}#${childNumber}`);
 }
 
-const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField,
+const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
   reviews: reviewsOnce, wait, handoff, ready, link, body };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
+  + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
-if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
+if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && !(process.argv.length > 5 && process.argv.slice(4).every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text))))
@@ -1040,10 +1140,10 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   console.error(usage);
   process.exit(2);
 }
-// field, status and priority report a failure as one "ERROR - reason" line: their output (verdicts, backlinks, confirmations)
+// field, status, priority and new report a failure as one "ERROR - reason" line: their output (verdicts, backlinks, confirmations)
 // is held until the command succeeds, so no failed call shows a write or a check as confirmed. The other commands keep ERROR
 // with "- reason" below it.
-const oneLine = ['field', 'status', 'priority'].includes(command), print = console.log, held = [];
+const oneLine = ['field', 'status', 'priority', 'new'].includes(command), print = console.log, held = [];
 if (oneLine) console.log = (...parts) => held.push(parts.join(' '));
 try {
   await commands[command]();
@@ -1052,7 +1152,7 @@ try {
 } catch (error) {
   console.log = print;
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link', 'body', 'field', 'status', 'priority'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link', 'body', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
   console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;
