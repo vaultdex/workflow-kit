@@ -1156,7 +1156,10 @@ const findHandoffComment = (comments, viewer, headRefOid) => comments.findLast(c
 function retroReasons(bodyHtml) {
   assert.equal(typeof bodyHtml, 'string', 'The rendered handoff comment is unreadable');
   const text = html => html.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
-  const section = bodyHtml.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && text(part.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/)?.[1] ?? '') === 'Retro');
+  // A quoted template is no section: drop quotes (innermost first, so nesting works) before searching.
+  let unquoted = bodyHtml;
+  for (let previous; previous !== unquoted;) { previous = unquoted; unquoted = unquoted.replace(/<blockquote[\s>](?:(?!<blockquote[\s>])[\s\S])*?<\/blockquote>/g, ''); }
+  const section = unquoted.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && text(part.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/)?.[1] ?? '') === 'Retro');
   const lines = [...(section ?? '').matchAll(/<li[^>]*>([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>])/g)].map(([, line]) => [line, text(line)]);
   if (!lines.length) return ['the handoff comment needs a "Retro" section with one list line per finding, each ending with its resolution, or the single line "Keine Funde" (README: Handoff comment)'];
   if (lines.length === 1 && /^keine funde\.?$/i.test(lines[0][1])) return [];
