@@ -2,7 +2,7 @@
 // Nutzen: Ein ausgecheckter Branch führt keinen eigenen Hook-Code aus (Kopie im Git-Verzeichnis); fremde Hooks gehen nie verloren.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -264,7 +264,8 @@ test('a branch that changes the tracked hooks does not run them on checkout or p
   f.git('remote', 'add', 'origin', '../remote.git');
   f.git('switch', '-q', '-c', 'evil');
   writeFileSync(join(tracked, 'post-checkout'), touch('checkout'), { mode: 0o755 });
-  writeFileSync(join(tracked, 'pre-push'), touch('push'), { mode: 0o755 });
+  writeFileSync(join(tracked, 'pre-push'), touch('push'));
+  chmodSync(join(tracked, 'pre-push'), 0o755); // the mode of an existing file stays
   f.git('add', '--chmod=+x', '.githooks');
   commit('evil hooks');
   const visit = () => {
