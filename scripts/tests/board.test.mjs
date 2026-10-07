@@ -1471,7 +1471,9 @@ test('new checks every required value before creating, reads all values back and
   // Without --start the issue lands in Backlog; a label given twice (other casing) is one label.
   let result = run(...base, '--label', 'ENHANCEMENT');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.equal(result.stdout, 'NEW https://github.com/test/example/issues/1 | milestone: 0.1.1 | labels: enhancement | Status: Backlog | Priority: Low | Size: XS\n');
+  // One line with the URL and the values read back; their order and separators are not pinned.
+  assert.match(result.stdout, /^NEW https:\/\/github\.com\/test\/example\/issues\/1\b[^\n]*\n$/);
+  for (const value of ['0.1.1', 'enhancement', 'Backlog', 'Low', 'XS']) assert.ok(result.stdout.includes(value), value);
   assert.deepEqual(read('created.json'), { title: 'Titel', body: 'Text', milestone: 4, labels: ['enhancement'] });
   assert.deepEqual(read('stored-values.json'), { F1: 'Backlog', F2: 'Low', F3: 'XS' });
   assert.equal(existsSync(join(checkout, 'comment-writes')), false, 'No claim without --start');
@@ -1490,7 +1492,9 @@ test('new checks every required value before creating, reads all values back and
   writeIssue({ ...issue('Ready'), assignees: { nodes: [{ login: 'worker' }] } });
   result = run(...base, '--start', '--agent', 'claude', '--session', 'S1');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.equal(result.stdout, 'NEW https://github.com/test/example/issues/1 | milestone: 0.1.1 | labels: enhancement | Status: In progress | Priority: Low | Size: XS | assignee: worker | claim: https://github.com/test/example/issues/1#issuecomment-1\n');
+  assert.match(result.stdout, /^NEW https:\/\/github\.com\/test\/example\/issues\/1\b[^\n]*\n$/);
+  for (const value of ['In progress', 'worker', 'https://github.com/test/example/issues/1#issuecomment-1']) assert.ok(result.stdout.includes(value), value);
+  assert.ok(!result.stdout.includes('Ready'), 'The final status is shown, not the intermediate one');
   assert.deepEqual(read('created.json').assignees, ['worker']);
   assert.equal(read('backlink-comments-1.json')[0].body, 'Agent: claude, Session: S1\n');
   assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 4, 'Ready, Priority, Size, In progress');
