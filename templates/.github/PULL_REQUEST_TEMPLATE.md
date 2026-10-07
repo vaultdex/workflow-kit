@@ -1,6 +1,7 @@
 ## Was wurde geändert und warum?
 
-<!-- Ergebnis, Grund und Nutzen in einfachem Deutsch, bei Bedarf Vorher/Nachher.
+<!-- Erster Satz: das Ergebnis in einfachem Deutsch. Danach Grund und Nutzen, bei
+Bedarf Vorher/Nachher; technische Belege bleiben.
 Closes #N nur für vollständig gelieferte Issues, sonst Refs #N. -->
 
 ## Prüfung und Grenzen

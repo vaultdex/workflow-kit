@@ -182,6 +182,11 @@ else {
   data = { repository: { issue } };
 }
 process.stdout.write(JSON.stringify({ data }));`);
+  // `gh pr merge …` runs this script: it records the call; merge-fails is gh refusing, merge-noop a merge that never shows.
+  writeFileSync(join(checkout, 'pr'), `const fs = require('node:fs');
+fs.appendFileSync('merges', process.argv.slice(2).join(' ') + '\\n');
+if (fs.existsSync('merge-fails')) { process.stderr.write('gh: Head branch was modified\\n'); process.exit(1); }
+if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));`);
   const env = {};
   return {
     checkout, env,
@@ -1462,4 +1467,64 @@ test('board check shows the age of a claim and whether a linked PR is open', t =
   assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #5 \(first 1 of 150\)$/m, 'A cut list says so');
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');
   assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');
+});
+
+test('merge merges the checked head by its full id only when no review is running, and proves the merge', t => {
+  const { checkout, run } = fixture(t);
+  const merges = join(checkout, 'merges');
+  const oid = 'abcdef1' + '0'.repeat(33);
+  const commit = handoffPr().commits.nodes[0].commit;
+  const withHead = (headRefOid, changes) => handoffPr({ headRefOid, commits: { nodes: [{ commit: { ...commit, oid: headRefOid } }] }, ...changes });
+  const write = (pr, comments = []) => {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr));
+    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
+  };
+  const codexRunning = { id: 1, user: { login: 'chatgpt-codex-connector[bot]', type: 'Bot' }, html_url: 'u', created_at: pushedAt(), updated_at: pushedAt(),
+    body: `| Code Review | ⏳ **Running** <relative-time datetime="${pushedAt()}"></relative-time> | \`abcdef1\` |` };
+  const failedCi = { ...commit, oid, statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } };
+  const refused = [
+    ['a reviewer that is still running', withHead(oid), [codexRunning], 3],
+    ['an open review request', withHead(oid, { reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { login: 'reviewer' } }] },
+      requestEvents: { totalCount: 1, nodes: [{ createdAt: pushedAt(), requestedReviewer: { login: 'reviewer' } }] } }), [], 3],
+    ['red CI', withHead(oid, { commits: { nodes: [{ commit: failedCi }] } }), [], 1],
+    ['a Draft', withHead(oid, { isDraft: true }), [], 1],
+    ['a merged PR', withHead(oid, { state: 'MERGED' }), [], 1],
+    ['an unresolved thread', withHead(oid, { threadPages: [[false]] }), [], 1],
+    ['conflicts', withHead(oid, { mergeStateStatus: 'DIRTY' }), [], 1],
+    ['an undetermined merge state', withHead(oid, { mergeStateStatus: 'UNKNOWN' }), [], 3],
+    ['a standing change request', withHead(oid, { latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'reviewer' } }] } }), [], 1],
+    ['a short head id, which gh --match-head-commit refuses', handoffPr(), [], 2],
+  ];
+  for (const [label, pr, comments, status] of refused) {
+    write(pr, comments);
+    const result = run('merge', '7');
+    assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
+    assert.equal(existsSync(merges), false, `${label}: gh pr merge is never called`);
+  }
+  // The refusal names the reviewer that is still running.
+  write(withHead(oid), [codexRunning]);
+  assert.match(run('merge', '7').stdout, /waiting: chatgpt-codex-connector running since/);
+  write(withHead(oid));
+  writeFileSync(join(checkout, 'fail'), '');
+  assert.equal(run('merge', '7').status, 2, 'An API read failure is unknown, never a merge');
+  rmSync(join(checkout, 'fail'));
+  assert.equal(existsSync(merges), false);
+  assert.equal(run('merge', '7', '--stall', '0').status, 2, 'A bad option is rejected');
+  assert.equal(run('merge', '7', '8').status, 2, 'A stray argument is rejected');
+
+  const merged = run('merge', '7');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.equal(readFileSync(merges, 'utf8'), `merge 7 --repo test/example --merge --match-head-commit ${oid}\n`, 'gh gets the full head id');
+  assert.match(merged.stdout, new RegExp(`^MERGED #7 head ${oid} merge commit f{40}$`, 'm'));
+
+  for (const flag of ['merge-fails', 'merge-noop']) {
+    rmSync(merges);
+    write(withHead(oid));
+    writeFileSync(join(checkout, flag), '');
+    const result = run('merge', '7');
+    assert.equal(result.status, 2, `${flag}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /^ERROR$/m);
+    assert.doesNotMatch(result.stdout, /^MERGED/m, 'Only a read-back showing the merge counts');
+    rmSync(join(checkout, flag));
+  }
 });
