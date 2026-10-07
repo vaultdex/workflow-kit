@@ -307,13 +307,21 @@ function api(argv, input, stdout, stderr, exit) {
       projectItems: { nodes: [{ project: { id: 'P1' }, fieldValues: { nodes: Object.entries(values).map(([id, name]) => ({ name: lost || name, field: { name: names[id] } })) } }] } } } };
   }
   else if (query.includes('reviewThreads(first:100')) {
-    const pages = JSON.parse(fs.readFileSync('pr.json')).threadPages ?? [[]];
+    let pr = JSON.parse(fs.readFileSync('pr.json'));
+    if (query.includes('readyEvents') && fs.existsSync('pr-reads.json')) {
+      const reads = JSON.parse(fs.readFileSync('pr-reads.json'));
+      const overlay = reads.length > 1 ? reads.shift() : reads[0];
+      fs.writeFileSync('pr-reads.json', JSON.stringify(reads));
+      pr = { ...pr, ...overlay };
+      fs.writeFileSync('pr.json', JSON.stringify(pr));
+    }
+    const pages = pr.threadPages ?? [[]];
     const cursor = argv.find(arg => arg.startsWith('after='));
     const index = cursor ? Number(cursor.slice(6)) : 0;
     const reviewThreads = { pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
       nodes: pages[index].map(isResolved => ({ isResolved, comments: { nodes: [{ url: 'thread-' + index }] } })) };
     data = query.includes('readyEvents')
-      ? { repository: { pullRequest: { ...JSON.parse(fs.readFileSync('pr.json')), reviewThreads } } }
+      ? { repository: { pullRequest: { ...pr, reviewThreads } } }
       : { repository: { pullRequest: { reviewThreads } } };
   }
   else if (query.includes('closingIssuesReferences')) {
