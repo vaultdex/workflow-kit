@@ -6,5 +6,6 @@
   "url": "https://github.com/orgs/vaultdex/projects/5",
   "optionalReviewers": [
     "coderabbitai"
-  ]
+  ],
+  "reviewerGraceMinutes": 0
 }
