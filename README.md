@@ -348,6 +348,11 @@ Locally run only the affected tests; CI runs the commands above plus the full
 `node --test scripts/tests` in one Linux job: about 20
 runs a month at up to 10 minutes on a free public runner.
 
+Per clone, run `node scripts/install-git-hooks.mjs` once (rerun after changing `.githooks/`). The copied
+`pre-push` hook then runs the static file test `scripts/tests/text-files.test.mjs` (stray control characters,
+well under a second) and stops the push when it fails. It checks the working tree, adds no network or
+fixture tests, and `git push --no-verify` skips it; CI runs everything either way.
+
 ### Submodule updates by Renovate
 
 Renovate only moves a submodule pin, so the Ponytail adaptation patch and the committed
