@@ -78,6 +78,11 @@ if (!path.startsWith('graphql')) {
     process.stdout.write(JSON.stringify(items.slice((page - 1) * 100, page * 100)));
     process.exit(0);
   }
+  if (parts[3] === 'stacks') {
+    // The stack read-back: by default PR 5 and PR 7 are linked in one open stack.
+    process.stdout.write(fs.existsSync('stacks.json') ? fs.readFileSync('stacks.json') : '[]');
+    process.exit(0);
+  }
   if (parts[3] === 'compare') {
     // compare.json: { behind: commits the base gained, own: files of the PR, base: files of the base }; by default the base has not moved.
     const moved = fs.existsSync('compare.json') ? JSON.parse(fs.readFileSync('compare.json')) : { behind: 0, own: [], base: [] };
@@ -87,7 +92,9 @@ if (!path.startsWith('graphql')) {
     const base = decodeURIComponent(parts.slice(4).join('/')).split('...')[0];
     const forward = base === JSON.parse(fs.readFileSync('pr.json')).baseRefName;
     const files = (forward ? moved.own : moved.base).slice(0, 300).map(filename => ({ filename }));
-    process.stdout.write(JSON.stringify({ behind_by: forward ? moved.behind : 0, files }));
+    // stack-compare.json: the status of the upper head against the base PR's head (ahead unless the test says the base moved on).
+    const status = fs.existsSync('stack-compare.json') ? JSON.parse(fs.readFileSync('stack-compare.json')).status : 'ahead';
+    process.stdout.write(JSON.stringify({ status, behind_by: forward ? moved.behind : 0, files }));
     process.exit(0);
   }
   if (parts[3] === 'activity') {
@@ -227,7 +234,9 @@ const issue = (status = 'Ready', nodes = [], totalCount = nodes.length) => ({
   projectItems: { nodes: [{ id: 'PI1', project: { id: 'P1' }, status: { name: status } }] },
   blockedBy: { totalCount, nodes },
 });
-const predecessor = (state, stateReason) => ({ number: 9, state, stateReason, repository: { nameWithOwner: 'test/other' } });
+// prs: the PRs GitHub lists as closing the predecessor (closedByPullRequestsReferences).
+const predecessor = (state, stateReason, prs = [], changes) => ({ number: 9, state, stateReason, repository: { nameWithOwner: 'test/other' },
+  closedByPullRequestsReferences: { totalCount: prs.length, nodes: prs }, ...changes });
 
 // Pushed long enough ago that the reviewer grace has passed.
 const pushedAt = () => new Date(Date.now() - 10 * 60_000).toISOString();
@@ -466,6 +475,120 @@ test('board check exits 0 only for startable issues: 1 blocked, 2 unknown', t =>
   assert.equal(check('Ready', [predecessor('CLOSED', null)]), 2, 'A closure without a reason is unknown');
   writeFileSync(join(checkout, 'fail'), '');
   assert.equal(check('Ready', []), 2, 'A failed read is never "no blockers"');
+});
+
+test('an issue held only by open predecessors is STACKABLE on the one open, ready PR that delivers them all, else BLOCKED', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const pr = (number, changes) => ({ number, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'release/0.1.1', headRefName: `claude/${number}-base`, headRefOid: 'ba5e0001', ...changes });
+  const open = (number, prs, changes) => predecessor('OPEN', null, prs, { number, repository: { nameWithOwner: 'test/example' }, ...changes });
+  const check = (...predecessors) => { writeIssue(issue('Ready', predecessors)); return run('check', '1'); };
+
+  const stackable = check(open(2, [pr(5)]));
+  assert.equal(stackable.status, 4, stackable.stdout);
+  assert.equal(check(open(2, [pr(5)]), open(3, [pr(5)]), predecessor('CLOSED', 'COMPLETED')).status, 4, 'Several predecessors delivered by one PR');
+  assert.equal(check(open(2, [pr(5), pr(6, { state: 'CLOSED' })])).status, 4, 'A closed PR delivers nothing');
+  assert.equal(check(open(2, [pr(5, { state: 'MERGED' })])).status, 4, 'A base merged into the release branch (its issue stays open) still counts');
+  assert.equal(check(open(2, [pr(5, { state: 'MERGED' }), pr(6)])).status, 1, 'A merged and an open PR are two deliveries');
+  const refused = [
+    ['no PR', open(2, [])],
+    ['only a Draft PR', open(2, [pr(5, { isDraft: true })])],
+    ['a PR from a fork', open(2, [pr(5, { isCrossRepository: true })])],
+    ['a closed PR', open(2, [pr(5, { state: 'CLOSED' })])],
+    ['a PR of another repository that closes the issue', open(2, [pr(5, { repository: { nameWithOwner: 'test/elsewhere' } })])],
+    ['two PRs for one predecessor', open(2, [pr(5), pr(6)])],
+    ['a predecessor in another repository', open(2, [pr(5)], { repository: { nameWithOwner: 'test/other' } })],
+  ];
+  for (const [label, candidate] of refused) assert.equal(check(candidate).status, 1, `${label} stays BLOCKED`);
+  assert.equal(check(open(2, [pr(5)]), open(3, [pr(6)])).status, 1, 'Two predecessors in two PRs are not linear');
+  assert.equal(check(open(2, [pr(5)]), open(3, [])).status, 1, 'Every open predecessor needs the PR');
+  assert.equal(check(open(2, [pr(5)]), predecessor('CLOSED', 'NOT_PLANNED')).status, 1, 'A decision-less closure still blocks');
+  assert.equal(check(open(2, [pr(5)]), predecessor('CLOSED', null)).status, 1, 'An unreadable predecessor never turns a wait into a stack');
+  const partial = open(2, [pr(5)]);
+  partial.closedByPullRequestsReferences.totalCount = 2;
+  assert.equal(check(partial).status, 2, 'Incomplete PR data is unknown, not "no PR"');
+  assert.equal(check(partial, open(3, [])).status, 1, 'A definitive refusal stays BLOCKED next to unreadable PR data');
+  writeIssue({ ...issue('Backlog', [open(2, [pr(5)])]) });
+  assert.equal(run('check', '1').status, 1, 'Another blocker is not lifted by a stack');
+  writeIssue({ ...issue('Ready', [open(2, [pr(5)])]), body: 'Wartet bis: 2999-01-01T00:00Z' });
+  assert.equal(run('check', '1').status, 1, '"Wartet bis" is not lifted by a stack');
+
+  // status accepts STACKABLE and still rejects BLOCKED.
+  const assigned = changes => ({ ...issue('Ready', [open(2, [pr(5)])]), assignees: { nodes: [{ login: 'worker' }] }, ...changes });
+  writeIssue(assigned({ blockedBy: { totalCount: 1, nodes: [open(2, [])] } }));
+  assert.notEqual(run('status', '1', 'In progress').status, 0);
+  assert.equal(existsSync(join(checkout, 'mutations')), false);
+  writeIssue(assigned());
+  assert.equal(run('status', '1', 'In progress').status, 0);
+  assert.equal(readFileSync(join(checkout, 'mutations'), 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 1);
+
+  // The upper layer may reach Human review before the base is merged, but only as a layer on that base.
+  const layer = assigned({ projectItems: issue('Automated review').projectItems });
+  writeIssue(layer);
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  writeFileSync(join(checkout, 'stored'), 'Automated review');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
+  writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{ open: true, pull_requests: [{ number: 5, state: 'open' }, { number: 7, state: 'open' }] }]));
+  // Every rejection changes one thing about the accepted case below and must leave the status untouched.
+  const stored = () => readFileSync(join(checkout, 'stored'), 'utf8');
+  const rejected = (label, status = 1) => {
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, status, `${label}: ${result.stdout}`);
+    assert.equal(stored(), 'Automated review', `${label} must not write Human review`);
+  };
+  const upper = { baseRefName: 'claude/5-base', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
+  rejected('a PR on the release branch while its base is open');
+  for (const fork of [{ isCrossRepository: true, headRepository: { nameWithOwner: 'someone/example' } }, { headRepository: { nameWithOwner: 'someone/example' } }, { isCrossRepository: undefined }]) {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ ...upper, ...fork })));
+    rejected('a fork PR');
+  }
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(upper)));
+  for (const status of ['behind', 'diverged']) {
+    writeFileSync(join(checkout, 'stack-compare.json'), JSON.stringify({ status }));
+    rejected(`a head that is ${status} the base head`);
+  }
+  rmSync(join(checkout, 'stack-compare.json'));
+  for (const stacks of [[], [{ open: true, pull_requests: [{ number: 7 }] }], [{ open: false, pull_requests: [{ number: 5 }, { number: 7 }] }]]) {
+    writeFileSync(join(checkout, 'stacks.json'), JSON.stringify(stacks));
+    rejected('no linked open stack');
+  }
+  writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{ open: true, pull_requests: [{ number: 5, state: 'open' }, { number: 7, state: 'open' }] }]));
+  // The upper head moves after the proof was gathered (4th PR read, inside the guarded write): the proof belongs to the old head.
+  writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([{}, {}, {}, { headRefOid: 'abcdef9999' }]));
+  rejected('a head that moved during handoff');
+  rmSync(join(checkout, 'pr-reads.json'));
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(upper)));
+  const handed = run('handoff', '1', '7');
+  assert.equal(handed.status, 0, handed.stdout + handed.stderr);
+  assert.equal(stored(), 'Human review');
+
+  // After the base merged into the release branch GitHub has retargeted the layer: a plain PR there, nothing stack-specific left to prove.
+  writeIssue(assigned({ projectItems: issue('Automated review').projectItems, blockedBy: { totalCount: 1, nodes: [open(2, [pr(5, { state: 'MERGED' })])] } }));
+  writeFileSync(join(checkout, 'stored'), 'Automated review');
+  writeFileSync(join(checkout, 'stacks.json'), '[]');
+  const plain = { baseRefName: 'release/0.1.1', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
+  for (const wrong of [{ baseRefName: 'main' }, { isCrossRepository: true }, { headRepository: { nameWithOwner: 'someone/example' } }]) {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ ...plain, ...wrong })));
+    rejected('a merged base with a PR that is not a plain PR of this repository on the release branch');
+  }
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(plain)));
+  assert.equal(run('handoff', '1', '7').status, 0);
+  assert.equal(stored(), 'Human review');
+});
+
+test('next lists stackable Ready issues with their base PR apart from blocked ones', t => {
+  const { checkout, run } = fixture(t);
+  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base' };
+  const ready = (number, nodes) => ({ ...issue('Ready', nodes), number, issueFieldValues: { nodes: [] } });
+  const open = prs => predecessor('OPEN', null, prs, { repository: { nameWithOwner: 'test/example' } });
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([ready(1, [open([pr])]), ready(2, [open([])]), ready(3, [predecessor('CLOSED', 'COMPLETED')])]));
+  const result = run('next');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const [startable, stackable, held] = result.stdout.split('\n\n');
+  assert.deepEqual(startable.match(/^#\d+/gm), ['#3']);
+  assert.deepEqual(stackable.match(/^#\d+/gm), ['#1']);
+  assert.ok(stackable.includes('base PR #5'), 'The base PR is named');
+  assert.deepEqual(held.match(/^#\d+/gm), ['#2']);
 });
 
 test('"Wartet bis" holds an issue until its tag exists or its UTC time has passed; unreadable values are unknown', t => {
@@ -1649,6 +1772,12 @@ test('merge merges the checked head by its full id only when no review is runnin
     assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
     assert.equal(existsSync(merges), false, `${label}: gh pr merge is never called`);
   }
+  // An upper layer of a stack is not merged while a layer below is open: that merge would take the lower layer along.
+  write(withHead(oid));
+  writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{ open: true, pull_requests: [{ number: 5, state: 'open' }, { number: 7, state: 'open' }] }]));
+  assert.equal(run('merge', '7').status, 1);
+  assert.equal(existsSync(merges), false, 'gh pr merge is never called for an upper layer');
+  rmSync(join(checkout, 'stacks.json'));
   // The refusal names the reviewer that is still running.
   write(withHead(oid), [codexRunning]);
   assert.match(run('merge', '7').stdout, /waiting: chatgpt-codex-connector running since/);

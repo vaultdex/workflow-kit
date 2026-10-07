@@ -143,7 +143,10 @@ the installer, so the kit's current one is copied.
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
 
-- `next`, `check ISSUE [--session ID]` (shows the age and open PR of a claim and one line per native sub-issue; information only), `status ISSUE "STATUS"`, `priority ISSUE High`,
+- `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open
+  predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);
+  `next` lists such issues apart, with the base PR; shows the age and open PR of a claim and one line per
+  native sub-issue; information only), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
 - `new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]`:
@@ -235,7 +238,8 @@ the installer, so the kit's current one is copied.
   `FAILED` (exit 1), and nothing is merged. Otherwise it runs `gh pr merge --merge
   --match-head-commit <full head id>` once (a push after the check makes gh refuse) and counts
   only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; gh
-  refusal or a read-back that differs: `ERROR`, exit 2). It does not read the issue, claims or the
+  refusal or a read-back that differs: `ERROR`, exit 2). A layer of a [stack](docs/CONTRIBUTING.md#stacked-pull-requests)
+  with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. It does not read the issue, claims or the
   [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
