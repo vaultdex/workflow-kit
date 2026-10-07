@@ -1241,12 +1241,12 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // The count is information only: an unreadable one never changes the verdict (neither red into ERROR nor green into ERROR).
     lines.push(`note: correction pushes unreadable (${error.message})`);
   }
-  // The base moves whenever other PRs merge; one merge before the next push is cheaper than a red CI run per move. Information only.
+  // The base moves whenever other PRs merge; PR CI already tests the merge result, so a base merge only pays off where both sides changed files. Information only.
   try {
     const moved = baseMovement(pr);
     if (moved) {
-      lines.push(`base moved: ${moved.behind} commits since merge-base (${pr.baseRefName}); merge it once before the next push`);
-      lines.push(moved.shared.length ? `changed on both sides: ${filesText(moved.shared)}` : 'no file is changed on both sides');
+      lines.push(`base moved: ${moved.behind} commits since merge-base (${pr.baseRefName})${moved.shared.length ? '; merge it once before the next push' : ''}`);
+      lines.push(moved.shared.length ? `changed on both sides: ${filesText(moved.shared)}` : 'no file is changed on both sides: no base merge needed');
     }
   } catch (error) {
     lines.push(`note: base movement unreadable (${error.message})`);
