@@ -88,7 +88,9 @@ project hooks in each agent, then start a new session:
 Settings → Hooks in Cursor, `.github/hooks` for Copilot. Missing snapshots produce
 a SessionStart install hint. Session and subagent starts also run
 `git submodule update --init .vendor/workflow-kit` when the kit checkout is missing (fresh
-worktree); an initialized kit stays untouched and a failure prints the command. Files and manual runs don't prove agent loading or
+worktree) or not at the commit the gitlink pins (a base merge moves the pin, not the checkout); a kit at its pin stays untouched,
+a kit with local changes or unpublished commits is not moved, and both that case and a failure print a hint. A SubagentStart in
+a worktree whose kit you deliberately moved ahead of the gitlink resets it, so stage the new pin (`git add .vendor/workflow-kit`) before starting subagents. Files and manual runs don't prove agent loading or
 trust; new definitions need personal review and trust. See
 [Ponytail](docs/ponytail.md) and [Impeccable](docs/impeccable.md) for hook behavior.
 

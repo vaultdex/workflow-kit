@@ -25,9 +25,9 @@ from the hint text. The snapshot is per user, so every checkout, worktree and ha
 on the machine shares it.
 
 One command runs from a hook on its own: when `.vendor/workflow-kit/AGENT_RULES.md` is missing
-and the project pins the kit as a gitlink, the committed SessionStart and SubagentStart
+or the kit is not at the commit the project's gitlink pins (a fresh worktree, or a base merge that moved the pin), the committed SessionStart and SubagentStart
 hooks run `git submodule update --init .vendor/workflow-kit` with `-c core.hooksPath=/dev/null`, so no Git hook of the checkout runs (source `.gitmodules`, the commit
-the gitlink pins). A present kit stays untouched; a failure only prints that command. No installer,
+the gitlink pins). A kit at its pin stays untouched. A lagging kit with local changes or unpublished commits is not updated; that case, a failed update and a missing `git` print a hint with the command, which the hook adds to the agent's context. The hooks locate the project from `CLAUDE_PROJECT_DIR` when the agent sets it, else from the working directory. No installer,
 provisioning or other command runs from a hook. It finds `git` on PATH like every agent command.
 The project's Git `post-checkout` hook, written only by an explicit run of `install-git-hooks.mjs`, runs
 the same update after a branch checkout so the kit follows the new gitlink; it skips a kit with local
