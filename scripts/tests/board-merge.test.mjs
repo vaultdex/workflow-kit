@@ -148,6 +148,17 @@ test('merge falls back to merge-async with the checked head when gh refuses a PR
     assert.equal(asyncMerges(), `merge_action=direct_merge merge_method=merge sha=${first}\n`);
     assert.match(result.stdout, new RegExp(`^MERGED #7 head ${first} `, 'm'));
   }
+  // The REST merge answers a stack with HTTP 403.
+  show();
+  writeFileSync(join(checkout, 'merge-403'), 'gh: Forbidden (HTTP 403)');
+  assert.equal(run('merge', '7', '--interval', '0').status, 0);
+  assert.deepEqual(calls(), ['merge', 'merge-async', 'delete claude/7-topic']);
+  // A "forbidden" without stack reference is a plain refusal: an error, no merge-async.
+  show();
+  writeFileSync(join(checkout, 'merge-403'), 'GraphQL: Resource not accessible by integration (forbidden)');
+  const plain = run('merge', '7');
+  assert.equal(plain.status, 2, plain.stdout + plain.stderr);
+  assert.deepEqual(calls(), ['merge']);
   // merge-async refused too: an error, no third try.
   show();
   flag('merge-403');
