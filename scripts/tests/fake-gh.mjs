@@ -122,6 +122,33 @@ function api(argv, input, stdout, stderr, exit) {
       stdout(fs.existsSync('activity.json') ? fs.readFileSync('activity.json') : JSON.stringify([{ after: head, timestamp: '2000-01-01T00:00:00Z' }]));
       exit(0);
     }
+    if (parts[3] === 'pulls' && parts.length === 5) {
+      // The PR as REST shows it, derived from pr.json so GraphQL and REST agree. Each read takes the next overlay of pr-rest-reads.json
+      // (the last one stays) and applies it to pr.json: a change that becomes visible between two rounds of `wait`. Reads are counted in rest-reads.
+      fs.appendFileSync('rest-reads', 'x\n');
+      if (fs.existsSync('pr-rest-reads.json')) {
+        const reads = JSON.parse(fs.readFileSync('pr-rest-reads.json'));
+        const overlay = reads.length > 1 ? reads.shift() : reads[0];
+        fs.writeFileSync('pr-rest-reads.json', JSON.stringify(reads));
+        fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...overlay }));
+      }
+      const pr = JSON.parse(fs.readFileSync('pr.json'));
+      stdout(JSON.stringify({ number: pr.number, state: pr.state === 'OPEN' ? 'open' : 'closed', merged: pr.state === 'MERGED', draft: pr.isDraft, updated_at: pr.updatedAt ?? 'u',
+        mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid } }));
+      exit(0);
+    }
+    if (parts[3] === 'commits' && ['check-runs', 'check-suites', 'status'].includes(parts[5])) {
+      // The checks of the head, also derived from pr.json.
+      const { commit } = JSON.parse(fs.readFileSync('pr.json')).commits.nodes[0];
+      const contexts = commit.statusCheckRollup?.contexts.nodes ?? [];
+      const pick = nodes => nodes.map((node, id) => ({ id, status: node.status?.toLowerCase(), conclusion: node.conclusion?.toLowerCase() }));
+      stdout(JSON.stringify({
+        'check-runs': { check_runs: pick(contexts.filter(node => node.__typename === 'CheckRun')) },
+        'check-suites': { check_suites: pick(commit.checkSuites.nodes) },
+        status: { statuses: contexts.filter(node => node.__typename === 'StatusContext').map(node => ({ context: node.context, state: node.state, description: node.description })) },
+      }[parts[5]]));
+      exit(0);
+    }
     const file = parts.at(-3) + '-' + parts.at(-1) + '.json';
     const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
     const items = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];

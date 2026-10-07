@@ -45,7 +45,9 @@ Konto und wird von allen Drivern gemeinsam verbraucht; ist es leer, scheitert je
 5 Minuten (bei Neuigkeiten wieder von vorn), also etwa 20 bis 40 Punkte pro Stunde und Driver
 statt 120 bei festem Minutentakt. Als Budget gilt: Zahl der Driver mal 40 Punkte, dazu der eigene
 Verbrauch der Agents; höchstens 20 parallele `wait` (rund 800 Punkte pro Stunde, ein Sechstel
-des Kontingents). `wait` und `reviews` melden den Rest in einer Zeile (`quota: …`).
+des Kontingents). `wait` fragt GraphQL nur noch, wenn sich laut REST etwas geändert hat (Head, Checks,
+Status, Aktualisierungszeit), spätestens alle 5 Minuten und zur Bestätigung jedes Endes; `wait PR --merged` liest nur REST
+([#324](https://github.com/vaultdex/workflow-kit/issues/324)). `wait` und `reviews` melden den Rest in einer Zeile (`quota: …`).
 `wait`, `reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 300 (`wait`)
 beziehungsweise 50 Punkten bis zum Reset (`rate limited until …`) und fragen danach weiter; bei
 einer kurzen Drosselung („secondary rate limit“) warten sie 1, 2, dann 4 Minuten statt bis zum
