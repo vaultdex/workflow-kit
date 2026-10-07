@@ -10,7 +10,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { projectRoot } from './checkout-root.mjs';
+import { enterCwd, projectRoot } from './checkout-root.mjs';
 
 const kit = fileURLToPath(new URL('..', import.meta.url));
 const tests = 'scripts/tests/';
@@ -93,6 +93,7 @@ export function projectCommands(files, map) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  enterCwd(); // `--cwd PROJECT_DIR` as the first argument; file arguments are relative to it
   const { values, positionals: given } = parseArgs({ allowPositionals: true, options: { run: { type: 'boolean' }, base: { type: 'string', default: 'origin/main' } } });
   // A project that uses the kit as a submodule: kit tests follow the kit's own changes, the project map the project's.
   const root = projectRoot(), inKit = realpathSync.native(root) === realpathSync.native(kit);

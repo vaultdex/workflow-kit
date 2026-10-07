@@ -152,7 +152,9 @@ the installer, so the kit's current one is copied.
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`. It acts on the project of the
 working directory; `--cwd PROJECT_DIR` as the first argument (`board.mjs --cwd PROJECT_DIR check 7`) reads
-the project from that directory instead. Other relative paths (`--body-file`) stay relative to the working directory:
+the project from that directory instead. Other relative paths (`--body-file`) stay relative to the working directory.
+`init-project.mjs`, `setup-skills.mjs` and `affected-tests.mjs` take the same first argument (`takeCwd` in `checkout-root.mjs`),
+and then work in that directory, their relative paths (changed files given to `affected-tests.mjs`) included:
 
 - `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open
   predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);

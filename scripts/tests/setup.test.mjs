@@ -22,11 +22,15 @@ test('generated skills and hook sources survive a plain clone without setup', t 
   copyFileSync(join(kit, '.gitattributes'), join(fixture, '.gitattributes'));
   // The generators register their submodules in the kit they live in: run them in a throwaway kit (#207).
   const scripts = join(kitCheckout(t), 'scripts');
-  const setup = name => spawnSync(process.execPath, [join(scripts, name)], { cwd: fixture, encoding: 'utf8' });
-  for (let run = 0; run < 2; run++) {
-    const result = setup('setup-skills.mjs');
+  const setup = (name, cwd, ...args) => spawnSync(process.execPath, [join(scripts, name), ...args], { cwd, encoding: 'utf8' });
+  // The first run names the fixture with --cwd from another checkout, which must stay untouched; the second runs in the fixture.
+  const elsewhere = temporary(t, 'workflow-kit elsewhere ');
+  execFileSync('git', ['init', '--quiet', elsewhere]);
+  for (const [cwd, args] of [[elsewhere, ['--cwd', fixture]], [fixture, []]]) {
+    const result = setup('setup-skills.mjs', cwd, ...args);
     assert.equal(result.status, 0, result.stderr);
   }
+  assert.deepEqual(readdirSync(elsewhere), ['.git'], '--cwd acts on the named checkout, not the working directory');
   // Only discovery files enter the commit; no ignored staging bundles or upstream submodules.
   execFileSync('git', ['-C', fixture, 'add', '.gitattributes', '.agent', '.agents', '.claude', '.github', '.codex', '.opencode', '.pi']);
   const executablePaths = ['**/skills/impeccable/scripts/impeccable', '**/skills/git-guardrails-claude-code/scripts/block-dangerous-git.sh']

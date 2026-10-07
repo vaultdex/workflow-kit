@@ -5,10 +5,11 @@ import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { projectRoot } from './checkout-root.mjs';
+import { enterCwd, projectRoot } from './checkout-root.mjs';
 import { checkDirectory } from './provider-links.mjs';
 
 const kit = realpathSync.native(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+enterCwd(); // `--cwd PROJECT_DIR` as the first argument
 const requestedRoot = projectRoot();
 // The installed kit owns only itself or the checkout it is vendored into.
 const root = requestedRoot === kit ? kit : resolve(kit, '../..');

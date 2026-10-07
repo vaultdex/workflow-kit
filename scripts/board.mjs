@@ -6,15 +6,11 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { externalTool } from './checkout-root.mjs';
+import { externalTool, takeCwd } from './checkout-root.mjs';
 import { isRateLimited, quotaOf, retryAt, splitResponse, untilText, waitInterval } from './quota.mjs';
 
 // Taken off here: the commands below read their arguments by position.
-const projectDirectory = process.argv[2] === '--cwd' ? process.argv.splice(2, 2)[1] : '.';
-if (!projectDirectory || projectDirectory.startsWith('--')) {
-  console.error('--cwd needs the directory of the project (the one holding .github/workflow-project.json)');
-  process.exit(2);
-}
+const projectDirectory = takeCwd();
 const [command, ref, typed] = process.argv.slice(2);
 const project = JSON.parse(readFileSync(join(projectDirectory, '.github/workflow-project.json'), 'utf8'));
 const [owner, name] = project.repository.split('/');
