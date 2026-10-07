@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { externalTool } from './checkout-root.mjs';
-import { isRateLimited, waitInterval } from './quota.mjs';
+import { isRateLimited, retryAt, waitInterval } from './quota.mjs';
 
 const [command, ref, value] = process.argv.slice(2);
 const project = JSON.parse(readFileSync('.github/workflow-project.json', 'utf8'));
@@ -48,7 +48,7 @@ function graphql(query, variables = {}) {
       return data;
     } catch (error) {
       if (!isRateLimited(`${error.stderr}${error.stdout}`)) throw error;
-      const resetAt = quotaReset();
+      const resetAt = retryAt(`${error.stderr}${error.stdout}`, sleeps, quotaReset);
       assert.ok(command in sleepers && sleeps < 3, `The GitHub GraphQL quota is used up until ${resetAt}; run ${command} again after that`);
       sleepUntilReset(resetAt);
     }

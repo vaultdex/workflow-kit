@@ -32,10 +32,11 @@ Konto und wird von allen Drivern gemeinsam verbraucht; ist es leer, scheitert je
 5 Minuten (bei Neuigkeiten wieder von vorn), also etwa 20 bis 40 Punkte pro Stunde und Driver
 statt 120 bei festem Minutentakt. Als Budget gilt: Zahl der Driver mal 40 Punkte, dazu der eigene
 Verbrauch der Agents; höchstens 20 parallele `wait` (rund 800 Punkte pro Stunde, ein Sechstel
-des Kontingents). `wait`, `reviews` und `handoff` melden den Rest in einer Zeile
-(`quota: …`), schlafen bei einer Sperre oder bei weniger als 300 (`wait`) beziehungsweise 50
-Punkten bis zum Reset (`rate limited until …`) und fragen danach weiter; alle anderen Befehle
-brechen mit der Reset-Zeit ab. Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
+des Kontingents). `wait` und `reviews` melden den Rest in einer Zeile (`quota: …`).
+`wait`, `reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 300 (`wait`)
+beziehungsweise 50 Punkten bis zum Reset (`rate limited until …`) und fragen danach weiter; bei
+einer kurzen Drosselung („secondary rate limit“) warten sie 1, 2, dann 4 Minuten statt bis zum
+Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab. Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
 
 **Review-Bots im Quota.** Ist ein Reviewer wegen Quota nicht verfügbar, gilt der
 bestehende Schritt „confirmed unavailable“ im [Review loop](CONTRIBUTING.md#review-loop):

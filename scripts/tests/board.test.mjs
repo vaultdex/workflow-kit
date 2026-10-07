@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { waitInterval } from '../quota.mjs';
+import { retryAt, waitInterval } from '../quota.mjs';
 
 // body_html is what GitHub renders for the body (the handoff check reads that, like the open acceptance of the issue).
 const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\nHead: abcdef1\n\n### Retro\n\n- Keine Funde',
@@ -1850,4 +1850,12 @@ test('wait pauses longer with every quiet read and, below 1000 points left, twic
   assert.deepEqual([0, 1, 2, 3, 4, 5, 9].map(reads => waitInterval(reads, 5000)), [60, 90, 135, 202.5, 300, 300, 300]);
   for (const reads of [0, 3, 9]) assert.ok(waitInterval(reads, 999) > waitInterval(reads, 1000), 'Little quota left lengthens the pause');
   assert.equal(waitInterval(0, undefined), 60, 'An unknown quota changes nothing');
+});
+
+test('a secondary limit is retried within minutes, only the primary one waits for the hourly reset', () => {
+  const now = Date.parse('2026-10-07T00:00:00Z'), hourly = () => '2026-10-07T00:55:00.000Z';
+  const secondary = 'You have exceeded a secondary rate limit';
+  assert.deepEqual([0, 1, 2].map(refusals => retryAt(secondary, refusals, hourly, now)),
+    ['2026-10-07T00:01:00.000Z', '2026-10-07T00:02:00.000Z', '2026-10-07T00:04:00.000Z']);
+  assert.equal(retryAt('API rate limit already exceeded for user ID 1', 0, hourly, now), hourly());
 });
