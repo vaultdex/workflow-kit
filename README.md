@@ -328,10 +328,11 @@ git submodule update --init --recursive    # the tests clone the pinned submodul
 node scripts/init-project.mjs --existing
 node scripts/setup-skills.mjs
 git status --short    # review intended outputs; preserve unrelated work
-node --test scripts/tests
+node --test scripts/tests/<affected>.test.mjs    # add --test-name-pattern for one test
 ```
 
-CI runs the commands above in one Linux job: about 20
+Locally run only the affected tests; CI runs the commands above plus the full
+`node --test scripts/tests` in one Linux job: about 20
 runs a month at up to 10 minutes on a free public runner.
 
 ### Submodule updates by Renovate

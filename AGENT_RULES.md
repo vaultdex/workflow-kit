@@ -80,7 +80,8 @@ The driver completes these steps before implementation, including review fixes:
    `git branch --show-current` before editing; preserve unrelated work.
 4. Assign yourself: `gh issue edit ISSUE --add-assignee "@me"`.
 5. Record the verdict, your session and branch in the issue, with the line
-   `Agent: claude|codex, Session: ID` (use the same ID for `--session`). A newer claim of
+   `Agent: claude|codex, Session: ID` (use the same ID for `--session`; in Claude Code it is
+   the environment variable `CLAUDE_CODE_SESSION_ID`). A newer claim of
    another session blocks `check` unless a `Handover: ID` comment passes it to yours
    ([Execution check](docs/CONTRIBUTING.md#execution-check)). Assignment is not a lock.
 6. On STARTABLE or STACKABLE, run `node .vendor/workflow-kit/scripts/board.mjs status ISSUE "In progress"`.
