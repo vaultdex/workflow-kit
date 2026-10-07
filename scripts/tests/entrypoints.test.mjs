@@ -24,6 +24,7 @@ function fixture(t) {
   mkdirSync(join(kit, 'templates'), { recursive: true });
   mkdirSync(join(kit, 'scripts'));
   for (const script of ['init-project.mjs', 'checkout-root.mjs', 'provider-links.mjs']) copyFileSync(new URL(`../${script}`, import.meta.url), join(kit, 'scripts', script));
+  copyFileSync(new URL('../../templates/.ignore', import.meta.url), join(kit, 'templates/.ignore'));
   const run = (...args) => spawnSync(process.execPath, [join(kit, 'scripts/init-project.mjs'), ...args], { cwd: root, encoding: 'utf8' });
   const template = (name, value) => (typeof value === 'string' ? write : json)(join(kit, 'templates', name), value);
   return { base, root, kit, run, template };
@@ -79,6 +80,24 @@ test('discovery files become trackable while custom ignores and private state st
   const once = readFileSync(ignore);
   succeeds(f.run('--existing'));
   assert.deepEqual(readFileSync(ignore), once);
+});
+
+test('search ignore is created or extended without losing project lines', t => {
+  const f = fixture(t), path = join(f.root, '.ignore');
+  succeeds(f.run('--existing'));
+  const created = readFileSync(path, 'utf8');
+  assert.ok(created.split('\n').includes('/.claude/skills/*'));
+  assert.ok(!created.includes('/.agents/skills'), 'One copy stays searchable');
+  write(path, '/my-notes/\n!/.claude/skills/mine/\n/.pi/skills/*\nescaped\\ ');
+  succeeds(f.run('--existing'));
+  const lines = readFileSync(path, 'utf8').split('\n');
+  assert.ok(lines.includes('/my-notes/') && lines.includes('!/.claude/skills/mine/'));
+  assert.ok(lines.includes('escaped\\ '), 'A significant trailing space survives');
+  assert.equal(lines.filter(line => line === '/.pi/skills/*').length, 1);
+  assert.ok(lines.includes('/.vendor/'));
+  const once = readFileSync(path);
+  succeeds(f.run('--existing'));
+  assert.deepEqual(readFileSync(path), once);
 });
 
 test('writes stay inside the owning checkout', t => {
