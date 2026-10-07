@@ -82,9 +82,10 @@ const ignore = existsSync(safe('.gitignore')) ? text(safe('.gitignore')).split('
 const additions = patterns.filter(p => !ignore.split('\n').includes(p));
 write('.gitignore', ignore.trimEnd() + (additions.length ? '\n' + additions.join('\n') : '') + '\n');
 // .ignore is read by ripgrep, not git. Like .gitignore it grows by the template's missing lines, also with --existing.
-const searchIgnore = existsSync(safe('.ignore')) ? text(safe('.ignore')).trimEnd() : '';
+// Existing text stays byte for byte: a trailing space can be significant (`name\ `).
+const searchIgnore = existsSync(safe('.ignore')) ? text(safe('.ignore')) : '';
 const missing = text(join(kit, 'templates/.ignore')).split('\n').filter(line => line && !searchIgnore.split('\n').includes(line));
-if (missing.length) write('.ignore', (searchIgnore ? searchIgnore + '\n' : '') + missing.join('\n') + '\n');
+if (missing.length) write('.ignore', searchIgnore + (searchIgnore && !searchIgnore.endsWith('\n') ? '\n' : '') + missing.join('\n') + '\n');
 // Earlier kit versions tracked ownership in a receipt; handlers are now recognized by their commands.
 if (existsSync(safe('.github/workflow-kit.json'))) unlinkSync(safe('.github/workflow-kit.json'));
 console.log('Project files configured. Generate and commit skills for this kit update; install and trust hooks explicitly.');

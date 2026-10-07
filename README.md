@@ -31,7 +31,8 @@ plus the label `spec` (`gh label create spec`), which the form sets.
 `init-project` (also with `--existing`) adds the missing lines of `templates/.ignore` to
 the project's `.ignore`, so ripgrep-based search skips the generated provider skill copies
 (only `.agents/skills` stays searchable) and `.vendor/`; to search an excluded copy, name its
-path (`rg pattern .claude/skills`), then `.ignore` doesn't apply. Git ignores the file.
+path (`rg pattern .claude/skills`), then `.ignore` doesn't apply. A project-owned skill in a
+provider directory stays visible with `!/.claude/skills/my-skill/` in `.ignore`. Git ignores the file.
 
 To update, move the gitlink first. `git submodule update` checks out the commit the
 index records, so run after a bump it silently puts the old kit back, and the
