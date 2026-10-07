@@ -2153,7 +2153,7 @@ if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFini
 }
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (command === 'ready' && Number.isSafeInteger(number) && !/^[0-9a-f]{7,40}$/i.test(value ?? '')) {
-    console.error(`ready needs a commit id of 7 to 40 characters (git rev-parse HEAD) or --local, not ${value ? `"${value}"` : 'nothing'}`);
+  console.error(`ready needs a commit id of 7 to 40 characters (git rev-parse HEAD) or --local, not ${value ? `"${value}"` : 'nothing'}`);
   process.exit(2);
 }
 if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' && headOption() !== undefined && !/^[0-9a-f]{7,40}$/i.test(headOption())) {

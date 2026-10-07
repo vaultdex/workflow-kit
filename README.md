@@ -226,7 +226,8 @@ and then work in that directory, their relative paths (changed files given to `a
   (a missing comment after the write exits 2; the write is not repeated).
 - `ready PR SHA|--local [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
   repository ready for review, but only for the commit you pushed. `SHA` is the commit id
-  (`git rev-parse HEAD`), 7 to 40 characters, compared with the PR head as a prefix; a shorter one exits 2 with that reason. `--local` reads that
+  (`git rev-parse HEAD`), 7 to 40 characters, compared with the PR head as a prefix; a shorter
+  one exits 2 with that reason. `--local` reads that
   id itself from the project's checkout (`--cwd`, else the working directory), so no `$(git rev-parse HEAD)` has to
   be spliced into the call; the PR must still show exactly that head, so a commit that was not pushed is refused
   like a wrong id. It rereads the PR
