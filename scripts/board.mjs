@@ -1584,7 +1584,7 @@ function updateBranch(head, base) {
     execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/update-branch`, '-X', 'PUT', '-f', `expected_head_sha=${head}`], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
   } catch (error) {
     // stdio 'pipe': without it execFileSync copies gh's raw refusal to stderr, and a caller that reads the last line sees that, not the instruction (#332).
-    if (!/\b403\b/.test(`${error.stderr}${error.stdout}`)) throw error;
+    if (!/\b403\b|stacked PR's branch/.test(`${error.stderr}${error.stdout}`)) throw error;
     console.log(['FAILED', `blocker: GitHub refuses the branch update with 403 (typical for a PR with stacked children): run \`git merge origin/${base}\` in the PR's worktree, push once, then run \`board.mjs merge ${number}\` again`].join('\n'));
     process.exitCode = 1;
     return;

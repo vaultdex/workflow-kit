@@ -125,15 +125,18 @@ test('merge merges a base that moved under the same files into the PR branch, wa
   assert.deepEqual(calls(), [`update-branch ${first}`]);
 
   // A PR with stacked children: GitHub answers 403 to the update. Nothing is merged or pushed; the manual way is named.
-  show();
-  json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
-  writeFileSync(join(checkout, 'update-fails'), '403');
-  const stacked = run('merge', '7');
-  assert.equal(stacked.status, 1, stacked.stdout + stacked.stderr);
-  assert.match(stacked.stdout, /^blocker: .*`git merge origin\/\S+`.*`board\.mjs merge 7`/m);
-  // The raw refusal of gh is not copied to stderr: a caller that reads the last line of the output sees the instruction (#332).
-  assert.equal(stacked.stderr, '');
-  assert.deepEqual(calls(), [`update-branch ${first}`]);
+  // The exact text of GitHub (#332), with and without its status code.
+  for (const kind of ['403', 'no-code']) {
+    show();
+    json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
+    writeFileSync(join(checkout, 'update-fails'), kind);
+    const stacked = run('merge', '7');
+    assert.equal(stacked.status, 1, kind + stacked.stdout + stacked.stderr);
+    assert.match(stacked.stdout, /^blocker: .*`git merge origin\/\S+`.*`board\.mjs merge 7`/m);
+    // The raw refusal of gh is not copied to stderr: a caller that reads the last line of the output sees the instruction.
+    assert.equal(stacked.stderr, '');
+    assert.deepEqual(calls(), [`update-branch ${first}`]);
+  }
 });
 
 test('merge falls back to merge-async with the checked head when gh refuses a PR with stacked children, and reads the merge back', t => {
