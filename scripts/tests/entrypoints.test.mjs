@@ -12,6 +12,7 @@ const json = (path, value) => write(path, JSON.stringify(value, null, 2) + '\n')
 const read = path => JSON.parse(readFileSync(path, 'utf8'));
 const kitHook = version => ({ command: `sh "$HOME/.ponytail/vaultdex/${version}/launch.sh" activate` });
 const foreign = { command: 'sonar hook codex-prompt-submit' };
+const staleBranchHook = { command: 'git -C "$root" merge-base --is-ancestor HEAD "$base" || continue' };
 // Handler shape of the 4.10.0-5 templates, before the snapshot path was spelled out.
 const legacyHook = { command: `node -e "require(require('node:path').join(require('node:os').homedir(),'.ponytail','vaultdex','4.10.0-5','.agents','hooks','ponytail-activate.js'))"` };
 
@@ -33,7 +34,7 @@ const succeeds = result => assert.equal(result.status, 0, result.stderr);
 
 test('kit handlers are replaced; foreign handlers, groups and settings stay; reruns change nothing', t => {
   const f = fixture(t), path = join(f.root, '.claude/settings.json');
-  json(path, { permissions: { allow: ['x'] }, hooks: { SessionStart: [{ matcher: 'startup', hooks: [foreign, kitHook('old'), legacyHook] }] } });
+  json(path, { permissions: { allow: ['x'] }, hooks: { SessionStart: [{ matcher: 'startup', hooks: [foreign, kitHook('old'), legacyHook, staleBranchHook] }] } });
   f.template('.claude/settings.json', { description: 'kit', hooks: { SessionStart: [{ matcher: 'startup', hooks: [kitHook('new')] }] } });
   succeeds(f.run('--existing'));
   assert.deepEqual(read(path), { description: 'kit', permissions: { allow: ['x'] }, hooks: { SessionStart: [
