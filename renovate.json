@@ -7,7 +7,7 @@
   "gitIgnoredAuthors": ["41898282+github-actions[bot]@users.noreply.github.com"],
   "automerge": true,
   "automergeType": "pr",
-  "platformAutomerge": false,
+  "platformAutomerge": true,
   "rebaseWhen": "conflicted",
   "git-submodules": {
     "enabled": true
