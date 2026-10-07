@@ -1284,6 +1284,7 @@ function merge() {
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
 const stallOption = () => numberOption('--stall', 20);
 const graceOption = () => numberOption('--grace', 3);
+const headOption = () => process.argv.includes('--head') ? process.argv[process.argv.indexOf('--head') + 1] ?? '' : undefined;
 const sessionOption = () => process.argv.includes('--session') ? process.argv[process.argv.indexOf('--session') + 1] : undefined;
 
 /** Metadata that can still describe the previous push right after it: identity, branch, state, draft, head. */
@@ -1365,8 +1366,20 @@ function mergeState() {
 /** What the last query cost and what is left, so a driver sees the shared quota without a command of its own. */
 const quotaLine = () => quota && `quota: ${quota.remaining} left, ${spent} points used by this run, resets ${quota.resetAt}`;
 
+/**
+ * Right after a push GitHub still reports the previous head, so a plain `wait` can end DONE for it. With `--head SHA`
+ * (the full id just pushed) an open PR keeps waiting until it shows exactly that head.
+ * ponytail: a head that never matches (wrong id, someone else pushed on top) waits on; stop it by hand.
+ */
+function reviewsForHead() {
+  const pr = readPr(number), expected = headOption()?.toLowerCase();
+  if (!expected || pr.state !== 'OPEN' || pr.headRefOid === expected) return reviews(stallOption(), Date.now(), number, pr);
+  return { done: false, lines: [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`,
+    `waiting: PR still shows head ${pr.headRefOid.slice(0, 7)}, expected ${expected.slice(0, 7)}`] };
+}
+
 async function wait() {
-  const look = process.argv.includes('--merged') ? mergeState : () => reviews(stallOption());
+  const look = process.argv.includes('--merged') ? mergeState : reviewsForHead;
   let shown, quiet = 0;
   for (;;) {
     const result = look(), { done, lines } = result;
@@ -1420,7 +1433,7 @@ const commands = { next, check: () => check(undefined, { session: sessionOption(
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
+  + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] | wait PR --merged'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
   + ' | merge PR [--stall MINUTES] [--grace MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
@@ -1438,6 +1451,8 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   // A misspelled flag must not silently turn the session check off.
   || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^\w[\w.-]*$/.test(process.argv[5])))
   || (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
+  // --head is the full id of the pushed commit (git rev-parse HEAD), as for ready; a short or missing one would wait on a head that never matches.
+  || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{40}$/i.test(headOption())))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'merge' && value && !value.startsWith('--'))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
