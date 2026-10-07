@@ -208,7 +208,9 @@ Git and the update may reset it. A hook copy with CRLF line endings differs from
   Recognized review traces: checks and statuses, Codex's `Running` summary (its code
   and security rows end separately: a security result comment never ends a running code
   review), bot 👀 reactions and review requests. Free-text announcements of other bots are not
-  detected; check such reviewers by hand.
+  detected; check such reviewers by hand. Reviewers in `"optionalReviewers"`
+  ([setup](SETUP.md#3-board-and-labels)) are skipped for all of these: their checks, comments and
+  reviews are listed, but they never wait, stall or fail; their open threads and change requests still block.
 
 ### Handoff comment
 
@@ -220,7 +222,7 @@ comment, a comment for an earlier push does not count, and it works the same for
 a check suite or one that was pushed and checked on another branch first. Put the retro result
 and the list of all findings with their disposition (fixed, linked follow-up issue, or none)
 under the heading, and, if a reviewer was unavailable or stalled, the reviewer, cause and
-evidence. The command checks heading, head and author, not the content, which is for the human
+evidence (an optional reviewer only when it found something). The command checks heading, head and author, not the content, which is for the human
 reviewer:
 
 ```md
