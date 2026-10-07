@@ -416,7 +416,7 @@ backlink never closes an issue.
    status untouched. An unsuccessful status read-back is an error, not a delivery;
    inspect the actual status before retrying. Plain `status` writes maintain
    metadata and do not prove these delivery gates.
-   Check off every fulfilled acceptance box in the issue body (`board.mjs body`) before the handoff; a part
+   Check off every fulfilled acceptance box in the issue body (`board.mjs body-replace`, one box per call, or `board.mjs body`) before the handoff; a part
    moved to a follow-up stays unchecked and links that issue (`- [ ] … → #12`). `board.mjs handoff`
    refuses while an open `- [ ]` line has no issue reference.
 7. A human merges. An agent that was given merge authority (for example by the chief of
