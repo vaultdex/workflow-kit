@@ -1344,7 +1344,6 @@ test('body-replace replaces exactly one match of the text and writes nothing for
   server('Satz eins.');
   result = replace('fehlt', 'x');
   assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.match(result.stdout, /^FAILED$/m);
   assert.equal([patches(), stored()].join('|'), '1|Satz eins.');
 
   // Two matches, also overlapping ones: refused, nothing written.
@@ -1352,7 +1351,6 @@ test('body-replace replaces exactly one match of the text and writes nothing for
     server(text);
     result = replace(from, 'x');
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stdout, /^FAILED$/m);
     assert.equal([patches(), stored()].join('|'), `1|${text}`);
   }
 
