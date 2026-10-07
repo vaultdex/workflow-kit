@@ -207,8 +207,11 @@ the installer, so the kit's current one is copied.
   (`- [ ]`) without an issue reference (`#N` or `OWNER/REPO#N`; exit 1 otherwise, status
   untouched, every such item is printed). It reads the body as GitHub renders it: checked-off
   items, items with a reference GitHub links, and code blocks do not count (a `#N` in a code
-  span or glued to letters is no reference). Session ownership, final
-  proof and the content of the findings remain driver responsibilities. Use this for
+  span or glued to letters is no reference). The handoff comment must also carry a
+  `Retro` section whose every list line ends with its resolution (exit 1 otherwise, status
+  untouched, every line without one is printed); it is read as GitHub renders it too.
+  Session ownership, final
+  proof and whether a finding is justified remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
 - `merge PR [--stall MINUTES] [--grace MINUTES]`: the only way for an agent with merge
   authority to merge ([review loop](docs/CONTRIBUTING.md#review-loop) step 7). It applies the review gates of
@@ -244,11 +247,21 @@ has the heading `## Übergabe` on its own line and a line `Head: <SHA>` that sta
 first seven characters of the PR's current head commit. The comment names the head it is
 about, so no timestamp is involved: a new head, for example after a review fix, asks for a new
 comment, a comment for an earlier push does not count, and it works the same for a head without
-a check suite or one that was pushed and checked on another branch first. Put the retro result
-and the list of all findings with their disposition (fixed, linked follow-up issue, or none)
-under the heading, and, if a reviewer was unavailable or stalled, the reviewer, cause and
-evidence. Name an optional reviewer only when it found something. The command checks heading,
-head and author, not the content, which is for the human reviewer:
+a check suite or one that was pushed and checked on another branch first. Put the retro under
+the heading `Retro` (any level, usually `###`), one list line per finding, and, after another
+heading, the review findings with their disposition and, if a reviewer was unavailable or
+stalled, the reviewer, cause and evidence (an optional reviewer only when it found something). Every retro line ends with exactly one resolution:
+
+- an issue link: `#N` or `OWNER/REPO#N` (the issue that owns the fix; a pull request link does not count),
+- `behoben in <SHA>`,
+- `persönlich gemeldet` (memory, shell profile: the human changes those),
+- `kein Handlungsbedarf: <Grund>`.
+
+Without findings the section has the single line `Keine Funde`. The command checks that the
+section exists and that each line ends this way, as GitHub renders the comment (an issue
+reference in a code span does not count); it does not judge whether a finding is justified.
+Of the rest, only heading, head and author are checked; the content is for the human reviewer.
+With several comments for the head the newest counts.
 
 ```md
 ## Übergabe
@@ -257,7 +270,13 @@ head and author, not the content, which is for the human reviewer:
 
 Head: abcdef1
 
-- Retro: <Ergebnis oder „keine Befunde“>
+### Retro
+
+- <Fund>: <Issue-Link, `behoben in <SHA>`, `persönlich gemeldet` oder `kein Handlungsbedarf: <Grund>`>
+- Oder als einzige Zeile: Keine Funde
+
+### Reviews
+
 - Befunde: <je Befund: behoben (Commit), Folge-Issue (Link), oder „keine“>
 - Eingeschränkte Reviewer: <Reviewer, Ursache, Beleg, oder „keine“>
 ```
