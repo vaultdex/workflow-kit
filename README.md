@@ -219,6 +219,8 @@ the installer, so the kit's current one is copied.
   whose `pull_request` jobs for the head were all skipped before the Ready event (Draft
   guard), with no executed run since Ready, waits (exit 3): the skip proves nothing
   about the Ready head. Push a commit to start one: a workflow without a `ready_for_review` trigger never does otherwise.
+  The kit's own CI skips Drafts this way (`pull_request` types incl. `ready_for_review`, job `if: github.event_name != 'pull_request' || !github.event.pull_request.draft`);
+  projects decide on the same guard themselves, the kit ships no CI template.
   It also prints `correction pushes after ready: N`, the distinct heads pushed (from the branch's push log)
   after the PR's first Ready event (a PR opened non-draft counts from its creation; the head that set Ready does not count,
   a force-push is one push, a PR that never was ready prints no line). From `N >= 2` it adds
