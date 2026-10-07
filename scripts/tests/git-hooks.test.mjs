@@ -2,9 +2,9 @@
 // Nutzen: Jeder Clone und Worktree nutzt die Hooks seines Branches; fremde Hooks gehen nie verloren.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -140,4 +140,132 @@ test('an own worktree path with a newline is still migrated', { skip: process.pl
   f.git('config', '--local', 'core.hooksPath', join(odd, '.githooks'));
   f.run();
   assert.equal(f.value('--local'), '.githooks');
+});
+
+/** A consumer with the kit as submodule: main pins kit commit one, `other` pins commit two; the kit's own main is a third, newer commit. The installer ran in it. */
+function kitFixture(t) {
+  const base = mkdtempSync(join(tmpdir(), 'kit post checkout '));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const global = join(base, 'global.gitconfig');
+  // The submodule is a local path; Git blocks that transport for submodules unless allowed.
+  writeFileSync(global, '[protocol "file"]\n\tallow = always\n[user]\n\tname = t\n\temail = t@t\n');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_NOSYSTEM: '1' };
+  const sh = (cwd, ...args) => {
+    const result = spawnSync('git', args, { cwd, env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result;
+  };
+  const kit = join(base, 'kit'), repo = join(base, 'repo');
+  for (const dir of [kit, repo]) { mkdirSync(dir); sh(dir, 'init', '-q', '-b', 'main'); }
+  const pin = (n) => { writeFileSync(join(kit, 'AGENT_RULES.md'), `rules ${n}\n`); if (n === 2) writeFileSync(join(kit, 'new.txt'), 'tracked\n'); sh(kit, 'add', '.'); sh(kit, 'commit', '-q', '-am', `kit ${n}`); return sh(kit, 'rev-parse', 'HEAD').stdout.trim(); };
+  writeFileSync(join(kit, 'AGENT_RULES.md'), 'rules 0\n');
+  sh(kit, 'add', '.');
+  const [one, two] = [pin(1), pin(2)];
+  pin(3);
+  mkdirSync(join(repo, '.githooks'));
+  writeFileSync(join(repo, '.githooks/pre-push'), '#!/bin/sh\n');
+  const installed = spawnSync(process.execPath, [script], { cwd: repo, env, encoding: 'utf8' });
+  assert.equal(installed.status, 0, installed.stderr);
+  sh(repo, 'submodule', '-q', 'add', kit.replaceAll('\\', '/'), '.vendor/workflow-kit');
+  sh(repo, '-C', '.vendor/workflow-kit', 'checkout', '-q', one);
+  sh(repo, 'add', '--chmod=+x', '.githooks/post-checkout');
+  sh(repo, 'add', '.');
+  sh(repo, 'commit', '-q', '-m', 'pin one');
+  sh(repo, 'switch', '-q', '-c', 'other');
+  sh(repo, '-C', '.vendor/workflow-kit', 'checkout', '-q', two);
+  sh(repo, 'commit', '-q', '-am', 'pin two');
+  sh(repo, 'switch', '-q', 'main');
+  sh(repo, 'submodule', '-q', 'update', '--init');
+  const rules = join(repo, '.vendor/workflow-kit/AGENT_RULES.md');
+  return { repo, sh, rules, status: () => sh(repo, 'status', '--porcelain').stdout, switchTo: (branch, extra) => spawnSync('git', ['switch', '-q', branch], { cwd: repo, env: { ...env, ...extra }, encoding: 'utf8' }) };
+}
+
+test('switching branches with another kit gitlink leaves no modified submodule', t => {
+  const f = kitFixture(t);
+  assert.equal(f.status(), '');
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 1\n');
+  assert.equal(f.switchTo('other').status, 0);
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 2\n');
+  assert.equal(f.status(), '');
+  assert.equal(f.switchTo('main').status, 0);
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 1\n');
+  assert.equal(f.status(), '');
+  // A new worktree starts with an empty kit directory; the same hook fills it.
+  const linked = join(f.repo, '../linked');
+  f.sh(f.repo, 'worktree', 'add', '-q', '--detach', linked, 'other');
+  assert.equal(readFileSync(join(linked, '.vendor/workflow-kit/AGENT_RULES.md'), 'utf8'), 'rules 2\n');
+});
+
+test('a kit with local changes keeps them, prints a hint and does not fail the switch', t => {
+  const f = kitFixture(t);
+  writeFileSync(f.rules, 'my edit\n');
+  const result = f.switchTo('other');
+  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.stderr.trim(), '', 'a diagnostic is printed');
+  assert.equal(readFileSync(f.rules, 'utf8'), 'my edit\n');
+});
+
+test('a failing kit update prints the command and does not fail the switch', t => {
+  const f = kitFixture(t);
+  // The kit is not cloned (empty directory) and its source is gone, so the update cannot succeed.
+  renameSync(join(f.repo, '../kit'), join(f.repo, '../kit-gone'));
+  rmSync(join(f.repo, '.vendor/workflow-kit'), { recursive: true, force: true });
+  rmSync(join(f.repo, '.git/modules'), { recursive: true, force: true });
+  mkdirSync(join(f.repo, '.vendor/workflow-kit'));
+  const result = f.switchTo('other');
+  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.stderr.trim(), '', 'a diagnostic is printed');
+});
+
+test('local commits and ignored files are kept; a clean published kit still follows', t => {
+  const kit = f => join(f.repo, '.vendor/workflow-kit');
+  // An unpublished commit would be left behind by the checkout.
+  const a = kitFixture(t);
+  a.sh(kit(a), 'commit', '-q', '--allow-empty', '-m', 'local');
+  const local = a.sh(kit(a), 'rev-parse', 'HEAD').stdout;
+  const result = a.switchTo('other');
+  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.stderr.trim(), '', 'a diagnostic is printed');
+  assert.equal(a.sh(kit(a), 'rev-parse', 'HEAD').stdout, local);
+
+  // An ignored file that the target revision tracks would be overwritten without a word.
+  const b = kitFixture(t);
+  writeFileSync(join(kit(b), 'new.txt'), 'mine\n');
+  appendFileSync(resolve(kit(b), b.sh(kit(b), 'rev-parse', '--git-path', 'info/exclude').stdout.trim()), 'new.txt\n');
+  assert.equal(b.status(), '');
+  assert.equal(b.switchTo('other').status, 0);
+  assert.equal(readFileSync(join(kit(b), 'new.txt'), 'utf8'), 'mine\n');
+
+  // A clean kit that is not the old pin but is published (stale) still follows the new gitlink.
+  const c = kitFixture(t);
+  c.sh(kit(c), 'checkout', '-q', 'origin/main');
+  assert.equal(c.switchTo('other').status, 0);
+  assert.equal(readFileSync(c.rules, 'utf8'), 'rules 2\n');
+});
+
+test('the kit update runs no hooks of the kit clone', t => {
+  const f = kitFixture(t), kitDir = join(f.repo, '.vendor/workflow-kit');
+  const hooks = resolve(kitDir, f.sh(kitDir, 'rev-parse', '--git-path', 'hooks').stdout.trim()), marker = join(f.repo, '../hook-ran');
+  mkdirSync(hooks, { recursive: true });
+  writeFileSync(join(hooks, 'post-checkout'), `#!/bin/sh\ntouch "${marker.replaceAll('\\', '/')}"\n`, { mode: 0o755 });
+  assert.equal(f.switchTo('other').status, 0);
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 2\n', 'the kit was updated');
+  assert.equal(existsSync(marker), false);
+});
+
+test('an installed hook without the executable bit is repaired', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t), hook = join(f.repo, '.githooks/post-checkout');
+  f.run();
+  chmodSync(hook, 0o644);
+  f.run('--check');
+  assert.equal(statSync(hook).mode & 0o111, 0);
+  f.run();
+  assert.notEqual(statSync(hook).mode & 0o111, 0);
+});
+
+test('an existing, different post-checkout hook of the project is kept', t => {
+  const f = fixture(t);
+  writeFileSync(join(f.repo, '.githooks/post-checkout'), '#!/bin/sh\necho mine\n');
+  f.run();
+  assert.equal(readFileSync(join(f.repo, '.githooks/post-checkout'), 'utf8'), '#!/bin/sh\necho mine\n');
 });

@@ -21,10 +21,16 @@ function graphql(query, variables = {}) {
 // A predecessor with its open PRs: the base of a stack is found through the native closing links (manual ones included).
 const predecessorFields = `number state stateReason repository{nameWithOwner}
   closedByPullRequestsReferences(first:10,includeClosedPrs:false){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
-const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
-  id number title state body bodyHTML assignees(first:10){nodes{login}}
+// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query. Only the issue
+// itself reads the PRs of its predecessors (to find a stack base); the sub-issues' verdicts stay without them.
+const issueFields = predecessor => `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
-  blockedBy(first:100){totalCount nodes{${predecessorFields}}}}}}`;
+  blockedBy(first:100){totalCount nodes{${predecessor}}}`;
+// ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
+const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
+  ${issueFields(predecessorFields)} bodyHTML
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
+  subIssues(first:100){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
@@ -138,7 +144,7 @@ function claimReasons(issue, session) {
   if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
   else if (holder && !session) notes.push(`newest claim: ${about(holder)}; pass --session ID to compare it with yours`);
   if (legacy) notes.push(`claim without Agent/Session field, session unknown: ${legacy.html_url}`);
-  return { blocked, notes };
+  return { blocked, notes, claim: holder ?? (legacy && { session: undefined, comment: legacy }) };
 }
 
 /** Base PR of the issue the last check() judged STACKABLE; handoff compares it with the PR's base branch. */
@@ -154,7 +160,8 @@ function mayStart(verdict) {
   return true;
 }
 
-function check(issue = readIssue(), claims) {
+/** Verdict inputs of one issue, shared by the issue itself and its sub-issues. */
+function issueReasons(issue) {
   const status = projectItem(issue)?.status?.name;
   const blocked = [], unknown = [];
   if (issue.state !== 'OPEN') blocked.push('issue is closed');
@@ -168,17 +175,32 @@ function check(issue = readIssue(), claims) {
   const waits = waitReasons(issue.body);
   blocked.push(...waits.blocked);
   unknown.push(...waits.unknown);
+  return { status, blocked, unknown, predecessors };
+}
+const verdictOf = ({ blocked, unknown }) => blocked.length ? 'BLOCKED' : unknown.length ? 'UNKNOWN' : 'STARTABLE';
+// #N in the project's repository, OWNER/REPO#N elsewhere: a bare number must never name a same-number issue or PR of another repository.
+const refOf = (repository, number) => `${repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() ? '' : repository.nameWithOwner}#${number}`;
+const logins = issue => issue.assignees.nodes.map(assignee => assignee.login).join(', ');
+const ago = ms => {
+  const minutes = Math.max(0, Math.floor(ms / 60_000)), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60);
+  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+};
+
+/** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
+function check(issue = readIssue(), claims) {
+  const { status, blocked, unknown, predecessors } = issueReasons(issue);
   const notes = [];
+  let claim;
   if (claims) try {
     const found = claimReasons(issue, claims.session);
     blocked.push(...found.blocked);
     notes.push(...found.notes);
+    claim = found.claim;
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;
-  let stack;
   if (heldOnlyByOpenPredecessors(blocked, predecessors) && !unknown.length) {
-    stack = stackBase(predecessors.open);
+    const stack = stackBase(predecessors.open);
     if (stack.pr) {
       stackedOn = stack.pr;
       notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
@@ -189,14 +211,25 @@ function check(issue = readIssue(), claims) {
     // A definitive refusal stays BLOCKED, whatever else is unreadable: a retry cannot lift it.
     } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
   }
-  let verdict = stackedOn ? 'STACKABLE' : 'STARTABLE';
-  if (unknown.length) verdict = 'UNKNOWN';
-  if (blocked.length) verdict = 'BLOCKED';
-  const assignees = issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none';
-  console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${assignees}\n${verdict}`);
+  const plain = verdictOf({ blocked, unknown });
+  const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;
+  console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
   if (stackedOn) console.log(`stack base: PR #${stackedOn.number} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
   for (const note of notes) console.log(`note: ${note}`);
+  if (claim) {
+    const linked = issue.closedByPullRequestsReferences;
+    const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => refOf(pr.repository, pr.number));
+    // A list cut at 100 is never presented as complete.
+    const cut = linked?.totalCount > linked?.nodes?.length ? ` (first ${linked.nodes.length} of ${linked.totalCount})` : '';
+    console.log(`claim: ${ago(Date.now() - Date.parse(claim.comment.created_at))} ago (Session ${claim.session ?? 'unknown'}), open PR: ${prs ? prs.join(', ') || 'none' : 'unknown'}${cut}`);
+  }
+  if (claims && issue.subIssues?.nodes?.length) {
+    if (issue.subIssues.totalCount > issue.subIssues.nodes.length) console.log(`note: ${issue.subIssues.nodes.length} of ${issue.subIssues.totalCount} sub-issues listed`);
+    for (const child of issue.subIssues.nodes) {
+      console.log(`${refOf(child.repository, child.number)}  ${projectItem(child)?.status?.name ?? '-'}  ${logins(child) || '-'}  ${verdictOf(issueReasons(child))}`);
+    }
+  }
   // STACKABLE is not 0: a caller that knows only STARTABLE must not start it without the stack rules.
   process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2, STACKABLE: 4 }[verdict];
   return verdict;
@@ -327,6 +360,7 @@ function setField() {
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
   number state isDraft createdAt headRefName headRefOid mergeStateStatus reviewDecision
   readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
+  firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
@@ -365,6 +399,27 @@ function restAll(path, expected) {
   }
 }
 
+/** Every comment of an open issue, complete and unique, or an exception: a partial list must never read as "no backlink". */
+function issueComments(repository, issueNumber) {
+  const issue = rest(`repos/${repository}/issues/${issueNumber}`);
+  assert.ok(issue?.number === issueNumber && issue.state === 'open' && !issue.pull_request,
+    `#${issueNumber} is not an open issue`);
+  assert.ok(Number.isSafeInteger(issue.comments) && issue.comments >= 0, 'Issue comment count is unreadable');
+  const comments = restAll(`repos/${repository}/issues/${issueNumber}/comments`, issue.comments);
+  assert.equal(comments.length, issue.comments, `Not every comment on #${issueNumber} is readable; retry the read`);
+  assert.ok(comments.every(comment => Number.isSafeInteger(comment?.id) && typeof comment.body === 'string'), 'Unreadable issue comment');
+  assert.equal(new Set(comments.map(comment => comment.id)).size, comments.length, 'Duplicate comment page');
+  return comments;
+}
+
+/** The comment that `status ... "Automated review"` accepts: it names the PR's full URL, whatever surrounds it. Shared by that guard and `link`. */
+const findBacklink = (comments, prUrl) => comments.find(comment => (comment.body.match(/https?:\/\/[^\s<>()[\]`"']+/g) ?? []).some(link => {
+  try {
+    const target = new URL(link.replace(/[.,;:!?]+$/, ''));
+    return target.origin === prUrl.origin && target.pathname.replace(/\/$/, '') === prUrl.pathname;
+  } catch { return false; } // An unrelated malformed URL is not a backlink.
+}));
+
 /** Explicit scope works with Refs on release branches; native closing links remain a separate proof. */
 function verifyBacklinks() {
   const [prRef, ...extraIssues] = process.argv.slice(command === 'field' ? 6 : 5);
@@ -384,21 +439,9 @@ function verifyBacklinks() {
     const qualifier = `(?:${RegExp.escape(repository)})${repository === project.repository ? '?' : ''}`;
     const reference = new RegExp(`(?<![\\w/])${qualifier}#${issueNumber}(?!\\w)`, 'i');
     assert.ok(reference.test(pr.body), `PR #${prNumber} does not reference ${issueRef}`);
-    const issue = rest(`repos/${repository}/issues/${issueNumber}`);
-    assert.ok(issue?.number === issueNumber && issue.state === 'open' && !issue.pull_request,
-      `#${issueNumber} is not an open issue`);
-    assert.ok(Number.isSafeInteger(issue.comments) && issue.comments >= 0, 'Issue comment count is unreadable');
-    const comments = restAll(`repos/${repository}/issues/${issueNumber}/comments`, issue.comments);
-    assert.equal(comments.length, issue.comments, `Not every comment on #${issueNumber} is readable; retry the read`);
-    assert.ok(comments.every(comment => Number.isSafeInteger(comment?.id) && typeof comment.body === 'string'), 'Unreadable issue comment');
-    assert.equal(new Set(comments.map(comment => comment.id)).size, comments.length, 'Duplicate comment page');
-    const backlink = comments.find(comment => (comment.body.match(/https?:\/\/[^\s<>()[\]`"']+/g) ?? []).some(link => {
-      try {
-        const target = new URL(link.replace(/[.,;:!?]+$/, ''));
-        return target.origin === url.origin && target.pathname.replace(/\/$/, '') === url.pathname;
-      } catch { return false; } // An unrelated malformed URL is not a backlink.
-    }));
-    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; post the full URL and retry`);
+    const backlink = findBacklink(issueComments(repository, issueNumber), url);
+    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; ${repository === project.repository
+      ? `run board.mjs link ${issueNumber} ${prNumber}` : 'post the full URL as a comment'} and retry`);
     console.log(`backlink ${issueRef}: ${backlink.html_url}`);
   }
 }
@@ -431,10 +474,27 @@ function sonarIssues(detailsUrl, prNumber) {
   return total;
 }
 
-/** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
-function headSetAt(pr) {
+function pushLog(pr) {
   const log = rest(`repos/${project.repository}/activity?ref=${encodeURIComponent(`refs/heads/${pr.headRefName}`)}&per_page=100`);
   assert.ok(Array.isArray(log), 'Push log is unreadable');
+  return log;
+}
+
+/** Distinct heads pushed after the PR first became ready; the head that set Ready is no correction, a force-push counts as one push. Null while there was no Ready.
+ * ponytail: the log is the newest 100 pushes and a PR opened ready that was converted to Draft and readied again counts from its second Ready; replace when the timeline lists pushes. */
+function correctionPushes(pr, pushes) {
+  const first = pr.firstReadyEvents?.nodes?.[0]?.createdAt ?? (pr.isDraft ? undefined : pr.createdAt);
+  if (!first) return null;
+  const since = Date.parse(first);
+  assert.ok(Number.isFinite(since), 'The first Ready time is unreadable');
+  const log = pushes().filter(entry => !/^0+$/.test(entry.after));
+  // The head that set Ready is the latest push up to the Ready event; pushing back to it later is no new head.
+  const atReady = log.filter(entry => Date.parse(entry.timestamp) <= since).sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0]?.after;
+  return new Set(log.filter(entry => Date.parse(entry.timestamp) > since && entry.after !== atReady).map(entry => entry.after)).size;
+}
+
+/** When the branch was set to the head. A commit pushed earlier to another branch has older check suites and commit date, so only the ref's push log dates it. */
+function headSetAt(pr, log = pushLog(pr)) {
   // The same commit can be pushed twice (X, Y, X again); the latest push counts, whatever the order.
   const pushes = log.filter(entry => entry.after === pr.headRefOid);
   assert.ok(pushes.length, 'Push time of the head is not readable; retry the read');
@@ -457,6 +517,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const suites = commit.checkSuites.nodes.map(suite => Date.parse(suite.createdAt));
   const pushed = suites.length ? Math.min(...suites) : Date.parse(commit.committedDate);
   const after = time => Date.parse(time) >= pushed;
+  let log;
+  const pushes = () => log ??= pushLog(pr);
   const stalled = since => now - since > stallMinutes * 60_000; // false for Infinity
   const waiting = [];
   let failed = false;
@@ -518,6 +580,18 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
       failed = true;
       lines.push(`check suite ${suite.app.slug}: ${suite.conclusion}`);
     }
+  }
+  // The review loop stops pushing after two corrections (docs/CONTRIBUTING.md#review-loop); nothing enforces it, so say where the PR stands.
+  // It is read before the red verdict, because a red head is when the next correction is weighed.
+  try {
+    const corrections = correctionPushes(pr, pushes);
+    if (corrections !== null) {
+      lines.push(`correction pushes after ready: ${corrections}`);
+      if (corrections >= 2) lines.push('cap reached: collect non-blocking findings in one follow-up issue');
+    }
+  } catch (error) {
+    // The count is information only: an unreadable one never changes the verdict (neither red into ERROR nor green into ERROR).
+    lines.push(`note: correction pushes unreadable (${error.message})`);
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
@@ -618,7 +692,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // pushed, whichever is later, a missing trace is no answer yet.
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
   if (!pr.isDraft && graceMinutes > 0) {
-    const graceFrom = Math.max(readyAt, pushed, headSetAt(pr));
+    const graceFrom = Math.max(readyAt, pushed, headSetAt(pr, pushes()));
     if (now - graceFrom < graceMinutes * 60_000) {
       waiting.push({ text: `reviewers may still start until ${new Date(graceFrom + graceMinutes * 60_000).toISOString()}`, since: Infinity });
     }
@@ -707,13 +781,15 @@ function body() {
   console.log(`BODY #${number} written and read back`);
 }
 
-/** Connect the issue natively to the PR (what a closing keyword does only on the default branch) and read it back. */
+/** Connect the issue natively to the PR (what a closing keyword does only on the default branch), post the backlink comment `status` requires, and read both back. */
 function link() {
   const prNumber = Number(value);
   const issue = readIssue();
   assert.ok(issue?.id, 'Issue identity is unreadable');
+  // The backlink comment belongs on an open issue (the guard requires one); refuse before any write instead of half-way.
+  assert.equal(issue.state, 'OPEN', `#${number} is not an open issue`);
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-    pullRequest(number:$number){id number state headRefOid}}}`, { owner, name, number: prNumber }).repository;
+    pullRequest(number:$number){id number state url headRefOid}}}`, { owner, name, number: prNumber }).repository;
   assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${value} is not an open pull request of ${project.repository}`);
   // Already connected is a success without a write; a Draft PR can be connected too.
   if (!connectedIssues(pr, true).has(issue.id)) {
@@ -727,6 +803,16 @@ function link() {
     }
   }
   console.log(`#${number} is natively linked to PR #${value}`);
+  // An existing comment is a success without a write. The text goes over stdin, like in `body`; the guard's reader proves it.
+  const prUrl = new URL(pr.url);
+  let backlink = findBacklink(issueComments(project.repository, number), prUrl);
+  if (!backlink) {
+    execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}/comments`, '-X', 'POST', '-F', 'body=@-'],
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `PR: ${pr.url}\n` });
+    backlink = findBacklink(issueComments(project.repository, number), prUrl);
+    assert.ok(backlink, `Backlink read-back differs: the comment with ${pr.url} is not readable on #${number}; read the comments before writing again`);
+  }
+  console.log(`backlink #${number}: ${backlink.html_url}`);
 }
 
 /**
@@ -744,7 +830,8 @@ function openAcceptance(bodyHtml) {
 }
 
 /** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
-function handoffIssue(issue, viewer) {
+/** `reviewedHead`: the PR head the proof was gathered for; a stacked layer must still be that head when this reads it. */
+function handoffIssue(issue, viewer, reviewedHead) {
   if (!mayStart(check(issue))) return false;
   assert.ok(issue.id, 'Issue identity is unreadable');
   const status = projectItem(issue)?.status?.name;
@@ -753,6 +840,7 @@ function handoffIssue(issue, viewer) {
   if (stackedOn) {
     const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
       pullRequest(number:$number){baseRefName headRefOid isCrossRepository headRepository{nameWithOwner}}}}`, { owner, name, number: Number(value) }).repository;
+    if (reviewedHead && pr?.headRefOid !== reviewedHead) reasons.push(`PR #${value} changed its head from ${reviewedHead.slice(0, 7)} during handoff; read it again`);
     if (pr?.isCrossRepository !== false || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) reasons.push(`PR #${value} comes from a fork or another repository: stacks stay inside ${project.repository}`);
     // Proof of the upper head only counts when that head contains the base PR's current head (a later push below leaves the branch name unchanged).
     if (!reasons.length && pr?.baseRefName === stackedOn.headRefName) {
@@ -833,7 +921,7 @@ function handoff() {
     if (!handoffPr(issue.id, viewer, pr.headRefOid)) return;
     const current = readIssue();
     assert.equal(current?.id, issue.id, 'Issue identity changed during handoff');
-    return handoffIssue(current, viewer) ? current : undefined;
+    return handoffIssue(current, viewer, pr.headRefOid) ? current : undefined;
   })) return;
   assert.equal(projectItem(readIssue())?.status?.name, 'Human review', 'Human review status read-back differs');
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);

@@ -31,6 +31,9 @@ and the project pins the kit as a gitlink, the committed SessionStart and Subage
 hooks run `git submodule update --init .vendor/workflow-kit` (source `.gitmodules`, the commit
 the gitlink pins). A present kit stays untouched; a failure only prints that command. No installer,
 provisioning or other command runs from a hook. It finds `git` on PATH like every agent command.
+The project's Git `post-checkout` hook, written only by an explicit run of `install-git-hooks.mjs`, runs
+the same update after a branch checkout so the kit follows the new gitlink; it skips a kit with local
+changes and prints a hint, and a failure never fails the checkout ([Git hooks](README.md#git-hooks)).
 
 The installers run checkout content: the Ponytail one copies the checkout's `.agents`
 hook sources into the snapshot that trusted hooks execute, and no check of a working
