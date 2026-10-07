@@ -15,12 +15,26 @@ if (!projectDirectory || projectDirectory.startsWith('--')) {
   console.error('--cwd needs the directory of the project (the one holding .github/workflow-project.json)');
   process.exit(2);
 }
-const [command, ref, value] = process.argv.slice(2);
+const [command, ref, typed] = process.argv.slice(2);
 const project = JSON.parse(readFileSync(join(projectDirectory, '.github/workflow-project.json'), 'utf8'));
 const [owner, name] = project.repository.split('/');
 // `new` has no issue yet and assigns the number it creates.
 let number = Number(String(ref).replace(/^#/, ''));
 const gh = externalTool('gh', process.cwd(), projectDirectory);
+
+/** The commit the project's checkout (--cwd, else the working directory) has checked out: what `ready PR --local` expects the PR to show. */
+function localHead() {
+  const git = externalTool('git', process.cwd(), projectDirectory);
+  try {
+    return execFileSync(git.file, ['-C', projectDirectory, 'rev-parse', 'HEAD'], { encoding: 'utf8', env: git.env, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch (error) {
+    console.error(`ready --local cannot read the head of ${projectDirectory}: ${String(error.stderr || error.message).trim()}`);
+    process.exit(2);
+  }
+}
+// The first argument after the PR; `ready PR --local` takes the head from the checkout, so a shell never has to splice `$(git rev-parse HEAD)` into the call.
+// The PR must still show exactly that head before it is marked ready, so a commit that was not pushed is refused like a mistyped id.
+const value = command === 'ready' && typed === '--local' && Number.isSafeInteger(number) ? localHead() : typed;
 
 // The account's GraphQL quota (5000 points an hour) is shared by every agent on it. Every response carries what is left and when it
 // resets in its headers (`gh api -i`, also on a refusal), so no extra request asks for it; a query reads its own cost.
@@ -432,7 +446,11 @@ function guardOption(issue, { fieldName, option }) {
     console.log = (...parts) => verdict.push(parts.join(' '));
     try { if (!mayStart(check(issue))) throw new Error(verdict.join('; ')); } finally { console.log = log; }
   }
-  if (fieldName === 'Status' && option.name === 'Automated review') verifyBacklinks();
+  if (fieldName === 'Status' && option.name === 'Automated review') {
+    verifyBacklinks();
+    // Only a hint, never a refusal: `handoff` refuses these later, and finding out now saves the round trip.
+    if (typeof issue.bodyHTML === 'string') for (const line of openAcceptance(issue.bodyHTML)) console.log(`warning: open acceptance in the issue, handoff will refuse it (check it off, or move it to a follow-up and link that issue): ${line}`);
+  }
 }
 
 function writeOption(issue, { fieldName, field, linked, option }) {
@@ -1711,7 +1729,7 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | check ISSUE [--sessio
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] | wait PR --merged [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
-  + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
+  + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFinite(projectGrace) && projectGrace >= 0)) {
   console.error('reviewerGraceMinutes in .github/workflow-project.json must be a number of minutes, 0 or more (0 turns the grace off); omit the field for the default');
@@ -1720,7 +1738,7 @@ if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFini
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (command === 'ready' && Number.isSafeInteger(number) && !/^[0-9a-f]{40}$/i.test(value ?? '')) {
   // A short id is what git log shows; naming the reason saves the trip through the usage line.
-  console.error(`ready needs the full 40-character commit id (git rev-parse HEAD), not ${value ? `"${value}"` : 'nothing'}`);
+  console.error(`ready needs the full 40-character commit id (git rev-parse HEAD) or --local, not ${value ? `"${value}"` : 'nothing'}`);
   process.exit(2);
 }
 if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' && headOption() !== undefined && !/^[0-9a-f]{40}$/i.test(headOption())) {

@@ -21,7 +21,11 @@ function realExecFileSync(file, args, options) {
   if (child.status !== 0) throw Object.assign(new Error(`Command failed: ${file} ${args.join(' ')}`), { status: child.status, signal: child.signal, stdout: child.stdout, stderr: null });
   return options?.encoding ? String(child.stdout) : child.stdout;
 }
-childProcess.execFileSync = (file, args, options) => /(^|[\\/])gh(\.exe)?$/.test(file) ? fakeGh(args, options?.input) : realExecFileSync(file, args, options);
+// A `git` that board.mjs finds is an empty placeholder in the test's bin (the tests run with that bin as PATH); the call goes to the host's real git.
+const hostPath = process.env.PATH;
+childProcess.execFileSync = (file, args, options) => /(^|[\\/])gh(\.exe)?$/.test(file) ? fakeGh(args, options?.input)
+  : /(^|[\\/])git(\.exe)?$/.test(file) ? realExecFileSync('git', args, { ...options, env: { ...options?.env, PATH: hostPath } })
+    : realExecFileSync(file, args, options);
 syncBuiltinESMExports();
 
 class ProcessExit extends Error {}

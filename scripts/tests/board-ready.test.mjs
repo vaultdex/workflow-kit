@@ -1,8 +1,42 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fixture, test } from './board-fixture.mjs';
+import { isolatedGit } from './fixtures.mjs';
 
+test('ready --local takes the head of the checkout and still needs the PR to show exactly it', t => {
+  const { checkout, run } = fixture(t);
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: checkout, encoding: 'utf8', env: isolatedGit(dirname(checkout)) }).trim();
+  git('init', '-q');
+  git('commit', '--allow-empty', '-q', '-m', 'pushed');
+  const PUSHED = git('rev-parse', 'HEAD');
+  const quick = ['--attempts', '2', '--interval', '0.01'];
+  const mutations = () => existsSync(join(checkout, 'mutations')) ? readFileSync(join(checkout, 'mutations'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const prepare = changes => {
+    for (const file of ['mutations', 'pr-reads.json', 'ready-noop', 'fail']) rmSync(join(checkout, file), { force: true });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ id: 'PR7', number: 7, state: 'OPEN', isDraft: true, isCrossRepository: false,
+      headRefOid: PUSHED, headRepository: { nameWithOwner: 'test/example' }, ...changes }));
+  };
+
+  prepare();
+  let result = run('ready', '7', '--local', ...quick);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, new RegExp(`^READY #7 head ${PUSHED}`, 'm'), 'The head came from the checkout');
+  assert.equal(mutations(), 1);
+
+  // A commit that exists only here is a head the PR does not show: refused, as a mistyped id would be.
+  git('commit', '--allow-empty', '-q', '-m', 'not pushed');
+  prepare();
+  result = run('ready', '7', '--local', ...quick);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^FAILED$/m);
+  assert.equal(mutations(), 0, 'nothing is written for a head the PR does not show');
+
+  prepare({ isDraft: false });
+  assert.equal(run('ready', '7', '--local', ...quick).status, 1, 'An already ready PR with another head is refused too');
+  assert.equal(mutations(), 0);
+});
 
 test('ready marks a Draft PR ready only for the expected pushed commit and never trusts stale metadata', t => {
   const { checkout, run } = fixture(t);
