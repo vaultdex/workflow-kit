@@ -1037,7 +1037,7 @@ function merge() {
   const result = finishedPr(number, 'merge', undefined, () => {
     let stacks;
     try { stacks = rest(`repos/${project.repository}/stacks?pull_request=${number}`); } catch (error) {
-      if (!/404|Not Found/.test(String(error.stderr))) throw error;
+      if (!/404|Not Found/.test(String(error.stderr))) throw error;
       stacks = [];
     }
     assert.ok(Array.isArray(stacks), 'The stack membership is unreadable');
