@@ -126,7 +126,7 @@ test('handoff needs a retro section whose every line ends with its resolution', 
 const selfReview = (level, ...lines) => `<h${level} dir="auto">Selbstprüfung</h${level}>\n` + lines.map(line => `<p dir="auto">${line}</p>`).join('\n');
 
 test('handoff needs the Selbstprüfung section of the PR body to name every check the project lists, and nothing without the field', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   const config = join(checkout, '.github/workflow-project.json'), plain = JSON.parse(readFileSync(config, 'utf8'));
