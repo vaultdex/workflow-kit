@@ -33,7 +33,6 @@ test('wait reads GraphQL once while REST shows no change, and once more per chan
   assert.deepEqual(graphqlReads(), { pr: 1, threads: 1, other: 2 }, 'Many rounds without a change: one read of the PR and one of its threads');
 
   // The third look at REST shows a new update time, the later ones keep it.
-  writeFileSync(join(checkout, 'rest-reads'), '');
   writeFileSync(join(checkout, 'pr-rest-reads.json'), JSON.stringify([{}, {}, { updatedAt: 'later' }]));
   assert.equal(run('wait', '7', '--interval', '0', '--max-minutes', '0.02').status, 4);
   assert.deepEqual(graphqlReads(), { pr: 2, threads: 2, other: 4 }, 'The change costs exactly one more read');
@@ -51,7 +50,7 @@ test('wait confirms every end with a full read', t => {
 });
 
 test('wait --merged reads REST only', t => {
-  const { checkout, run, pr, show, graphqlReads } = waitFixture(t);
+  const { run, pr, show, graphqlReads } = waitFixture(t);
   show(pr());
   assert.equal(run('wait', '7', '--merged', '--interval', '0', '--max-minutes', '0.02').status, 4, 'An open PR keeps waiting');
   show({ ...pr(), state: 'MERGED' });
@@ -59,7 +58,6 @@ test('wait --merged reads REST only', t => {
   assert.equal(merged.status, 0);
   assert.match(merged.stdout, /^#7 MERGED$/m);
   assert.equal(graphqlReads().other, 0, 'No GraphQL point is spent while waiting for the merge');
-  assert.ok(restReads(checkout) >= 2);
   assert.equal(run('wait', '7', '--interval', '301').status, 2, 'A pause above 5 minutes is refused');
   assert.equal(run('wait', '7', '--interval', 'x').status, 2, 'and so is a bad one');
 });

@@ -1,5 +1,5 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run in the project: board.mjs next | check | status | priority | field | new | block | sub | reviews | wait | merge (see usage below).
+// Run in the project: board.mjs next | check | status | priority | field | new | block | sub | reviews | wait | quota-wait | merge (see usage below).
 // `--cwd PATH` as the first argument runs it for the project in PATH from any directory: without it the
 // working directory decides the project, and a driver in another project would read and write the wrong board.
 import assert from 'node:assert/strict';
@@ -36,7 +36,7 @@ const value = command === 'ready' && typed === '--local' && Number.isSafeInteger
 // resets in its headers (`gh api -i`, also on a refusal), so no extra request asks for it; a query reads its own cost.
 // wait, reviews and handoff sleep until the reset instead of failing when it runs out or falls below their reserve;
 // every other command stops with the reset time.
-const sleepers = { wait: 300, reviews: 50, handoff: 50 };
+const sleepers = { wait: 300, reviews: 50, handoff: 50, 'quota-wait': 300 };
 let quota, spent = 0; // the latest { remaining, resetAt } a response reported, and the points this run has used
 // `wait` gives up at this time (--max-minutes), before the 10-minute limit of an agent's shell tool would push it into the background.
 let deadline = Infinity;
@@ -1821,6 +1821,22 @@ async function wait() {
   console.log([word, ...result.lines, quotaLine()].filter(Boolean).join('\n'));
 }
 
+/**
+ * Returns once the GraphQL quota has as many points as `wait` needs (300), so a driver never builds its own loop around `gh`: a
+ * refused `gh api graphql` prints the error and may still exit 0. The reset comes from the headers of the answer; after --max-minutes
+ * the command ends "still waiting" (exit 4) with the reset time, like `wait`.
+ */
+async function quotaWait() {
+  const result = await poll(() => {
+    for (;;) {
+      graphql('query{viewer{login}}'); // sleeps first while the last answer showed too few points, and again when a refusal comes
+      if (!(quota?.remaining < sleepers[command])) return { done: true }; // an answer without headers is an answer
+      sleepUntilReset(quota.resetAt);
+    }
+  });
+  if (result) console.log(['DONE', quotaLine()].join('\n'));
+}
+
 // OWNER/REPO#N names a blocker in another repository; N or #N one in this project's repository.
 const blockerRepository = reference => reference.includes('/') ? reference.slice(0, reference.lastIndexOf('#')) : project.repository;
 const validBlocker = reference => /^\d+$/.test(reference.slice(reference.lastIndexOf('#') + 1))
@@ -1852,12 +1868,13 @@ function sub() {
 }
 
 const commands = { next, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
-  reviews: reviewsOnce, wait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
+  reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
 const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | new --from FILE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
+  + ' | quota-wait [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
@@ -1876,7 +1893,7 @@ if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' &
   console.error(`wait --head needs the full 40-character commit id (git rev-parse HEAD), not ${headOption() ? `"${headOption()}"` : 'nothing'}`);
   process.exit(2);
 }
-if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeInteger(number))
+if (!commands[command] || (!['next', 'new', 'quota-wait'].includes(command) && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && !(process.argv.length > 5 && process.argv.slice(4).every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text))))
@@ -1890,7 +1907,7 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   // --head is the full id of the pushed commit (git rev-parse HEAD), as for ready; a short or missing one would wait on a head that never matches.
   || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{40}$/i.test(headOption())))
   // 0 = no limit; a missing or non-numeric value must not silently mean that.
-  || (process.argv.includes('--max-minutes') && (!['wait', 'merge'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
+  || (process.argv.includes('--max-minutes') && (!['wait', 'merge', 'quota-wait'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'merge' && value && !value.startsWith('--'))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
@@ -1912,7 +1929,7 @@ try {
 } catch (error) {
   console.log = print;
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'merge', 'ready', 'link', 'body', 'body-replace', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'quota-wait', 'handoff', 'merge', 'ready', 'link', 'body', 'body-replace', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
   console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;

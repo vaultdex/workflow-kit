@@ -140,6 +140,9 @@ Modellwahl stehen hier nicht.
      Bericht zurückkommt; Hintergrund nur für lange Prüfläufe mit eigener Benachrichtigung.
    - Warten: auf die Benachrichtigung der eigenen Hintergrundaufgabe; Prozessnamen
      (`node.exe`) gehören auch anderen Drivern.
+   - Keine eigenen Schleifen um `gh`: `gh api graphql` meldet die Kontingentsperre als Text und kann mit Exit 0 enden
+     (Driver #1095 wartete so 9 Minuten umsonst). Warten mit `board.mjs wait` oder `board.mjs quota-wait`
+     ([#324](https://github.com/vaultdex/workflow-kit/issues/324)).
    - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
      und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
    - Kommentare eines Issues: `gh api repos/OWNER/REPO/issues/N/comments`.
