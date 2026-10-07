@@ -1126,10 +1126,13 @@ function openAcceptance(bodyHtml) {
     .map(([, , text]) => decode(text.replace(/<[^>]*>/g, '')).trim());
 }
 
-/** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
-/** `reviewedHead`: the PR head the proof was gathered for; a stacked layer must still be that head when this reads it. */
-function handoffIssue(issue, viewer, reviewedHead) {
-  if (!mayStart(check(issue))) return false;
+/**
+ * Everything the issue side of the handoff still lacks (readiness, review status, assignment, open acceptance) on the
+ * supplied issue snapshot, or undefined when check() already printed its verdict and stopped.
+ * `reviewedHead`: the PR head the proof was gathered for; a stacked layer must still be that head when this reads it.
+ */
+function handoffIssueReasons(issue, viewer, reviewedHead) {
+  if (!mayStart(check(issue))) return;
   assert.ok(issue.id, 'Issue identity is unreadable');
   const status = projectItem(issue)?.status?.name;
   const reasons = [];
@@ -1161,12 +1164,17 @@ function handoffIssue(issue, viewer, reviewedHead) {
     reasons.push('the issue is not assigned to the authenticated driver');
   }
   for (const line of openAcceptance(issue.bodyHTML)) reasons.push(`open acceptance without an issue reference (check it off, or move it to a follow-up and link that issue): ${line}`);
-  if (reasons.length) {
+  return reasons;
+}
+
+/** The recheck before the write: true when the issue side holds, otherwise the verdict is printed. */
+function handoffIssue(issue, viewer, reviewedHead) {
+  const reasons = handoffIssueReasons(issue, viewer, reviewedHead);
+  if (reasons?.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     process.exitCode = 1;
-    return false;
   }
-  return true;
+  return reasons?.length === 0;
 }
 
 /**
@@ -1206,58 +1214,76 @@ function retroReasons(bodyHtml) {
  * The PR gate handoff and merge share: an open non-draft PR whose CI and every traced review have finished, without
  * blockers or open threads, and with a determined merge state. Prints the verdict and sets the exit code; returns the
  * review result only when it holds. `extra` adds the caller's own reasons (it runs only once the shared gate holds).
+ * `prior` are reasons the caller found before (the issue side of handoff): they are listed with the PR's, in one run.
+ * GitHub computes the merge state late: an undetermined one is read again a few times (`--interval` seconds apart, at
+ * 1 point each) before it counts as waiting.
  */
-function finishedPr(prNumber, action, expectedHead, extra = () => []) {
+const mergeStates = ['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'], mergeReads = 4;
+function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []) {
   const pr = readPr(prNumber);
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
+  const blockers = reasons => reasons.map(reason => `blocker: ${reason}`);
   if (pr.state !== 'OPEN' || pr.isDraft) {
-    console.log(`FAILED\nblocker: ${action} needs an open non-draft PR`);
+    console.log(['FAILED', ...blockers([...prior, `${action} needs an open non-draft PR`])].join('\n'));
     process.exitCode = 1;
     return;
   }
   const result = reviews(stallOption(), Date.now(), prNumber, pr);
   console.log(result.lines.join('\n'));
   if (!result.done || result.failed) {
-    process.exitCode = result.failed ? 1 : 3;
-    console.log(result.failed ? 'FAILED' : 'WAITING');
+    process.exitCode = result.failed || prior.length ? 1 : 3;
+    console.log([result.failed || prior.length ? 'FAILED' : 'WAITING', ...blockers(prior)].join('\n'));
     return;
   }
   if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, `PR head changed during ${action}`);
-  const reasons = [];
+  const reasons = [...prior];
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push(`resolve review blockers and threads before ${action}`);
   }
   reasons.push(...extra(result));
-  if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
-    console.log('WAITING\nwaiting: PR mergeability is not determined');
-    process.exitCode = 3;
-    return;
+  const undetermined = state => !state || state === 'UNKNOWN';
+  let state = result.pr.mergeStateStatus;
+  for (let read = 1; undetermined(state) && read < mergeReads; read++) {
+    sleep(numberOption('--interval', 3));
+    const fresh = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+      pullRequest(number:$number){headRefOid mergeStateStatus}}}`, { owner, name, number: prNumber }).repository.pullRequest;
+    assert.equal(fresh?.headRefOid, result.pr.headRefOid, `PR head changed during ${action}`);
+    state = fresh.mergeStateStatus;
+  }
+  // The snapshot's own DIRTY is already a blocker line of reviews(); a DIRTY that GitHub computed during the re-reads is new.
+  if (state === 'DIRTY' && result.pr.mergeStateStatus !== 'DIRTY') reasons.push('merge conflicts: resolve them before ' + action);
+  if (!mergeStates.includes(state)) {
+    if (!reasons.length) {
+      console.log('WAITING\nwaiting: PR mergeability is not determined');
+      process.exitCode = 3;
+      return;
+    }
+    if (undetermined(state)) reasons.push('PR mergeability is not determined (GitHub is still computing it): run again in a minute');
   }
   if (reasons.length) {
-    console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    console.log(['FAILED', ...blockers(reasons)].join('\n'));
     process.exitCode = 1;
     return;
   }
   return result;
 }
 
-/** Read all PR gates and native links, optionally requiring the previously checked head. */
-function handoffPr(issueId, viewer, expectedHead) {
+/** Read all PR gates and native links, optionally requiring the previously checked head; `prior`: see finishedPr. */
+function handoffPr(issueId, viewer, expectedHead, prior) {
   const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => {
+    const reasons = [];
     const comment = findHandoffComment(comments, viewer, pr.headRefOid);
-    if (!comment) return [`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line and the "Retro" section (README: Handoff comment)`];
-    // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
-    const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
-      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
-    return retroReasons(rendered.body_html);
-  });
-  if (!result) return;
-  if (!connectedIssues(result.pr).has(issueId)) {
-    console.log(`FAILED\nblocker: PR #${value} is not natively linked to issue #${number}`);
-    process.exitCode = 1;
-    return;
-  }
-  return result.pr;
+    if (!comment) reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line and the "Retro" section (README: Handoff comment)`);
+    else {
+      // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
+      const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
+        { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
+      reasons.push(...retroReasons(rendered.body_html));
+    }
+    if (!connectedIssues(pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
+    return reasons;
+  }, prior);
+  return result?.pr;
 }
 
 /** Guard the Human review write with current PR proof followed by current issue prerequisites. */
@@ -1265,8 +1291,10 @@ function handoff() {
   const issue = readIssue();
   const { viewer } = graphql('query{viewer{login}}');
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
-  if (!handoffIssue(issue, viewer)) return;
-  const pr = handoffPr(issue.id, viewer);
+  // The issue side's reasons wait for the PR side's, so one run names everything that is missing.
+  const prior = handoffIssueReasons(issue, viewer);
+  if (!prior) return;
+  const pr = handoffPr(issue.id, viewer, undefined, prior);
   if (!pr) return;
   if (!set('Status', 'Human review', () => {
     if (!handoffPr(issue.id, viewer, pr.headRefOid)) return;
@@ -1460,8 +1488,8 @@ const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] | wait PR --merged'
-  + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
-  + ' | merge PR [--stall MINUTES] [--grace MINUTES]'
+  + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
+  + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
@@ -1477,6 +1505,8 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   // A misspelled flag must not silently turn the session check off.
   || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^\w[\w.-]*$/.test(process.argv[5])))
   || (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
+  // sleep(NaN) would wait forever.
+  || (['handoff', 'merge'].includes(command) && !(numberOption('--interval', 3) >= 0 && numberOption('--interval', 3) <= 60))
   // --head is the full id of the pushed commit (git rev-parse HEAD), as for ready; a short or missing one would wait on a head that never matches.
   || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{40}$/i.test(headOption())))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
