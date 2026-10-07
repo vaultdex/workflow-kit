@@ -166,7 +166,9 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
   wer es merkt.
 - PRs und Kommentare beginnen mit dem Ergebnis in einem Satz, Details danach. Das gilt
   auch für den [Übergabekommentar](../README.md#handoff-comment). Maschinell erzeugte
-  Kommentare wie der Backlink von `board.mjs link` sind ausgenommen.
+  Kommentare wie der Backlink von `board.mjs link` sind ausgenommen. Ein Hinweis, den
+  ein Skill an den Anfang stellt (der KI-Hinweis von `/triage`), steht zuerst, das
+  Ergebnis direkt danach.
 - Kein Status im Text: Project-Status, Priorität und Größe stehen nur auf dem Board. Ein
   Issue-Text schreibt keine Zeilen wie „Status: Backlog, keine Ready-Freigabe“; sie
   veralten beim nächsten Statuswechsel. Das gilt auch, wenn die Vorlage eines Skills
