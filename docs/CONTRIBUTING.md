@@ -306,8 +306,12 @@ backlink never closes an issue.
    issue's scope through step 4; record the rest as follow-up issues in the
    repository that owns the fix, with evidence from the session. Report findings
    about personal configuration (memory, shell profile, scheduled tasks) to the
-   human instead of editing it. List every finding and its disposition, or none,
-   in the [handoff comment](../README.md#handoff-comment).
+   human instead of editing it. List every finding in the `Retro` section of the
+   [handoff comment](../README.md#handoff-comment), one line each, ending with its
+   resolution: an issue link, `behoben in <SHA>`, `persönlich gemeldet` or
+   `kein Handlungsbedarf: <Grund>`; `Keine Funde` as the only line when there are none.
+   A fixable finding that no issue covers yet becomes an issue first; a comment alone
+   is no record. `board.mjs handoff` refuses a missing section or a line without a resolution.
 6. Run `board.mjs handoff ISSUE PR` for the fully delivered issue only when CI
    passes, every review with a trace on the current head has finished or stalled,
    each finding is fixed or linked to a follow-up, the
