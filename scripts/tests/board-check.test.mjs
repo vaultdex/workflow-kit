@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixture, handoffPr, issue, predecessor, test } from './board-fixture.mjs';
 
@@ -302,4 +302,22 @@ test('board check asks for a short list of sub-issues and reads a longer one aga
   const [first, second, ...rest] = queries();
   assert.deepEqual(rest, []);
   assert.ok(first.includes('subIssues(first:30)') && second.includes('subIssues(first:100)'), 'The second read asks for 100');
+});
+
+
+test('--cwd names the project of a command, not the working directory', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const other = join(checkout, '..', 'other-project');
+  mkdirSync(join(other, '.github'), { recursive: true });
+  writeFileSync(join(other, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/other-project', id: 'P2' }));
+  // Startable on the board of the other project only: its item is in P2, the working directory's project is P1.
+  writeIssue({ ...issue(), projectItems: { nodes: [{ id: 'PI2', project: { id: 'P2' }, status: { name: 'Ready' } }] } });
+
+  const here = run('check', '1');
+  assert.match(here.stdout, /^test\/example#1 /, 'Without --cwd the working directory decides');
+  assert.equal(here.status, 2, here.stdout);
+  const there = run('--cwd', other, 'check', '1');
+  assert.match(there.stdout, /^test\/other-project#1 /);
+  assert.equal(there.status, 0, there.stdout + there.stderr);
+  assert.equal(run('--cwd').status, 2, 'A missing directory is a usage error, not the working directory');
 });

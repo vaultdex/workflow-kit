@@ -1,0 +1,9 @@
+#!/bin/sh
+# Workflow Kit repository: the static file tests before a push (#246). A stray control byte in a script
+# once cost a red CI run; this finds it in milliseconds. Only tests without network or Git fixtures belong
+# here, the full suite stays in CI. Installed by install-git-hooks.mjs; rerun it after changing this file.
+command -v node >/dev/null 2>&1 || { echo "pre-push: node not found, static file tests skipped (CI still runs them)" >&2; exit 0; }
+# Git may export the repository of the hook's caller; the tests select their own.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+cd "$(git rev-parse --show-toplevel)" || exit 1
+exec node --test scripts/tests/text-files.test.mjs

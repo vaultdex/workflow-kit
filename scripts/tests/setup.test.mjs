@@ -6,6 +6,7 @@ import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { materialize } from '../provider-links.mjs';
+import { kitCheckout } from './fixtures.mjs';
 
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const temporary = (t, name) => {
@@ -19,7 +20,9 @@ test('generated skills and hook sources survive a plain clone without setup', t 
   execFileSync('git', ['init', '--quiet', fixture]);
   execFileSync('git', ['-C', fixture, 'config', 'core.filemode', 'false']);
   copyFileSync(join(kit, '.gitattributes'), join(fixture, '.gitattributes'));
-  const setup = name => spawnSync(process.execPath, [join(kit, 'scripts', name)], { cwd: fixture, encoding: 'utf8' });
+  // The generators register their submodules in the kit they live in: run them in a throwaway kit (#207).
+  const scripts = join(kitCheckout(t), 'scripts');
+  const setup = name => spawnSync(process.execPath, [join(scripts, name)], { cwd: fixture, encoding: 'utf8' });
   for (let run = 0; run < 2; run++) {
     const result = setup('setup-skills.mjs');
     assert.equal(result.status, 0, result.stderr);

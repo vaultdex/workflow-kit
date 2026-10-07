@@ -36,7 +36,16 @@ des Kontingents). `wait` und `reviews` melden den Rest in einer Zeile (`quota: �
 `wait`, `reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 300 (`wait`)
 beziehungsweise 50 Punkten bis zum Reset (`rate limited until …`) und fragen danach weiter; bei
 einer kurzen Drosselung („secondary rate limit“) warten sie 1, 2, dann 4 Minuten statt bis zum
-Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab. Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
+Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab (Uhrzeit und Minuten bis dahin). Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
+Rest und Reset stammen aus den Headern `x-ratelimit-remaining` und `x-ratelimit-reset` der eigenen Antworten
+(auch der abgewiesenen); zeigt eine Abweisung selbst freies Kontingent, fragt der Befehl sofort erneut,
+statt auf eine Reset-Zeit zu warten. `gh api rate_limit` ist kein Beleg: es zeigte am 07.10.2026 für GraphQL einen
+veralteten Wert. Wer die Zeit selbst braucht, fragt `gh api graphql -f query='query{rateLimit{remaining resetAt}}'`;
+diese Abfrage antwortet auch bei leerem Kontingent.
+Viele Issues auf einmal: `board.mjs new --from FILE` statt einer Schleife um `new`. Jede Abfrage und jede
+Mutation kostet 1 Punkt, ein einzelnes `new` braucht 4 Anfragen (vorher 8 bis 9), die Sammel-Anlage für bis zu 16
+Issues zusammen 4 ([README](../README.md#board-commands)). Lesen Sie Issues und Kommentare über REST
+(`gh api repos/OWNER/REPO/issues/N`): `gh issue view` und `gh pr view` fragen GraphQL.
 
 **Review-Bots im Quota.** Ein Reviewer, auf den das Projekt nicht angewiesen ist
 (CodeRabbit auf dem Free-Plan), steht als `"optionalReviewers"` in
@@ -64,6 +73,9 @@ schreiben und per `--body-file` übergeben, nicht per Heredoc.
 Allgemeine Regeln für jeden Driver-Subagenten. Projektspezifische Regeln und die
 Modellwahl stehen hier nicht.
 
+0. **Neuer Worktree: Kit zuerst.** Ein Worktree mit `isolation: worktree` startet mit leerem
+   Kit-Submodul, weil die Start-Hooks für das Projektverzeichnis der Eltern laufen: als Erstes
+   `git submodule update --init .vendor/workflow-kit`, dann AGENT_RULES.md lesen.
 1. **Ein Issue bis „Human review“ treiben.** Früher enden nur bei einem menschlichen
    Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung) oder bei einem Blocker
    (`board.mjs check` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
@@ -83,7 +95,10 @@ Modellwahl stehen hier nicht.
 4. **Warten ohne Handarbeit.** Abweichend von [AGENT_RULES.md](../AGENT_RULES.md#economy)
    und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
    `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
-   Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht auf einen Reviewer
+   Zuges von Hintergrundaufgaben erfährt. `wait` endet nach 9 Minuten von selbst (`--max-minutes N`,
+   0 = unbegrenzt) mit Exit-Code 4 und der Zeile `still waiting: call wait again`, damit das
+   Bash-Werkzeug es nicht nach 10 Minuten in den Hintergrund schiebt: bei Exit 4 einfach erneut
+   aufrufen. Nach DONE nicht auf einen Reviewer
    ohne Spur pollen (ein Review, das nie startet) und keinen Review von Hand anfordern
    (kein `@codex review`); fehlt die Spur, nennt der Übergabe-Kommentar das
    ([Review loop](CONTRIBUTING.md#review-loop) Schritt 3). Freitext-Ankündigungen anderer Bots
@@ -94,16 +109,26 @@ Modellwahl stehen hier nicht.
 5. **Shell und Werkzeuge.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus,
    mit literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
    - Tests: lokal nur die betroffenen (`--test-name-pattern` oder eine Testdatei), die
-     ganze Suite läuft in der CI. Führt die Projekt-CI sie für diesen Head nicht aus,
+     ganze Suite läuft in der CI. Die Testdateien zu den geänderten Dateien nennt
+     `node scripts/affected-tests.mjs` (im Kit); mit `--run` startet er sie auch. Führt die Projekt-CI sie für diesen Head nicht aus,
      läuft sie einmal vor der Übergabe im Hintergrund mit Logdatei. Das Kit fährt sie in
      seiner CI, Kit-Driver testen lokal nur gezielt.
    - Dateien: mit Edit und Write oder mit einem Node-Skript aus einer Datei ändern;
      Heredoc, Python und sed verlieren Backslashes.
    - Suchen: auf Pfade eingrenzen oder erst mit `-l` die Dateien finden.
+   - Ziel-Stand: Suchen und Lesen laufen gegen den Stand des Ziel-Branches, bei abweichendem
+     Checkout mit `git grep … origin/<Ziel-Branch>`.
+   - Such- und Explore-Subagenten im Vordergrund (`run_in_background: false`), damit genau ein
+     Bericht zurückkommt; Hintergrund nur für lange Prüfläufe mit eigener Benachrichtigung.
    - Warten: auf die Benachrichtigung der eigenen Hintergrundaufgabe; Prozessnamen
      (`node.exe`) gehören auch anderen Drivern.
-   - `gh issue view N --json comments` liefert die Kommentare; `--comments` passt nicht
-     zu `--json`.
+   - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
+     und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
+   - Kommentare eines Issues: `gh api repos/OWNER/REPO/issues/N/comments`.
+   - Board-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD check N` (die Option steht vor
+     dem Befehl) liest `.github/workflow-project.json` aus dem Klon statt aus dem Arbeitsverzeichnis.
+     Ohne sie bestimmt das Arbeitsverzeichnis das Projekt, und ein Status oder Kommentar kann im
+     falschen Issue landen; ein `cd … &&` ist dafür nicht nötig.
    - Worktree: der Driver arbeitet im eigenen Worktree, nie in dem der Eltern-Session;
      hat er keinen, legt er ihn als Erstes an. Scratch-Dateien tragen die Issue-Nummer.
    - Kit-Stand: Hooks und Skills eines Subagenten kommen aus dem Start-Worktree der

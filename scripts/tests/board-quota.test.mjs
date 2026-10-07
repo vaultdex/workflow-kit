@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { retryAt, waitInterval } from '../quota.mjs';
+import { quotaOf, retryAt, splitResponse, untilText, waitInterval } from '../quota.mjs';
 import { fixture, handoffPr, issue, test } from './board-fixture.mjs';
 
 test('a used-up GraphQL quota is waited out by reviews and reported by the other commands', t => {
@@ -17,7 +17,34 @@ test('a used-up GraphQL quota is waited out by reviews and reported by the other
   writeFileSync(join(checkout, 'limited'), '');
   const stopped = run('check', '1');
   assert.equal(stopped.status, 2, stopped.stdout + stopped.stderr);
-  assert.match(stopped.stdout, /\d{4}-\d\d-\d\dT/, 'Commands that cannot wait name the time to try again');
+  assert.match(stopped.stdout, /\d{4}-\d\d-\d\dT[^(]*\(in \d+ min\)/, 'Commands that cannot wait name the time to try again, and the minutes until then');
+});
+
+test('a reset time in the future does not make wait or reviews sleep while the headers show free quota', t => {
+  const { checkout, run } = fixture(t);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  // The headers report 4000 points left and a reset three seconds away: nothing to wait for.
+  writeFileSync(join(checkout, 'quota-left'), '4000');
+  let started = Date.now();
+  let result = run('reviews', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(Date.now() - started < 2500, 'Free quota is no reason to wait for the reset');
+  // A refusal whose own headers show free quota is stale: the command asks again at once, silently.
+  writeFileSync(join(checkout, 'limited'), 'free');
+  started = Date.now();
+  result = run('reviews', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(Date.now() - started < 2500, 'A stale refusal is not waited out');
+  assert.ok(!result.stderr.includes('rate limited until'), 'It says nothing about a reset it does not wait for');
+});
+
+test('the quota is read from the headers of a response, a refusal included', () => {
+  const response = 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 42\r\nX-Ratelimit-Reset: 1791346834\r\n\r\n{"data":{}}';
+  const { headers, body } = splitResponse(response);
+  assert.equal(body, '{"data":{}}');
+  assert.deepEqual(quotaOf(headers), { remaining: 42, resetAt: '2026-10-07T04:20:34.000Z' });
+  assert.equal(quotaOf(splitResponse('{"data":{}}').headers), undefined, 'Without headers there is no quota to report');
+  assert.equal(untilText('2026-10-07T04:20:34.000Z', Date.parse('2026-10-07T04:14:10Z')), '2026-10-07T04:20:34.000Z (in 7 min)');
 });
 
 test('little quota left makes reviews wait for the reset before the next query', t => {
@@ -43,4 +70,5 @@ test('a secondary limit is retried within minutes, only the primary one waits fo
   assert.deepEqual([0, 1, 2].map(refusals => retryAt(secondary, refusals, hourly, now)),
     ['2026-10-07T00:01:00.000Z', '2026-10-07T00:02:00.000Z', '2026-10-07T00:04:00.000Z']);
   assert.equal(retryAt('API rate limit already exceeded for user ID 1', 0, hourly, now), hourly());
+  assert.equal(retryAt(secondary, 0, hourly, now, { 'retry-after': '600' }), '2026-10-07T00:10:00.000Z', 'A longer Retry-After wins over the backoff');
 });

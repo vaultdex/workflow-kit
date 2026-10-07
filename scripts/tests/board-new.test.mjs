@@ -12,7 +12,7 @@ test('new checks every required value before creating, reads all values back and
   const stored = changes => write('backlink-1.json', { number: 1, state: 'open', comments: 0, milestone: { title: '0.1.1' }, labels: [{ name: 'enhancement' }], assignees: [], ...changes });
   write('test-milestones.json', [{ number: 4, title: '0.1.1' }]);
   write('test-labels.json', [{ name: 'enhancement' }, { name: 'ci' }]);
-  write('create-response.json', { number: 1, html_url: 'https://github.com/test/example/issues/1' });
+  write('create-response.json', { number: 1, node_id: 'N1', html_url: 'https://github.com/test/example/issues/1' });
   write('backlink-comments-1.json', []);
   write('body.md', 'Text\r\n');
   stored();
@@ -47,7 +47,7 @@ test('new checks every required value before creating, reads all values back and
   assert.equal(result.status, 2);
   assert.match(result.stdout, /^ERROR - .*may exist anyway.*before trying again/);
   rmSync(created);
-  write('create-response.json', { number: 1, html_url: 'https://github.com/test/example/issues/1' });
+  write('create-response.json', { number: 1, node_id: 'N1', html_url: 'https://github.com/test/example/issues/1' });
 
   // Without --start the issue lands in Backlog; a label given twice (other casing) is one label.
   result = run(...base, '--label', 'ENHANCEMENT');
@@ -85,4 +85,66 @@ test('new checks every required value before creating, reads all values back and
   result = run(...base);
   assert.equal(result.status, 2);
   assert.match(result.stdout, /^ERROR - .*issues\/1 was created, but setting the Project fields failed.*do not create it again/);
+});
+
+test('new --from checks every entry before creating, then costs few GraphQL requests however many issues it creates', t => {
+  const { checkout, run, queries } = fixture(t);
+  const write = (file, data) => writeFileSync(join(checkout, file), typeof data === 'string' ? data : JSON.stringify(data));
+  const read = file => JSON.parse(readFileSync(join(checkout, file), 'utf8'));
+  const gone = file => !existsSync(join(checkout, file));
+  const answers = count => Array.from({ length: count }, (_, index) => ({ number: index + 1, node_id: `N${index + 1}`, html_url: `https://github.com/test/example/issues/${index + 1}` }));
+  const entry = (title, size, changes) => ({ title, bodyFile: 'body.md', milestone: '0.1.1', labels: ['enhancement'], priority: 'Low', fields: { Size: size }, ...changes });
+  write('test-milestones.json', [{ number: 4, title: '0.1.1' }]);
+  write('test-labels.json', [{ name: 'enhancement' }]);
+  write('body.md', 'Text\n');
+  for (const number of [1, 2, 3]) write(`backlink-${number}.json`, { number, state: 'open', comments: 0, milestone: { title: '0.1.1' }, labels: [{ name: 'enhancement' }], assignees: [] });
+  const create = (list, count = list.length) => {
+    for (const file of ['creates', 'stored-items.json', 'stored-values.json', 'mutations']) rmSync(join(checkout, file), { force: true });
+    write('create-responses.json', answers(count));
+    write('list.json', list);
+    queries();
+    return run('new', '--from', 'list.json');
+  };
+
+  // One bad entry anywhere creates nothing and says which one it is.
+  for (const [reason, bad, expected] of [['an unknown option', entry('C', 'XXL'), /entry 3 "C".*XS.*S/], ['an unknown key', entry('C', 'S', { label: 'x' }), /entry 3 "C".*unknown key label/],
+    ['a missing priority', entry('C', 'S', { priority: undefined }), /entry 3 "C".*priority is required/], ['an unknown label', entry('C', 'S', { labels: ['nope'] }), /entry 3 "C".*no label "nope"/]]) {
+    const result = create([entry('A', 'XS'), entry('B', 'S'), bad]);
+    assert.equal(result.status, 2, `${reason}: ${result.stdout}`);
+    assert.match(result.stdout, expected, reason);
+    assert.ok(gone('creates') && gone('mutations'), `${reason}: nothing may be created or written`);
+  }
+  assert.match(create({ not: 'a list' }).stdout, /JSON list/);
+
+  // Three issues: created over REST, then four GraphQL requests in all (field definitions, add to Project, write values, read back).
+  let result = create([entry('A', 'XS'), entry('B', 'S'), entry('C', 'XS')]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n').map(line => line.split(' | ')[0]), [1, 2, 3].map(number => `NEW https://github.com/test/example/issues/${number}`));
+  for (const value of ['0.1.1', 'enhancement', 'Backlog', 'Low']) assert.ok(result.stdout.split('\n').every(line => !line || line.includes(value)), value);
+  assert.deepEqual(readFileSync(join(checkout, 'creates'), 'utf8').trim().split('\n').map(line => JSON.parse(line).title), ['A', 'B', 'C']);
+  assert.deepEqual(read('stored-items.json'), Object.fromEntries([['XS'], ['S'], ['XS']].map(([size], index) => [`PI-N${index + 1}`, { F1: 'Backlog', F2: 'Low', F3: size }])));
+  assert.equal(queries().length, 4, 'The number of requests does not grow with the number of issues');
+
+  // The Project may have added the issues first; that is no failure as long as the items are readable.
+  write('add-exists', '');
+  result = create([entry('A', 'XS'), entry('B', 'S')]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(queries().length, 5, 'One more request finds the items the Project added');
+  write('add-exists-unreadable', '');
+  result = create([entry('A', 'XS')]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /^ERROR - 1 of 1 issues exist: https:\/\/github\.com\/test\/example\/issues\/1, but setting the Project fields failed.*do not create them again/);
+  rmSync(join(checkout, 'add-exists'));
+  rmSync(join(checkout, 'add-exists-unreadable'));
+
+  // A value that does not read back, and a creation that fails half-way, name every issue that exists.
+  write('lost', 'Done');
+  result = create([entry('A', 'XS'), entry('B', 'S')]);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /^ERROR - 2 of 2 issues exist: \S*issues\/1 \S*issues\/2, but setting the Project fields failed.*Read-back of/);
+  rmSync(join(checkout, 'lost'));
+  result = create([entry('A', 'XS'), entry('B', 'S'), entry('C', 'XS')], 2);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /^ERROR - creating the issue failed.*2 of 3 issues exist: \S*issues\/1 \S*issues\/2.*never an existing one again/);
+  assert.ok(gone('mutations'), 'Nothing is written to the Project after a failed creation');
 });

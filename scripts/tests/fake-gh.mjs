@@ -13,18 +13,20 @@ function api(argv, input, stdout, stderr, exit) {
   const path = argv[2] ?? '';
   if (!path.startsWith('graphql')) {
     if (fs.existsSync('fail') || fs.existsSync('fail-rest')) exit(1);
-    // The quota endpoint: the GraphQL quota resets a second from now.
-    if (path === 'rate_limit') {
-      stdout(JSON.stringify({ resources: { graphql: { reset: Math.floor(Date.now() / 1000) + 1 } } }));
-      exit(0);
-    }
     // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
     const parts = path.split('?')[0].split('/');
     const backlink = 'backlink-' + parts[4] + '.json';
     if (parts[3] === 'issues' && parts.length === 4 && argv.includes('POST')) {
-      // A new issue: the request is kept for the test, the answer is prepared by it.
+      // A new issue: the request is kept for the test (created.json the last one, creates.json all of them), the answer is prepared by it:
+      // create-response.json for every call, or create-responses.json, one after the other.
       fs.writeFileSync('created.json', input);
-      stdout(fs.readFileSync('create-response.json'));
+      fs.appendFileSync('creates', input + '\n');
+      if (fs.existsSync('create-responses.json')) {
+        const answers = JSON.parse(fs.readFileSync('create-responses.json'));
+        if (!answers.length) exit(1);
+        fs.writeFileSync('create-responses.json', JSON.stringify(answers.slice(1)));
+        stdout(JSON.stringify(answers[0]));
+      } else stdout(fs.readFileSync('create-response.json'));
       exit(0);
     }
     if (parts[3] === 'issues' && parts[4] === 'comments' && parts.length === 6) {
@@ -100,10 +102,20 @@ function api(argv, input, stdout, stderr, exit) {
   }
   const query = argv.find(arg => arg.startsWith('query=')).slice(6);
   if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('query{viewer'))) exit(1);
-  // limited: GitHub refuses the next query, like its RATE_LIMITED error, and takes the file away: the quota is back after one wait.
+  // `gh api -i` prints the status line and the headers before the body, on a failure too. The quota headers come with
+  // quota-left (the points GitHub reports as left, to be spent until three seconds from now) and with limited (none left, reset within a second).
+  const answer = (body, quota) => {
+    const [remaining, reset] = quota ?? (fs.existsSync('quota-left') ? [Number(fs.readFileSync('quota-left', 'utf8')), Math.ceil((Date.now() + 3000) / 1000)] : []);
+    const headers = ['HTTP/2.0 200 OK', 'Content-Type: application/json; charset=utf-8', ...remaining === undefined ? [] : [`X-Ratelimit-Remaining: ${remaining}`, `X-Ratelimit-Reset: ${reset}`]];
+    stdout(argv.includes('-i') ? `${headers.join('\r\n')}\r\n\r\n${body}` : body);
+  };
+  // limited: GitHub refuses the next query, like its RATE_LIMIT error, and takes the file away: the quota is back after one wait.
+  // "free" in the file: the refusal is stale, its own headers show 4000 points left and a reset three seconds away.
   if (fs.existsSync('limited')) {
+    const stale = fs.readFileSync('limited', 'utf8') === 'free';
     fs.unlinkSync('limited');
-    stdout(JSON.stringify({ errors: [{ type: 'RATE_LIMITED', message: 'API rate limit already exceeded for user ID 1.' }] }));
+    answer(JSON.stringify({ errors: [{ type: 'RATE_LIMIT', code: 'graphql_rate_limit', message: 'API rate limit already exceeded for user ID 1.' }] }),
+      stale ? [4000, Math.ceil((Date.now() + 3000) / 1000)] : [0, Math.floor(Date.now() / 1000) + 1]);
     stderr('gh: API rate limit already exceeded for user ID 1.\n');
     exit(1);
   }
@@ -114,6 +126,35 @@ function api(argv, input, stdout, stderr, exit) {
     // mutation-fails: GitHub refuses every write.
     if (fs.existsSync('mutation-fails')) exit(1);
     fs.appendFileSync('mutations', query + '\n');
+    if (/\bm\d+:\w+\(/.test(query)) {
+      // Aliased mutations (m0:…, m1:…) with their values written into the query: items are PI-<issue id>, kept per item in
+      // stored-items.json ({ item: { field: option } }); add-exists is GitHub refusing the add of every issue, but answering the rest.
+      const items = fs.existsSync('stored-items.json') ? JSON.parse(fs.readFileSync('stored-items.json')) : {};
+      const values = fs.existsSync('stored-values.json') ? JSON.parse(fs.readFileSync('stored-values.json')) : {};
+      const result = {};
+      let refused = false;
+      for (const call of query.slice('mutation{'.length, -1).split(/ (?=m\d+:)/)) {
+        const [, alias, name] = /^(m\d+):(\w+)/.exec(call);
+        const argument = key => new RegExp(`${key}:"([^"]*)"`).exec(call)?.[1];
+        if (name === 'addProjectV2ItemById') {
+          refused ||= fs.existsSync('add-exists');
+          result[alias] = refused ? null : { item: { id: `PI-${argument('contentId')}` } };
+        } else {
+          const target = argument('itemId') ?? argument('issueId');
+          items[target] = { ...items[target], [argument('fieldId')]: argument('singleSelectOptionId') };
+          values[argument('fieldId')] = argument('singleSelectOptionId');
+          result[alias] = {};
+        }
+      }
+      fs.writeFileSync('stored-items.json', JSON.stringify(items));
+      fs.writeFileSync('stored-values.json', JSON.stringify(values));
+      if (refused) {
+        answer(JSON.stringify({ data: result, errors: [{ message: 'Content already exists in this project' }] }));
+        stderr('gh: Content already exists in this project\n');
+        exit(1);
+      }
+      return answer(JSON.stringify({ data: result }));
+    }
     const option = argv.find(arg => arg.startsWith('option='));
     if (option) fs.writeFileSync('stored', option.slice(7));
     // Per field, so a call that sets several fields can be read back field by field.
@@ -150,6 +191,23 @@ function api(argv, input, stdout, stderr, exit) {
       data = { addProjectV2ItemById: { item: { id: 'PI1' } } };
     } else data = {};
   } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
+  else if (query.includes('items:nodes(ids:') || query.includes('issues:nodes(ids:')) {
+    // The read-back of a batch: the values of the items (PI-<issue id>) and of the issues, as the mutations stored them.
+    // lost: the API accepted the writes but every field reads back as this value.
+    const names = { F1: 'Status', F2: 'Priority', F3: 'Size' };
+    const stored = fs.existsSync('stored-items.json') ? JSON.parse(fs.readFileSync('stored-items.json')) : {};
+    const lost = fs.existsSync('lost') && fs.readFileSync('lost', 'utf8');
+    const read = key => {
+      const ids = new RegExp(`${key}:nodes\\(ids:(\\[[^\\]]*\\])`).exec(query)?.[1];
+      return ids && JSON.parse(ids).map(id => ({ fieldValues: { nodes: Object.entries(stored[id] ?? {}).map(([field, name]) => ({ name: lost || name, field: { name: names[field] } })) }, issueFieldValues: { nodes: [] } }));
+    };
+    data = { items: read('items'), issues: read('issues') };
+  }
+  else if (query.startsWith('query{nodes(ids:') && query.includes('projectItems(first:100){nodes{id project{id}}}')) {
+    // The item of an issue the Project's own automation added first (add-exists-unreadable: it is not readable).
+    const ids = JSON.parse(/nodes\(ids:(\[[^\]]*\])/.exec(query)[1]);
+    data = { nodes: ids.map(id => ({ projectItems: { nodes: fs.existsSync('add-exists-unreadable') ? [] : [{ id: `PI-${id}`, project: { id: 'P1' } }] } })) };
+  }
   else if (query.includes('nodes(ids:')) {
     // The PRs that close predecessors, read by id: deliveries.json maps an id to its closedByPullRequestsReferences; an id it lacks is unreadable.
     const deliveries = JSON.parse(fs.readFileSync('deliveries.json'));
@@ -217,9 +275,8 @@ function api(argv, input, stdout, stderr, exit) {
     }
     data = { repository: { issue }, ...query.includes('{viewer{login}') && { viewer: { login: 'worker' } } };
   }
-  // quota-left: the points GitHub reports as left, to be spent until three seconds from now.
-  const rateLimit = fs.existsSync('quota-left') && { cost: 1, remaining: Number(fs.readFileSync('quota-left', 'utf8')), resetAt: new Date(Date.now() + 3000).toISOString() };
-  stdout(JSON.stringify({ data: rateLimit && data ? { ...data, rateLimit } : data }));
+  // A query reports its cost (one point), a mutation none.
+  answer(JSON.stringify({ data: data && query.startsWith('query') ? { ...data, rateLimit: { cost: 1 } } : data }));
 }
 
 /** gh pr merge …: records the call; merge-fails is gh refusing, merge-noop a merge that never shows. */
