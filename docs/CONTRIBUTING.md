@@ -35,15 +35,19 @@ does not replace it.
 | --- | --- |
 | STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed, every `Wartet bis` condition met. |
 | STACKABLE | Held only by open native predecessors, all in this repository and all delivered by the same single open, non-Draft PR from a branch of this repository (or by the same single PR once it is merged into a release branch, where the predecessor issue stays open until the release: then there is no stack, only a plain PR on that branch). `check` names it (`stack base: PR #N`); work starts as a [stacked pull request](#stacked-pull-requests) on that PR. Exit code 4, never 0. |
-| BLOCKED | An open predecessor that is not STACKABLE (no open PR, only a Draft PR, a fork PR, several PRs, another repository), a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, or an unmet `Wartet bis` condition. |
+| BLOCKED | An open predecessor that is not STACKABLE (no open PR, only a Draft PR, a fork PR, several PRs, another repository), a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, an unmet `Wartet bis` condition, or work of another session (see Claims). |
 | UNKNOWN | API error, incomplete dependency data (including the PR list of an open predecessor), an inaccessible predecessor, an unset or unknown status, the issue is missing from the Project, or an unreadable `Wartet bis` line. Retry the read; never read it as "no blockers". |
 
 **Claims.** `check ISSUE --session ID` also reads the issue comments of the authenticated login
-(other authors are ignored). A claim carries the line `Agent: claude|codex, Session: ID`; a comment
+(other authors are ignored). A claim carries `Agent: claude|codex, Session: ID` (anywhere in a line, not quoted in code); `Agent: codex`
+alone is a claim of an unknown session. A comment
 with the line `Handover: ID` (from the earlier session or the human handing over, under the same login) passes the claim to
 that session. The newest claim or handover decides, the later comment wins on equal times. If it names
-another session than `--session`, `check` reports BLOCKED with agent, session, time and comment link.
-Without `--session`, or when the newest claim is an old one that lacks the field (no known session), `check` only shows a note. Unreadable
+another session than `--session` (or no session), `check` reports BLOCKED with agent, session, time and comment link.
+Without `--session`, or when the newest claim is an old one that lacks the field (no known session), `check` only shows a note.
+Whatever the claims say, `check` also reports BLOCKED while an open PR closes the issue (a Draft too) or a branch `<agent>/<issue number>-…`
+exists, unless the newest claim is of `--session` (the own session resumes its own PR and branch); without `--session` nothing proves it. Both come
+with the one issue query. Two sessions that check within seconds, before either has a claim or a branch, are not caught. Unreadable
 comments are UNKNOWN. Assignment stays no lock; this check only reports, and `status` and `handoff` do not read claims.
 
 **Claim-Alter und Sub-Issues.** Nur Information, kein neues Verdict und keine Erlaubnis zur Übernahme (die braucht
