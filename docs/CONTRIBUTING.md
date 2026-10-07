@@ -242,12 +242,12 @@ backlink never closes an issue.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
    (`board.mjs ready PR SHA`), set Automated review and wait again. Merge main only for conflicts or a real need.
-   After two correction pushes, collect new findings that neither block (P1,
+   After two correction pushes, collect new findings that neither block (P0/P1,
    security, data loss) nor regress against main in one follow-up issue instead of
    another push; every push restarts CI and reviews. `board.mjs reviews` and `wait` print
    `correction pushes after ready: N` (distinct heads pushed after the PR's first Ready,
    not the head that set it) and from `N >= 2` `cap reached`; nothing is blocked, and
-   blocking findings (P0/P1, security, red required CI) are still corrected.
+   findings that block or regress (as defined above) and a red required CI are still corrected.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
    are unchanged. Then run a retro once per PR: apply the retro skill
