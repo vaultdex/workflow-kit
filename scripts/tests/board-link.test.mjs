@@ -69,3 +69,7 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
 
   assert.equal(run('link', '1', 'seven').status, 2, 'Only a PR number is accepted');
 });
+
+test('link refuses an unknown flag before any write', t => {
+  fixture(t).refusesUnknownFlag('link', '1', '7');
+});
