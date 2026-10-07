@@ -202,3 +202,7 @@ test('merge deletes the head branch only when nothing else needs it, and the mer
   assert.equal(run('merge', '7').status, 1);
   assert.deepEqual(calls(), []);
 });
+
+test('merge refuses an unknown flag before any write', t => {
+  fixture(t).refusesUnknownFlag('merge', '7');
+});

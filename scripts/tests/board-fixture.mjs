@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import nodeTest from 'node:test';
@@ -30,7 +30,7 @@ export function fixture(t) {
   // By default the driver has posted the handoff comment long after any push; tests about it replace this file.
   writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment()]));
   const env = {};
-  return {
+  const board = {
     checkout, env,
     // A call that hangs (a `wait` that never ends) would block the whole file silently: it is cut off and named with its test.
     run: (...args) => {
@@ -47,7 +47,15 @@ export function fixture(t) {
       rmSync(file, { force: true });
       return sent;
     },
+    // An unknown flag ends in the usage line before gh is called: every gh call leaves a file in the checkout, so none may appear.
+    refusesUnknownFlag: (...args) => {
+      const before = readdirSync(checkout).sort();
+      const result = board.run(...args, '--oops');
+      assert.equal(result.status, 2, `${args[0]} --oops: ${result.stdout}${result.stderr}`);
+      assert.deepEqual(readdirSync(checkout).sort(), before, `${args[0]} --oops reached gh`);
+    },
   };
+  return board;
 }
 
 export const issue = (status = 'Ready', nodes = [], totalCount = nodes.length) => ({

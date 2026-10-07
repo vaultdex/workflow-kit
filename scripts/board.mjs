@@ -1856,6 +1856,20 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | check ISSUE [--sessio
   + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
+// --help is the one flag that never writes: usage on stdout, success.
+if (process.argv.slice(2).includes('--help')) {
+  console.log(usage);
+  process.exit(0);
+}
+// A writing command takes only its own flags; any other `--word` is a mistake that must not reach a write.
+const writeFlags = { status: [], priority: [], field: [], block: [], sub: [], link: [], body: [], 'body-replace': ['--from', '--to'],
+  new: ['--title', '--body-file', '--milestone', '--label', '--priority', '--field', '--start', '--agent', '--session', '--from'],
+  ready: ['--local', '--attempts', '--interval'], handoff: ['--stall', '--grace', '--interval'],
+  merge: ['--stall', '--grace', '--interval', '--max-minutes'] };
+if (Object.hasOwn(writeFlags, command) && process.argv.slice(3).some(arg => arg.startsWith('--') && !writeFlags[command].includes(arg))) {
+  console.error(usage);
+  process.exit(2);
+}
 if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFinite(projectGrace) && projectGrace >= 0)) {
   console.error('reviewerGraceMinutes in .github/workflow-project.json must be a number of minutes, 0 or more (0 turns the grace off); omit the field for the default');
   process.exit(2);

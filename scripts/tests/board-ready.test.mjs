@@ -117,3 +117,7 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
   assert.equal(missing.status, 2);
   assert.match(missing.stderr, /full 40-character commit id.*or --local/, 'A missing SHA names the way out, not just the usage line');
 });
+
+test('ready refuses an unknown flag before any write', t => {
+  fixture(t).refusesUnknownFlag('ready', '7', 'a'.repeat(40));
+});

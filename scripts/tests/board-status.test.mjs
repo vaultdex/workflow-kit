@@ -126,9 +126,9 @@ test('Automated review requires the declared open PR and every issue backlink be
   writeBacklink(1, []);
   assert.match(reject('status', '1', 'Automated review').stdout, /needs the PR number: status ISSUE "Automated review" PR/);
   reject('field', '1', 'Status', 'Automated review');
-  reject('status', '1', 'Automated review', '--help');
+  reject('status', '1', 'Automated review', '--oops');
   reject('status', '1', 'Automated review', '0');
-  reject('status', '1', 'Automated review', '7', '--help');
+  reject('status', '1', 'Automated review', '7', '--oops');
   reject('status', '1', 'Automated review', '7');
   for (const body of [
     'PR #7',
@@ -189,4 +189,15 @@ test('Automated review requires the declared open PR and every issue backlink be
   assert.equal(JSON.parse(readFileSync(join(checkout, 'backlink-comments-2.json'))).length, 1, 'Repeated verification leaves the existing comment intact');
   writePR({ baseRefName: 'main', body: 'Closes #1' });
   assert.equal(run('status', '1', 'Automated review', '7').status, 0, 'Default-branch delivery works too');
+});
+
+test('status and priority refuse an unknown flag, and --help only prints the usage', t => {
+  const { checkout, run, refusesUnknownFlag, writeIssue } = fixture(t);
+  writeIssue(issue('Ready'));
+  refusesUnknownFlag('status', '1', 'In progress');
+  refusesUnknownFlag('priority', '1', 'High');
+  const help = run('status', '1', 'In progress', '--help');
+  assert.equal(help.status, 0, help.stderr);
+  assert.ok(help.stdout, '--help prints the usage');
+  assert.equal(existsSync(join(checkout, 'queries')), false, '--help reached gh');
 });
