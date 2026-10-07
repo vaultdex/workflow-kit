@@ -134,3 +134,21 @@ test('a branch may change the pin and the generated data, nothing that decides w
   assert.equal(foreign.status, 0, foreign.stderr);
   assert.equal(foreign.skipped, true);
 });
+
+// The job holds contents: write, so upstream code must not move with a tag.
+const unpinnedUses = text => [...text.matchAll(/^\s*(?:-[ \t]+)?uses:[ \t]+(\S+)(.*)$/gm)]
+  .filter(([, ref, rest]) => !/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/.test(ref) || !/^[ \t]+# v\d\S*\s*$/.test(rest))
+  .map(([, ref]) => ref);
+
+test('the write-capable workflow runs only commit-pinned actions, and Renovate keeps the pins without automerge', () => {
+  assert.match(yaml, /uses: actions\/checkout@[0-9a-f]{40}/, 'pinned uses expected');
+  assert.deepEqual(unpinnedUses(yaml), []);
+  assert.deepEqual(unpinnedUses('      - uses: actions/checkout@v7.0.1\n'), ['actions/checkout@v7.0.1']);
+  assert.deepEqual(unpinnedUses(`      - uses: actions/checkout@${'a'.repeat(40)}\n`), ['actions/checkout@' + 'a'.repeat(40)]);
+  const rules = JSON.parse(readFileSync(new URL('../../renovate.json', import.meta.url), 'utf8')).packageRules;
+  const index = rules.findIndex(rule => rule.pinDigests);
+  assert.deepEqual(rules[index]?.matchFileNames, ['.github/workflows/renovate-regenerate.yml']);
+  assert.equal(rules[index].automerge, false);
+  // Later rules win in Renovate; none may switch automerge back on.
+  assert.ok(rules.slice(index + 1).every(later => later.automerge !== true));
+});
