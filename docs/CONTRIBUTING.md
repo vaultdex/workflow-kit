@@ -399,7 +399,8 @@ backlink never closes an issue.
    findings that block or regress (as defined above) and a red required CI are still corrected.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
-   are unchanged. Then run a retro once per PR: call the `retro` skill with the Skill
+   are unchanged; a base merge that changes no file in the proof's scope keeps it valid.
+   Then run a retro once per PR: call the `retro` skill with the Skill
    tool (the kit's copy is invocable; if the tool still refuses, your checkout is
    older than the kit pin that fixed it, so update it, and don't substitute a short
    review). Its sources are your own session: the commands you ran, failed attempts
