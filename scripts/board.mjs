@@ -1745,7 +1745,7 @@ function handoffPr(issueId, viewer, expectedHead, prior) {
     const reasons = [];
     const comment = findHandoffComment(comments, viewer, pr.headRefOid);
     if (!comment) reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading and a "Head: ${pr.headRefOid.slice(0, 7)}" line (README: Handoff comment)`);
-    else if (!expectedHead) {
+    else if (!expectedHead) { // noted once, on the first pass
       // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
       const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
         { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));

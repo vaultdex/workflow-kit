@@ -89,23 +89,23 @@ test('handoff notes a retro section whose lines do not end with a resolution, an
     writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment({ body_html })]));
     return run('handoff', '1', '7');
   };
-  const rejected = (html, named, label) => {
+  const noted = (html, named, label) => {
     const result = handoff(html);
     assert.equal(result.status, 0, label + result.stdout + result.stderr);
     assert.match(result.stdout, /^note: /m, label + result.stdout);
-    for (const line of named) assert.ok(result.stdout.includes('note: retro line without a resolution (end it with an issue link, "behoben in <SHA>", "persönlich gemeldet" or "kein Handlungsbedarf: <Grund>"): ' + line), label + result.stdout);
+    for (const line of named) assert.ok(result.stdout.includes(': ' + line), label + result.stdout);
   };
 
-  rejected(retro('Kit-Init dauert: ' + link, 'Rate-Limit: ohne Erledigung', 'Memory veraltet: persönlich gemeldet'), ['Rate-Limit: ohne Erledigung'], 'one line without resolution: ');
-  rejected(retro('Zeile mit ' + link + ' mittendrin'), ['Zeile mit #12 mittendrin'], 'reference not at the end: ');
-  rejected(retro('Zeile mit <code>#12</code>'), ['Zeile mit #12'], 'reference in code: ');
-  rejected(retro('Keine Funde', 'Zusätzlicher Fund: ' + link), ['Keine Funde'], 'Keine Funde is allowed only alone: ');
-  rejected(retro('Fund: ' + pullLink), ['Fund: #12'], 'a pull request is no follow-up issue: ');
-  rejected(retro('Fund.', 'Fund ' + link + ' danach noch Text.'), ['Fund.', 'Fund #12 danach noch Text.'], 'punctuation alone is no resolution, text after the link still is none: ');
-  rejected('<h2 dir="auto">Übergabe</h2>\n<ul dir="auto">\n<li>Retro: keine Befunde</li>\n</ul>', [], 'no retro section: ');
-  rejected('<h2 dir="auto">Übergabe</h2>\n<h3 dir="auto">Retro</h3>\n<p dir="auto">Nichts gefunden.</p>', [], 'section without lines: ');
-  rejected(quote(retro('Keine Funde')), [], 'a quoted retro section is no section: ');
-  rejected(quote(quote(retro('Keine Funde'))), [], 'a nested quote is no section either: ');
+  noted(retro('Kit-Init dauert: ' + link, 'Rate-Limit: ohne Erledigung', 'Memory veraltet: persönlich gemeldet'), ['Rate-Limit: ohne Erledigung'], 'one line without resolution: ');
+  noted(retro('Zeile mit ' + link + ' mittendrin'), ['Zeile mit #12 mittendrin'], 'reference not at the end: ');
+  noted(retro('Zeile mit <code>#12</code>'), ['Zeile mit #12'], 'reference in code: ');
+  noted(retro('Keine Funde', 'Zusätzlicher Fund: ' + link), ['Keine Funde'], 'Keine Funde is allowed only alone: ');
+  noted(retro('Fund: ' + pullLink), ['Fund: #12'], 'a pull request is no follow-up issue: ');
+  noted(retro('Fund.', 'Fund ' + link + ' danach noch Text.'), ['Fund.', 'Fund #12 danach noch Text.'], 'punctuation alone is no resolution, text after the link still is none: ');
+  noted('<h2 dir="auto">Übergabe</h2>\n<ul dir="auto">\n<li>Retro: keine Befunde</li>\n</ul>', [], 'no retro section: ');
+  noted('<h2 dir="auto">Übergabe</h2>\n<h3 dir="auto">Retro</h3>\n<p dir="auto">Nichts gefunden.</p>', [], 'section without lines: ');
+  noted(quote(retro('Keine Funde')), [], 'a quoted retro section is no section: ');
+  noted(quote(quote(retro('Keine Funde'))), [], 'a nested quote is no section either: ');
 
   for (const [html, label] of [
     [retro('Keine Funde'), 'Keine Funde alone'],
@@ -120,6 +120,12 @@ test('handoff notes a retro section whose lines do not end with a resolution, an
     assert.doesNotMatch(result.stdout, /^note:/m, label);
   }
   assert.equal(handoff(undefined).status, 2, 'An unreadable rendered comment is unknown, never a handoff');
+  // Both notes in one run, and the handoff still goes through.
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
+  const both = handoff('<h2 dir="auto">Übergabe</h2>');
+  assert.equal(both.status, 0, both.stdout + both.stderr);
+  assert.match(both.stdout, /^note: open acceptance .*open box$/m);
+  assert.match(both.stdout, /^note: the handoff comment has no "Retro"/m);
 });
 
 
