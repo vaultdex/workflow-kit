@@ -1,8 +1,11 @@
 name: Renovate regenerate
 # Renovate only moves a submodule pin. Port the Ponytail adaptations, regenerate the committed
 # skills, push the result to the Renovate branch and start the repository CI for it.
+# pull_request_target, not pull_request: GitHub loads this definition from main, so a branch cannot rewrite
+# the workflow that holds the write token (with pull_request the definition comes from the PR's merge commit).
+# That is safe only because the job never runs code of the branch (see below).
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     paths:
       - .gitmodules
@@ -30,8 +33,9 @@ jobs:
       BRANCH: ${{ github.event.pull_request.head.ref }}
     steps:
       # The commit Renovate's authenticated event named, not the branch name: a push by someone else in
-      # between makes the final push fail instead of running that commit. No stored credentials either;
-      # only the last two steps get the token.
+      # between makes the final push fail instead of running that commit. The checkout action receives the
+      # token as its default input to fetch and, with persist-credentials: false, drops it again; no `run`
+      # step (so no script) sees it except the last two.
       - uses: actions/checkout@v7.0.1
         env:
           GIT_CONFIG_COUNT: '1'
@@ -54,7 +58,7 @@ jobs:
           fi
           # Whoever wrote the commits: nothing the job runs or dispatches may differ from main. That is every
           # workflow, script and the Renovate config; the three files the updaters generate are data.
-          forbidden=$(git diff --name-only origin/main...HEAD | grep -E '^(\.github/workflows/|renovate\.json|\.node-version|scripts/)' \
+          forbidden=$(git diff --name-only --no-renames origin/main...HEAD | grep -E '^(\.github/workflows/|renovate\.json|\.node-version|scripts/)' \
             | grep -v -x -e 'scripts/ponytail/adaptations.patch' -e 'scripts/impeccable/VERSION' -e 'scripts/impeccable/SHA256SUMS' || true)
           if [ -n "$forbidden" ]; then
             echo "::error::The branch changes workflows, scripts or Renovate config; not running with write access: $forbidden"
@@ -99,8 +103,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Generated outputs and the three generated files under scripts/ only; main's scripts stay out.
-          git add --all -- . ':(exclude)scripts' ':(exclude).node-version'
+          # Generated outputs and the three generated files under scripts/ only; main's scripts and every workflow stay out.
+          git add --all -- . ':(exclude)scripts' ':(exclude).node-version' ':(exclude).github/workflows'
           git add -- scripts/ponytail/adaptations.patch scripts/impeccable/VERSION scripts/impeccable/SHA256SUMS
           if git diff --cached --quiet HEAD; then
             echo "Committed outputs are already current."
@@ -128,20 +132,35 @@ jobs:
           if [ "$runs" = 0 ]; then
             # workflow_dispatch takes a branch, not a commit, and runs that branch's workflow definition. Start it
             # only while the branch still is the commit validated above, and stop any run it started for another one.
-            [ "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" = "$head" ] \
+            [ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$head" ] \
               || { echo "::error::The branch moved after the push; not dispatching a workflow nobody validated."; exit 1; }
+            # Runs created from here on are ours (30 s of margin for clock differences).
+            started=$(date -u -d '30 seconds ago' +%Y-%m-%dT%H:%M:%SZ)
             for attempt in 1 2 3; do
               gh workflow run repository.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" && break
               [ "$attempt" = 3 ] && exit 1
               sleep 10
             done
-            sleep 15
-            for id in $(HEAD_NOW="$head" gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --branch "$BRANCH" --event workflow_dispatch --limit 5 \
-              --json databaseId,headSha,status --jq '.[] | select(.status != "completed" and .headSha != env.HEAD_NOW) | .databaseId'); do
-              gh run cancel "$id" --repo "$GITHUB_REPOSITORY"
-              echo "::error::A dispatched run belonged to another commit and was cancelled."
-              exit 1
+            # The dispatch must show up as a run on exactly this commit; a run for any other one, finished or not,
+            # is an error (running ones are cancelled). A run that already ended is still listed, so a quick
+            # failure on the wrong commit cannot slip through.
+            dispatched=''
+            for _ in 1 2 3 4 5 6; do
+              sleep 10
+              dispatched=$(STARTED="$started" gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --branch "$BRANCH" --event workflow_dispatch --limit 10 \
+                --json databaseId,headSha,createdAt --jq '.[] | select(.createdAt >= env.STARTED) | "\(.databaseId) \(.headSha)"') \
+                || dispatched=''   # a transient API error costs one poll, not the step
+              [ -n "$dispatched" ] && break
             done
+            [ -n "$dispatched" ] || { echo "::error::The dispatched run did not appear; start repository.yml for $BRANCH by hand."; exit 1; }
+            wrong=0
+            while read -r id sha; do
+              if [ "$sha" != "$head" ]; then
+                gh run cancel "$id" --repo "$GITHUB_REPOSITORY" || true
+                wrong=1
+              fi
+            done <<< "$dispatched"
+            [ "$wrong" = 0 ] || { echo "::error::A dispatched run belonged to another commit."; exit 1; }
           else
             echo "The repository CI already runs for $head."
           fi
