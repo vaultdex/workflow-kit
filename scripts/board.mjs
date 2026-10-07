@@ -1535,18 +1535,18 @@ function handoffIssueReasons(issue, viewer, reviewedHead, currentPrNumber) {
       // An aligned branch chain is no stack: GitHub must list both PRs in one open stack (the read-back of the docs, step 2).
       const stacks = rest(`repos/${project.repository}/stacks?pull_request=${Number(value)}`);
       // The base PR may sit anywhere below this PR; the head and target checks below concern the layer directly under it.
-      let lower;
+      let lower; // {number, ref, sha} of the layer directly under this PR
       if (Array.isArray(stacks) && stacks.length === 1 && stacks[0].open === true && Array.isArray(stacks[0].pull_requests)) {
         const members = stacks[0].pull_requests;
         const baseIndex = members.findIndex(member => member.number === stackedOn.number);
         const ownIndex = members.findIndex(member => member.number === Number(value));
         const under = members[ownIndex - 1];
-        if (baseIndex >= 0 && ownIndex > baseIndex && typeof under.head?.ref === 'string' && typeof under.head.sha === 'string') lower = under;
+        if (baseIndex >= 0 && ownIndex > baseIndex && typeof under.head?.ref === 'string' && typeof under.head.sha === 'string') lower = { number: under.number, ref: under.head.ref, sha: under.head.sha };
       }
       if (!lower) {
         reasons.push(`PR #${value} is not above PR #${stackedOn.number} in one open native stack (GET repos/${project.repository}/stacks?pull_request=${value}); link it (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
       }
-      const { number: lowerNumber, ref: lowerRef, sha: lowerSha } = lower ? { number: lower.number, ref: lower.head.ref, sha: lower.head.sha } : { number: stackedOn.number, ref: stackedOn.headRefName, sha: stackedOn.headRefOid };
+      const { number: lowerNumber, ref: lowerRef, sha: lowerSha } = lower ?? { number: stackedOn.number, ref: stackedOn.headRefName, sha: stackedOn.headRefOid };
       // Proof of the upper head only counts when that head contains the lower PR's current head (a later push below leaves the branch name unchanged).
       if (!reasons.length && pr?.baseRefName === lowerRef) {
         const { status } = rest(`repos/${project.repository}/compare/${lowerSha}...${pr.headRefOid}`);
