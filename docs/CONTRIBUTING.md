@@ -210,7 +210,10 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
 
 **Branch.** Create the branch from the issue so GitHub links it:
 `gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base main`.
-Reuse your existing branch and PR for the same issue. If creation fails, check the
+GitHub cuts it from the current remote base, which a local clone often does not have yet:
+then run `git fetch origin` and `git switch --track origin/<agent>/ISSUE-topic`, never
+a branch cut from your local `main`. Reuse your existing branch and PR for the same
+issue. If creation fails, check the
 remote branches and issue links before retrying.
 
 **PR body.** From the first push, write `Closes #N` (cross-repo:
@@ -247,8 +250,9 @@ otherwise: every correction below restarts CI and reviews above.
 
 1. **Branch.** Create the issue-linked branch from the head of the base PR's branch (`stack
    base: … branch B` in the `check` output):
-   `gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base B`. On a base
-   PR into `release/X.Y.Z` the stack's trunk is that release branch; that is allowed.
+   `gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base B`, then
+   `git fetch origin` and `git switch --track origin/<agent>/ISSUE-topic` as in [Delivery](#delivery).
+   On a base PR into `release/X.Y.Z` the stack's trunk is that release branch; that is allowed.
 2. **PR and stack.** Create your PR as Draft with base `B` (`gh pr create --draft --base B`),
    then link both PRs: `gh stack link --base BASE_OF_BASE_PR BASE_PR YOUR_PR` (bottom first;
    `BASE_OF_BASE_PR` is the `base` shown after `stack base`: without the flag the stack's bottom
