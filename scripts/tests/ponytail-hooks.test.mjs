@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { run as exec } from './fixtures.mjs';
 
 const root = process.env.WORKFLOW_KIT_TARGET || fileURLToPath(new URL('../../', import.meta.url));
 const windows = process.platform === 'win32';
@@ -14,7 +15,7 @@ const git = (process.env.PATH || '').split(path.delimiter).filter(path.isAbsolut
 const hookTimeout = Number(process.env.WORKFLOW_KIT_HOOK_TIMEOUT_MS) || 30_000;
 const version = '4.10.3-1';
 
-test('installed hooks run every manifest command without executing checkout programs', t => {
+test('installed hooks run every manifest command without executing checkout programs', async t => {
   assert.ok(git, 'Git must be available on an absolute PATH');
   const temp = mkdtempSync(path.join(tmpdir(), 'vaultdex ponytail '));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
@@ -70,13 +71,15 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
   const input = JSON.stringify({ prompt: '/ponytail lite' });
   // Cursor on Windows pipes its payload through PowerShell's $input.
   const cursor = (shell, command) => shell.executable.endsWith('powershell.exe') ? `$input | & { $input | ${command}\n }` : command;
-  const execute = (shell, command, extra = {}) => spawnSync(shell.executable, [...shell.args, command],
-    { cwd: path.join(checkout, 'frontend'), env: { ...hostile, ...extra }, input, encoding: 'utf8', timeout: hookTimeout });
+  const execute = (shell, command, extra = {}) => exec(shell.executable, [...shell.args, command],
+    { cwd: path.join(checkout, 'frontend'), env: { ...hostile, ...extra }, input, timeout: hookTimeout });
   const manifests = ['.codex/hooks.json', '.claude/settings.json', '.github/hooks/ponytail.json', '.cursor/hooks.json'];
   const handlers = manifest => Object.entries(JSON.parse(readFileSync(path.join(root, manifest), 'utf8')).hooks)
     .flatMap(([event, groups]) => groups.flatMap(group => group.hooks || [group]).map(handler => ({ event, handler })))
     .filter(({ handler }) => /ponytail/.test(handler.command || handler.bash || ''));
   const missing = { HOME: path.join(temp, 'missing'), USERPROFILE: path.join(temp, 'missing') };
+  // The handlers only read the installed snapshot, so every launcher runs side by side.
+  const trials = [];
   for (const manifest of manifests) for (const { event, handler } of handlers(manifest)) {
     const start = event.toLowerCase() === 'sessionstart';
     for (const shell of shells) {
@@ -84,24 +87,27 @@ public class Shim { public static void Main() { System.IO.File.WriteAllText(Syst
       if (powershell && !handler.powershell && !['.codex/hooks.json', '.cursor/hooks.json'].includes(manifest)) continue;
       const native = powershell ? handler.commandWindows ?? handler.powershell ?? handler.command : handler.command ?? handler.bash;
       const command = manifest === '.cursor/hooks.json' ? cursor(shell, native) : native;
-      const result = execute(shell, command);
-      assert.equal(result.status, 0, `${manifest} ${event}: ${result.stderr}`);
-      if (manifest !== '.claude/settings.json' && result.stdout) assert.doesNotThrow(() => JSON.parse(result.stdout), `${manifest} ${event}: host JSON`);
-      // Without a snapshot only SessionStart speaks (the install hint). Cursor's prompt hook just errors.
-      if (manifest === '.cursor/hooks.json' && !start) continue;
-      const absent = execute(shell, command, missing);
-      assert.equal(absent.status, 0, `${manifest} ${event} without snapshot: ${absent.stderr}`);
-      assert.equal(Boolean(absent.stdout.trim()), start, `${manifest} ${event} without snapshot`);
+      trials.push((async () => {
+        const result = await execute(shell, command);
+        assert.equal(result.status, 0, `${manifest} ${event}: ${result.stderr}`);
+        if (manifest !== '.claude/settings.json' && result.stdout) assert.doesNotThrow(() => JSON.parse(result.stdout), `${manifest} ${event}: host JSON`);
+        // Without a snapshot only SessionStart speaks (the install hint). Cursor's prompt hook just errors.
+        if (manifest === '.cursor/hooks.json' && !start) return;
+        const absent = await execute(shell, command, missing);
+        assert.equal(absent.status, 0, `${manifest} ${event} without snapshot: ${absent.stderr}`);
+        assert.equal(Boolean(absent.stdout.trim()), start, `${manifest} ${event} without snapshot`);
+      })());
     }
-    assert.equal(existsSync(marker), false, `${manifest} ${event}: a checkout program ran`);
   }
+  await Promise.all(trials);
+  assert.equal(existsSync(marker), false, 'a checkout program ran');
 
   // A failing installed hook stays a failure through every launcher.
   const activate = path.join(env.HOME, '.ponytail/vaultdex', version, '.agents/hooks/ponytail-activate.js');
   const [{ handler: cursorStart }] = handlers('.cursor/hooks.json');
   writeFileSync(activate, 'process.exit(7);');
-  if (windows) assert.equal(execute(shells[0], handlers('.codex/hooks.json')[0].handler.commandWindows).status, 7, 'Codex preserves launcher failure');
-  for (const shell of shells) assert.equal(execute(shell, cursor(shell, cursorStart.command)).status, 7, shell.executable);
+  if (windows) assert.equal((await execute(shells[0], handlers('.codex/hooks.json')[0].handler.commandWindows)).status, 7, 'Codex preserves launcher failure');
+  for (const shell of shells) assert.equal((await execute(shell, cursor(shell, cursorStart.command))).status, 7, shell.executable);
 });
 
 test('adapted hooks preserve explicit host and checkout state and drain stdout on EOF or stuck stdin', async t => {

@@ -36,7 +36,9 @@ test('wait --head keeps waiting while the PR still shows the previous head, and 
   assert.equal(run('wait', '7', '--head', pushed).status, 0, 'The expected head is DONE');
   show(old, { state: 'CLOSED' });
   assert.equal(run('wait', '7', '--head', pushed).status, 1, 'A closed PR ends the wait whatever its head');
-  assert.equal(run('wait', '7', '--head', 'bbbbbbb').status, 2, 'A short id is refused');
+  const short = run('wait', '7', '--head', 'bbbbbbb');
+  assert.equal(short.status, 2, 'A short id is refused');
+  assert.match(short.stderr, /full 40-character commit id/, 'and the reason is named, not just the usage line');
   assert.equal(run('reviews', '7', '--head', pushed).status, 2, '--head belongs to wait');
 });
 
