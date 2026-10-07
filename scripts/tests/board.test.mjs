@@ -1035,6 +1035,15 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(blocked.status, 0, 'Blockers are for the handoff; the wait itself is over');
   assert.match(blocked.stdout, /^blocker: changes requested by coderabbitai$/m, 'A standing change request is named as a blocker');
   assert.match(look({ ...pr(), mergeStateStatus: 'DIRTY' }).stdout, /^blocker: merge conflicts$/m);
+  // Conflicts start no workflow: without any check, a non-draft PR would wait for "first CI check" forever.
+  const noCi = mergeStateStatus => look({ ...pr({ contexts: [] }), isDraft: false, mergeStateStatus });
+  const conflicted = noCi('DIRTY');
+  assert.equal(conflicted.status, 1, 'Merge conflicts end the wait at once, however little CI there is');
+  assert.match(conflicted.stdout, /^FAILED$/m);
+  assert.match(conflicted.stdout, /^blocker: merge conflicts$/m);
+  for (const state of ['UNKNOWN', 'BEHIND']) assert.equal(noCi(state).status, 3, `${state} keeps waiting`);
+  assert.equal(look({ ...pr({ contexts: [] }), mergeStateStatus: 'DIRTY' }).status, 3, 'A draft with conflicts keeps waiting');
+  assert.equal(reviews({ ...readied(5), mergeStateStatus: 'BEHIND' }), 0, 'BEHIND is no conflict');
   assert.equal(reviews({ ...pr(), latestOpinionatedReviews: { totalCount: 101, nodes: [] } }), 2, 'Cut-off review decisions are never read as no blocker');
   const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['sonarqubecloud'] }));
