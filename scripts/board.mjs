@@ -1224,6 +1224,8 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
     assert.equal(fresh?.headRefOid, result.pr.headRefOid, `PR head changed during ${action}`);
     state = fresh.mergeStateStatus;
   }
+  // The snapshot's own DIRTY is already a blocker line of reviews(); a DIRTY that GitHub computed during the re-reads is new.
+  if (state === 'DIRTY' && result.pr.mergeStateStatus !== 'DIRTY') reasons.push('merge conflicts: resolve them before ' + action);
   if (!mergeStates.includes(state)) {
     if (!reasons.length) {
       console.log('WAITING\nwaiting: PR mergeability is not determined');

@@ -206,3 +206,16 @@ test('handoff reads an undetermined merge state again before it gives up', t => 
   assert.match(result.stdout, /HANDOFF #1 PR #7/);
   assert.equal(run('handoff', '1', '7', '--interval', 'x').status, 2, 'A bad interval is a usage error');
 });
+
+
+test('handoff lists merge conflicts that GitHub reports only after an undetermined state', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([{ mergeStateStatus: 'UNKNOWN' }, { mergeStateStatus: 'DIRTY' }]));
+  const result = run('handoff', '1', '7', '--interval', '0');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /blocker: merge conflicts/);
+  assert.match(result.stdout, /open acceptance .*open box/);
+  assert.doesNotMatch(result.stdout, /WAITING|not determined/);
+});
