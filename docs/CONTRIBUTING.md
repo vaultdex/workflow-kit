@@ -354,13 +354,22 @@ backlink never closes an issue.
    findings that block or regress (as defined above) and a red required CI are still corrected.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
-   are unchanged. Then run a retro once per PR: apply the retro skill
-   (`.agents/skills/retro/SKILL.md`) to your own session. Fix findings within the
+   are unchanged. Then run a retro once per PR: call the `retro` skill with the Skill
+   tool (the kit's copy is invocable; if the tool still refuses, your checkout is
+   older than the kit pin that fixed it, so update it, and don't substitute a short
+   review). Its sources are your own session: the commands you ran, failed attempts
+   and retries, tool refusals and errors, waiting times and the files you had to
+   search for. "Present these candidates to the user" means the finding list in the
+   handoff comment. Fix findings within the
    issue's scope through step 4; record the rest as follow-up issues in the
    repository that owns the fix, with evidence from the session. Report findings
    about personal configuration (memory, shell profile, scheduled tasks) to the
-   human instead of editing it. List every finding and its disposition, or none,
-   in the [handoff comment](../README.md#handoff-comment).
+   human instead of editing it. List every finding in the `Retro` section of the
+   [handoff comment](../README.md#handoff-comment), one line each, ending with its
+   resolution: an issue link, `behoben in <SHA>`, `persönlich gemeldet` or
+   `kein Handlungsbedarf: <Grund>`; `Keine Funde` as the only line when there are none.
+   A fixable finding that no issue covers yet becomes an issue first; a comment alone
+   is no record. `board.mjs handoff` refuses a missing section or a line without a resolution.
 6. Run `board.mjs handoff ISSUE PR` for the fully delivered issue only when CI
    passes, every review with a trace on the current head has finished or stalled,
    each finding is fixed or linked to a follow-up, the

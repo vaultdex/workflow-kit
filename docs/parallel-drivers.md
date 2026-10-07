@@ -74,5 +74,9 @@ Modellwahl stehen hier nicht.
    `tasks/*.output` nicht pollen, die Datei bleibt leer.
 5. **Shell.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus, mit
    literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
-6. **Abschlussbericht** mit höchstens 12 Zeilen: PR, zurückgelesener Status,
+6. **Retro vor der Übergabe.** Den Skill `retro` mit dem Skill-Werkzeug aufrufen
+   (die Kit-Kopie ist aufrufbar, [Abweichung](matt-pocock.md)); Quelle ist die eigene
+   Session ([Review loop](CONTRIBUTING.md#review-loop) Schritt 5). Eine
+   Kurzdurchsicht aus dem Kopf ersetzt ihn nicht.
+7. **Abschlussbericht** mit höchstens 12 Zeilen: PR, zurückgelesener Status,
    Folge-Issues, Überschneidungen, Reibung.
