@@ -88,7 +88,9 @@ project hooks in each agent, then start a new session:
 Settings → Hooks in Cursor, `.github/hooks` for Copilot. Missing snapshots produce
 a SessionStart install hint. Session and subagent starts also run
 `git submodule update --init .vendor/workflow-kit` when the kit checkout is missing (fresh
-worktree); an initialized kit stays untouched and a failure prints the command. Files and manual runs don't prove agent loading or
+worktree) or not at the commit the gitlink pins (a base merge moves the pin, not the checkout); a kit at its pin stays untouched,
+a kit with local changes or unpublished commits is not moved, and both that case and a failure print a hint. A SubagentStart in
+a worktree whose kit you deliberately moved ahead of the gitlink resets it, so stage the new pin (`git add .vendor/workflow-kit`) before starting subagents. Files and manual runs don't prove agent loading or
 trust; new definitions need personal review and trust. See
 [Ponytail](docs/ponytail.md) and [Impeccable](docs/impeccable.md) for hook behavior.
 
@@ -191,6 +193,10 @@ the installer, so the kit's current one is copied.
   a force-push is one push, a PR that never was ready prints no line). From `N >= 2` it adds
   `cap reached: collect non-blocking findings in one follow-up issue` ([review loop](docs/CONTRIBUTING.md#review-loop)).
   It is information only: no exit code changes (an unreadable push log prints a note instead), and blocking findings are still corrected. `wait` prints it with the final result.
+  It also reports a moved base: `base moved: N commits since merge-base (BASE)` when the PR's base branch has commits the head lacks
+  (GitHub compare `behind_by`), then `changed on both sides:` with the files the PR and those commits both change (first 10),
+  or `no file is changed on both sides`. Information only, like the correction count: no exit code changes, an unreadable
+  comparison prints a note, and nothing is merged or rebased for you. `wait` prints it with the final result.
 - `handoff ISSUE PR`: verifies a fully delivered issue's native PR connection,
   assigned/startable task, open non-draft PR, finished checks/reviews and resolved
   threads/conflicts before writing and reading back Human review (exit 0 verified,

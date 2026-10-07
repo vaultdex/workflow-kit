@@ -145,6 +145,22 @@ recommendation or elapsed time is not approval. Remove the section and the label
 only when every point is resolved. Routine technical decisions are yours.
 [Example](task-writing-examples.md#menschliche-mitwirkung).
 
+**Asking a human.** This applies to every question a human must decide, in a
+grilling or anywhere else, not to routine technical choices:
+
+1. **Overview first.** Start with a numbered overview in plain language. For each
+   question give the context, the options with their consequences, and your
+   recommendation.
+2. **Then the question tool.** Ask the same questions through the harness's question
+   tool (Claude Code: `AskUserQuestion`), in batches of at most 4. Questions only as
+   text in a status report are not enough: they get lost. A harness without such a
+   tool gets the numbered list at the end of your answer, and you stop there.
+3. **Never skip.** Don't answer the question yourself, skip it, postpone it
+   silently or work around it. Work that depends on the answer waits; everything
+   else continues. If the human closes the dialog without answering, the question
+   stays open. This extends "Silence, a recommendation or elapsed time is not
+   approval" above.
+
 ### Einfache Sprache
 
 Issues, Specs, PRs und Kommentare muss ein Mensch ohne Code-Kenntnis verstehen. Das gilt
@@ -276,7 +292,10 @@ backlink never closes an issue.
    while its findings, open threads and change requests count like any other.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
-   (`board.mjs ready PR SHA`), set Automated review and wait again. Merge main only for conflicts or a real need.
+   (`board.mjs ready PR SHA`), set Automated review and wait again. When `reviews` or `wait` print
+   `base moved: N commits since merge-base`, merge the base once before the next correction push: the files listed
+   as changed on both sides are where a parallel merge conflicts or breaks a test, and it saves the red CI run that would
+   show it. Otherwise merge the base only for conflicts or a real need.
    After two correction pushes, collect new findings that neither block (P0/P1,
    security, data loss) nor regress against main in one follow-up issue instead of
    another push; every push restarts CI and reviews. `board.mjs reviews` and `wait` print
