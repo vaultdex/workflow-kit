@@ -6,7 +6,7 @@ import { fixture, issue, predecessor, test } from './board-fixture.mjs';
 
 test('next lists stackable Ready issues with their base PR apart from blocked ones', t => {
   const { checkout, run } = fixture(t);
-  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base' };
+  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base', headRefOid: 'abcdef1234' };
   const ready = (number, nodes) => ({ ...issue('Ready', nodes), number, issueFieldValues: { nodes: [] } });
   const open = prs => predecessor('OPEN', null, prs, { repository: { nameWithOwner: 'test/example' } });
   writeFileSync(join(checkout, 'search.json'), JSON.stringify([ready(1, [open([pr])]), ready(2, [open([])]), ready(3, [predecessor('CLOSED', 'COMPLETED')])]));
@@ -45,7 +45,7 @@ test('next lists blocked and unreadable Ready issues apart from startable ones',
 
 test('next reads the PRs of predecessors in one lookup, for the candidates for a stack only', t => {
   const { checkout, run, queries } = fixture(t);
-  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base' };
+  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base', headRefOid: 'abcdef1234' };
   // As GitHub answers the search: the predecessor has an id and no PRs; they come from a lookup by id (deliveries.json).
   const bare = (id, state = 'OPEN', stateReason = null) => ({ id, number: 2, state, stateReason, repository: { nameWithOwner: 'test/example' } });
   const ready = (number, nodes) => ({ ...issue('Ready', nodes), number, issueFieldValues: { nodes: [] } });

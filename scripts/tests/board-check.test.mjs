@@ -64,12 +64,19 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   assert.equal(readFileSync(join(checkout, 'mutations'), 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 1);
 
   // The upper layer may reach Human review before the base is merged, but only as a layer on that base.
-  const layer = assigned({ projectItems: issue('Automated review').projectItems });
+  const layer = assigned({ projectItems: issue('Automated review').projectItems,
+    closedByPullRequestsReferences: { totalCount: 1, nodes: [
+      { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/example' } },
+    ] } });
   writeIssue(layer);
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   writeFileSync(join(checkout, 'stored'), 'Automated review');
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
-  writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{ open: true, pull_requests: [{ number: 5, state: 'open' }, { number: 7, state: 'open' }] }]));
+  writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{ number: 42, open: true, base: { ref: 'release/0.1.1' }, pull_requests: [
+    { number: 5, state: 'open', draft: false, head: { ref: 'claude/5-base', sha: 'ba5e0001' } },
+    { number: 6, state: 'open', draft: false, head: { ref: 'claude/6-base', sha: 'beef0001' } },
+    { number: 7, state: 'open', draft: false, head: { ref: 'claude/7-upper', sha: 'abcdef1234' } },
+  ] }]));
   // Every rejection changes one thing about the accepted case below and must leave the status untouched.
   const stored = () => readFileSync(join(checkout, 'stored'), 'utf8');
   const rejected = (label, status = 1) => {
@@ -77,7 +84,10 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
     assert.equal(result.status, status, `${label}: ${result.stdout}`);
     assert.equal(stored(), 'Automated review', `${label} must not write Human review`);
   };
-  const upper = { baseRefName: 'claude/5-base', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
+  const middle = { number: 6, state: 'OPEN', isDraft: false, isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' },
+    baseRefName: 'claude/5-base', headRefName: 'claude/6-base', headRefOid: 'beef0001' };
+  const upper = { baseRefName: 'claude/6-base', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
+  writeFileSync(join(checkout, 'stack-prs.json'), JSON.stringify({ 6: middle }));
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
   rejected('a PR on the release branch while its base is open');
   for (const fork of [{ isCrossRepository: true, headRepository: { nameWithOwner: 'someone/example' } }, { headRepository: { nameWithOwner: 'someone/example' } }, { isCrossRepository: undefined }]) {
@@ -90,11 +100,14 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
     rejected(`a head that is ${status} the base head`);
   }
   rmSync(join(checkout, 'stack-compare.json'));
-  for (const stacks of [[], [{ open: true, pull_requests: [{ number: 7 }] }], [{ open: false, pull_requests: [{ number: 5 }, { number: 7 }] }]]) {
+  const stack = (numbers, open = true) => [{ number: 42, open, base: { ref: 'release/0.1.1' }, pull_requests: numbers.map(number => ({
+    number, state: 'open', draft: false, head: { ref: `claude/${number}-base`, sha: number === 5 ? 'ba5e0001' : number === 6 ? 'beef0001' : `sha-${number}` },
+  })) }];
+  for (const [stacks, status] of [[[], 1], [stack([5, 6]), 2], [stack([5, 6, 7], false), 1]]) {
     writeFileSync(join(checkout, 'stacks.json'), JSON.stringify(stacks));
-    rejected('no linked open stack');
+    rejected('no linked open stack', status);
   }
-  writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{ open: true, pull_requests: [{ number: 5, state: 'open' }, { number: 7, state: 'open' }] }]));
+  writeFileSync(join(checkout, 'stacks.json'), JSON.stringify(stack([5, 6, 7])));
   // The upper head moves after the proof was gathered (4th PR read, inside the guarded write): the proof belongs to the old head.
   writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([{}, {}, {}, { headRefOid: 'abcdef9999' }]));
   rejected('a head that moved during handoff');
@@ -105,7 +118,10 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   assert.equal(stored(), 'Human review');
 
   // After the base merged into the release branch GitHub has retargeted the layer: a plain PR there, nothing stack-specific left to prove.
-  writeIssue(assigned({ projectItems: issue('Automated review').projectItems, blockedBy: { totalCount: 1, nodes: [open(2, [pr(5, { state: 'MERGED' })])] } }));
+  writeIssue(assigned({ projectItems: issue('Automated review').projectItems, blockedBy: { totalCount: 1, nodes: [open(2, [pr(5, { state: 'MERGED' })])] },
+    closedByPullRequestsReferences: { totalCount: 1, nodes: [
+      { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/example' } },
+    ] } }));
   writeFileSync(join(checkout, 'stored'), 'Automated review');
   writeFileSync(join(checkout, 'stacks.json'), '[]');
   const plain = { baseRefName: 'release/0.1.1', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
@@ -116,6 +132,103 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(plain)));
   assert.equal(run('handoff', '1', '7').status, 0);
   assert.equal(stored(), 'Human review');
+});
+
+test('a native stack selects its tip for new work and the immediate lower layer when resuming an appended PR', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const makePr = (number, baseRefName, changes = {}) => ({ number, state: 'OPEN', isDraft: false, isCrossRepository: false,
+    repository: { nameWithOwner: 'test/example' }, headRepository: { nameWithOwner: 'test/example' },
+    baseRefName, headRefName: `branch-${number}`, headRefOid: `sha-${number}`, ...changes });
+  const bottom = makePr(1318, 'release/0.1.1');
+  const middle = makePr(1345, bottom.headRefName);
+  const top = makePr(1350, middle.headRefName);
+  const ownDraft = makePr(1351, top.headRefName, { isDraft: true });
+  const member = (pr, changes = {}) => ({ number: pr.number, state: 'open', draft: pr.isDraft, head: { ref: pr.headRefName, sha: pr.headRefOid }, ...changes });
+  const basePredecessor = predecessor('OPEN', null, [bottom], { number: 775, repository: { nameWithOwner: 'test/example' } });
+  const setStack = (prs, changes = {}) => writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{
+    number: 88, open: true, base: { ref: 'release/0.1.1' }, pull_requests: prs.map(pr => member(pr)), ...changes,
+  }]));
+  const check = () => run('check', '1');
+  const checkWithSession = () => run('check', '1', '--session', 'resume1');
+  const issueWith = (...blockers) => ({ ...issue('Ready', blockers), closedByPullRequestsReferences: {
+    totalCount: 3, nodes: [
+      { number: 1351, state: 'OPEN', repository: { nameWithOwner: 'test/example' }, headRefName: ownDraft.headRefName },
+      { number: 1300, state: 'CLOSED', repository: { nameWithOwner: 'test/example' } },
+      { number: 1200, state: 'MERGED', repository: { nameWithOwner: 'test/example' } },
+    ],
+  } });
+
+  setStack([bottom, middle]);
+  writeFileSync(join(checkout, 'stack-prs.json'), JSON.stringify({ [middle.number]: middle }));
+  writeIssue(issue('Ready', [basePredecessor]));
+  const atTip = check();
+  assert.equal(atTip.status, 4, atTip.stdout + atTip.stderr);
+  assert.match(atTip.stdout, /^stack base: PR #1345 in stack #88 \(branch branch-1345, base branch-1318\)/m);
+
+  const second = predecessor('OPEN', null, [middle], { number: 776, repository: { nameWithOwner: 'test/example' } });
+  writeIssue(issue('Ready', [basePredecessor, second]));
+  assert.equal(check().status, 4, 'Multiple blocker PRs in one native linear stack resolve to its top');
+  setStack([bottom, top]);
+  const split = check();
+  assert.equal(split.status, 1, split.stdout + split.stderr);
+  assert.match(split.stdout, /blocker PR #1345 is not in native stack #88/);
+
+  const longStack = Array.from({ length: 128 }, (_, index) => makePr(2000 + index,
+    index ? `branch-${1999 + index}` : 'release/0.1.1'));
+  longStack.forEach((pr, index) => { pr.headRefName = `branch-${pr.number}`; pr.baseRefName = index ? longStack[index - 1].headRefName : 'release/0.1.1'; });
+  const longTip = longStack.at(-1);
+  writeFileSync(join(checkout, 'stack-prs.json'), JSON.stringify({ [longTip.number]: longTip }));
+  setStack(longStack);
+  writeIssue(issue('Ready', [predecessor('OPEN', null, [longStack[0]], { number: 900, repository: { nameWithOwner: 'test/example' } })]));
+  const deep = check();
+  assert.equal(deep.status, 4, deep.stdout + deep.stderr);
+  assert.match(deep.stdout, /^stack base: PR #2127 in stack #88/m);
+
+  setStack([bottom, middle, ownDraft, makePr(1352, ownDraft.headRefName)]);
+  const upper = makePr(1352, ownDraft.headRefName);
+  writeFileSync(join(checkout, 'stack-prs.json'), JSON.stringify({ [middle.number]: middle, [upper.number]: upper }));
+  writeIssue(issue('Ready', [basePredecessor]));
+  const newAtTip = check();
+  assert.equal(newAtTip.status, 4, newAtTip.stdout + newAtTip.stderr);
+  assert.match(newAtTip.stdout, /^stack base: PR #1352 in stack #88/m);
+
+  writeIssue(issueWith(basePredecessor));
+  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker' },
+    body: 'Agent: codex, Session: resume1', created_at: new Date().toISOString(), html_url: 'claim' }]));
+  const resumed = run('check', '1', '--session', 'resume1');
+  assert.equal(resumed.status, 4, resumed.stdout + resumed.stderr);
+  assert.match(resumed.stdout, /^stack base: PR #1345 in stack #88/m, 'Resume uses own PR immediate lower layer, not foreign layer above it');
+  assert.doesNotMatch(resumed.stdout, /PR #1351 is still Draft/);
+
+  const ownLink = number => ({ number, state: 'OPEN', repository: { nameWithOwner: 'test/example' } });
+  writeIssue({ ...issue('Ready', [basePredecessor]), closedByPullRequestsReferences: {
+    totalCount: 2, nodes: [ownLink(1351), ownLink(1352)],
+  } });
+  const ambiguous = checkWithSession();
+  assert.equal(ambiguous.status, 2, ambiguous.stdout + ambiguous.stderr);
+  assert.match(ambiguous.stdout, /multiple open PRs/);
+  assert.doesNotMatch(ambiguous.stdout, /^stack base:/m, 'Ambiguous own PR links must not be treated as new work at the tip');
+
+  const partial = { ...issue('Ready', [basePredecessor]), closedByPullRequestsReferences: {
+    totalCount: 2, nodes: [ownLink(1351)],
+  } };
+  writeIssue(partial);
+  const incomplete = checkWithSession();
+  assert.equal(incomplete.status, 2, incomplete.stdout + incomplete.stderr);
+  assert.doesNotMatch(incomplete.stdout, /^stack base:/m);
+
+  const missingLinks = issue('Ready', [basePredecessor]);
+  delete missingLinks.closedByPullRequestsReferences;
+  writeIssue(missingLinks);
+  const missing = checkWithSession();
+  assert.equal(missing.status, 2, missing.stdout + missing.stderr);
+  assert.doesNotMatch(missing.stdout, /^stack base:/m);
+
+  writeFileSync(join(checkout, 'fail-stacks'), '');
+  writeIssue(issue('Ready', [basePredecessor]));
+  const unreadable = check();
+  assert.equal(unreadable.status, 2, unreadable.stdout + unreadable.stderr);
+  assert.doesNotMatch(unreadable.stdout, /stack base: PR #1318/);
 });
 
 
@@ -312,7 +425,7 @@ test('board check reads the issue, the viewer and the claim comments in one quer
 
 test('board check asks for the PRs of predecessors only when open predecessors alone hold the issue', t => {
   const { checkout, run, writeIssue, queries } = fixture(t);
-  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base' };
+  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base', headRefOid: 'abcdef1234' };
   // As GitHub answers the issue query: the predecessor has an id and no PRs; they come from a lookup by id (deliveries.json).
   const bare = id => ({ id, number: 2, state: 'OPEN', stateReason: null, repository: { nameWithOwner: 'test/example' } });
   const deliveries = value => writeFileSync(join(checkout, 'deliveries.json'), JSON.stringify(value));
