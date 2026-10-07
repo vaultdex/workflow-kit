@@ -1,5 +1,5 @@
 // Renovate regenerate holds contents: write and actions: write. These tests pin who defines the workflow, who
-// sees the token, and that the dispatched CI must run on the pushed commit.
+// sees the token, and that the held CI run of the pushed commit gets approved.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -24,74 +24,54 @@ test('the write-capable definition comes from main, not from the branch, and onl
   for (const [, script] of yaml.matchAll(/\bnode (\S+\.mjs)/g)) assert.match(script, /^scripts\//);
   assert.ok(yaml.includes("':(exclude).github/workflows'"), 'a generated or changed workflow is never staged');
   const withToken = steps.filter(step => step.includes('github.token')).map(name);
-  assert.deepEqual(withToken, ['Commit and push', 'Start the repository CI']);
+  assert.deepEqual(withToken, ['Commit and push', 'Approve the repository CI']);
   assert.deepEqual(steps.slice(-2).map(name), withToken);
-  // The dispatched run is repository.yml; its changelog-free checks need no history beyond a shallow checkout.
-  const repository = read('repository');
-  assert.match(repository, /^  workflow_dispatch:/m);
-  assert.doesNotMatch(repository, /origin\//);
 });
 
 const bash = process.platform === 'win32' ? join(process.env.ProgramFiles, 'Git/bin/bash.exe') : 'bash';
-const head = 'a'.repeat(40), other = 'b'.repeat(40);
-const block = steps.find(step => name(step) === 'Start the repository CI').split('        run: |\n')[1].replace(/^          /gm, '');
+const head = 'a'.repeat(40);
+const block = steps.find(step => name(step) === 'Approve the repository CI').split('        run: |\n')[1].replace(/^          /gm, '');
 
-/** Runs the step with gh, git, date and sleep replaced; gh answers as its three queries would after their jq filters. */
-function start({ onHead = 0, live = head, dispatched = [], dispatchFails = false } = {}) {
+/** Runs the step with gh, git and sleep replaced; gh answers the run list as after its jq filter, one "id conclusion" per run. */
+function approve({ runs = [], approveFails = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'renovate regenerate '));
   const log = join(dir, 'gh.log').replaceAll('\\', '/');
   const result = spawnSync(bash, ['-c', `
     git() { echo ${head}; }
-    date() { echo 2000-01-01T00:00:00Z; }
     sleep() { :; }
     gh() {
       echo "$*" >> "${log}"
       case "$*" in
-        "run list"*--commit*) echo ${onHead} ;;
-        "api "*) echo ${live} ;;
-        "workflow run"*) return ${dispatchFails ? 1 : 0} ;;
-        "run list"*--event*) printf '%s' "$DISPATCHED" ;;
-        "run cancel"*) return 1 ;; # a run that already ended cannot be cancelled
+        "run list"*) printf '%s' "$RUNS" ;;
+        "api "*) return ${approveFails ? 1 : 0} ;;
       esac
     }
     ${block}
-  `], { encoding: 'utf8', timeout: 20000, env: { ...process.env, DISPATCHED: dispatched.join('\n'), GITHUB_REPOSITORY: 'o/r', BRANCH: 'renovate/x' } });
+  `], { encoding: 'utf8', timeout: 20000, env: { ...process.env, RUNS: runs.join('\n'), GITHUB_REPOSITORY: 'o/r' } });
   let ghCalls = '';
   try { ghCalls = readFileSync(log, 'utf8'); } catch { /* gh was never called */ }
   rmSync(dir, { recursive: true, force: true });
   return { ...result, ghCalls };
 }
 
-test('the dispatched run must exist on exactly the pushed commit; any other run is an error, even an ended one', () => {
-  const dispatches = result => result.ghCalls.split('\n').filter(call => call.startsWith('workflow run')).length;
-  // A run on the head already exists: nothing is dispatched.
-  const present = start({ onHead: 1 });
-  assert.equal(present.status, 0, present.stderr);
-  assert.equal(dispatches(present), 0);
-
-  const ok = start({ dispatched: [`7 ${head}`] });
-  assert.equal(ok.status, 0, ok.stderr);
-  assert.equal(dispatches(ok), 1);
-  // A run on another commit that already ended cannot be cancelled, but it still fails the job.
-  const wrong = start({ dispatched: [`7 ${other}`] });
-  assert.notEqual(wrong.status, 0);
-  assert.match(wrong.stdout, /another commit/);
-  assert.equal(dispatches(wrong), 1);
-  // The poll lists runs by creation time, not by status: the status filter is what let an ended run through.
-  const poll = ok.ghCalls.split('\n').find(call => call.includes('--event workflow_dispatch'));
-  assert.match(poll, /createdAt >= env\.STARTED/);
-  assert.doesNotMatch(poll, /\.status/);
-  // One right and one wrong run: the wrong one fails the job.
-  assert.notEqual(start({ dispatched: [`7 ${head}`, `8 ${other}`] }).status, 0);
-  // No run ever appears: the job fails instead of trusting the dispatch.
-  const none = start();
+test('a CI run held for approval on the pushed commit is approved; a running or finished one is left alone', () => {
+  const approvals = result => result.ghCalls.split('\n').filter(call => call.startsWith('api -X POST')).length;
+  const held = approve({ runs: ['7 action_required'] });
+  assert.equal(held.status, 0, held.stderr);
+  assert.equal(approvals(held), 1);
+  assert.match(held.ghCalls, /actions\/runs\/7\/approve/);
+  // The list is asked for the pushed commit and the pull_request event only.
+  assert.match(held.ghCalls, new RegExp(`--event pull_request --commit ${head}`));
+  for (const conclusion of ['', 'success', 'failure']) {
+    const other = approve({ runs: [`8 ${conclusion}`] });
+    assert.equal(other.status, 0, other.stderr);
+    assert.equal(approvals(other), 0);
+  }
+  // No run ever appears, or the approval is refused: the job fails instead of reporting a CI that never runs.
+  const none = approve();
   assert.notEqual(none.status, 0);
-  assert.match(none.stdout, /did not appear/);
-  // The branch moved after the push: nothing is dispatched.
-  const moved = start({ live: other });
-  assert.notEqual(moved.status, 0);
-  assert.equal(dispatches(moved), 0);
-  assert.notEqual(start({ dispatchFails: true }).status, 0);
+  assert.match(none.stdout, /No pull_request run/);
+  assert.notEqual(approve({ runs: ['7 action_required'], approveFails: true }).status, 0);
 });
 
 const check = steps.find(step => name(step) === 'Check who changed the branch').split('        run: |\n')[1].replace(/^          /gm, '');
