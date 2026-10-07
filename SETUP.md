@@ -74,7 +74,8 @@ project does not depend on (CodeRabbit on a free plan that is mostly rate limite
 `"optionalReviewers"`, a list of bot logins or app slugs, for example
 `"optionalReviewers": ["coderabbitai"]`: `board.mjs wait`, `reviews` and `handoff` never
 wait for it or call it stalled, and agents neither re-request nor replace its review.
-Its findings, open threads and change requests still count. The script keeps both settings.
+Its findings, open threads and change requests still count. The script keeps these settings too.
+`board.mjs new` demands besides Priority.
 
 For first installation, add the setup issue to this Project, complete its
 [metadata](docs/CONTRIBUTING.md#issues), and set Ready under the explicit setup
