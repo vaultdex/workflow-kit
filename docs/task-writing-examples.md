@@ -36,6 +36,13 @@ und Ursache eingrenzen; keinen erfolgreichen Durchlauf behaupten.
 
 ## Größere Aufgabe: Wiederholte Bestätigung erzeugt keinen doppelten Bestand
 
+### Kurz gesagt
+
+Wer eine Bestätigung nach einem Netzwerkfehler wiederholt, bekommt heute einen
+zweiten Bestandseintrag. Künftig führt dieselbe Bestätigung immer zu genau einem
+Eintrag, auch bei parallelen Aufrufen. Nutzer müssen Doppelte nicht mehr von Hand
+entfernen.
+
 ### Wofür brauchen wir das?
 
 Im Beispielprojekt legt `POST /requests/{id}/confirm` nach einem Netzwerkfehler

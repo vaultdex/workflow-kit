@@ -51,7 +51,7 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
       const commands = new Set(handlers(file, key));
       assert.ok(commands.size, `${file} carries the kit init handler`);
       for (const command of commands) {
-        const trial = (cwd) => run(kind, [...args, command], cwd, nested);
+        const trial = (cwd, env) => run(kind, [...args, command], cwd, { ...nested, ...env });
         const [first, second] = [clone(), clone()];
         assert.ok(!existsSync(join(first, '.vendor/workflow-kit/AGENT_RULES.md')), 'fresh clone starts without the kit');
 
@@ -76,6 +76,55 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
         assert.notEqual(result.stdout.trim(), '', 'a failed init prints the manual command');
         assert.ok(!existsSync(join(second, '.vendor/workflow-kit/AGENT_RULES.md')));
         renameSync(`${kit}-gone`, kit);
+
+        // An initialized kit whose gitlink moved on (a base merge) lags behind the pin; the pin commit is not fetched yet.
+        const head = inner => git(inner, 'rev-parse', 'HEAD').trim();
+        const stale = () => {
+          const dir = clone(), inner = join(dir, '.vendor/workflow-kit');
+          git(dir, 'submodule', '--quiet', 'update', '--init', '.vendor/workflow-kit');
+          const old = head(inner);
+          git(kit, 'commit', '--quiet', '--allow-empty', '-m', 'newer');
+          const pin = head(kit);
+          git(dir, 'update-index', '--cacheinfo', `160000,${pin},.vendor/workflow-kit`);
+          assert.notEqual(old, pin, 'the kit lags behind its pin');
+          return { dir, inner, old, pin };
+        };
+        let lag = stale();
+        result = trial(lag.dir);
+        assert.deepEqual([result.status, result.stdout, head(lag.inner)], [0, '', lag.pin], `${file} moves a lagging kit to the pin`);
+        assert.ok(!existsSync(marker), 'the update runs no hook from the checkout');
+
+        // Work that a checkout would lose stays: local changes, unpublished commits. Both are reported.
+        lag = stale();
+        writeFileSync(join(lag.inner, 'notes.txt'), 'mine');
+        result = trial(lag.dir);
+        assert.notEqual(result.stdout.trim(), '', 'a lagging kit with local changes is reported');
+        assert.deepEqual([head(lag.inner), existsSync(join(lag.inner, 'notes.txt'))], [lag.old, true]);
+        lag = stale();
+        git(lag.inner, 'commit', '--quiet', '--allow-empty', '-m', 'mine');
+        const mine = head(lag.inner);
+        result = trial(lag.dir);
+        assert.notEqual(result.stdout.trim(), '', 'a lagging kit with unpublished commits is reported');
+        assert.equal(head(lag.inner), mine);
+
+        lag = stale();
+        renameSync(kit, `${kit}-gone`);
+        result = trial(lag.dir);
+        assert.notEqual(result.stdout.trim(), '', 'a lagging kit that cannot be updated is reported');
+        assert.equal(head(lag.inner), lag.old);
+        renameSync(`${kit}-gone`, kit);
+
+        // The agent's project directory wins over the hook's working directory.
+        const away = clone();
+        result = trial(temp, { CLAUDE_PROJECT_DIR: away });
+        assert.ok(existsSync(join(away, '.vendor/workflow-kit/AGENT_RULES.md')), `${file} initializes the project directory, not the working directory`);
+
+        if (kind === 'posix') {
+          const noGit = mkdtempSync(join(temp, 'no-git '));
+          const sh = process.platform === 'win32' ? execFileSync('where', ['sh'], { encoding: 'utf8' }).split(/\r?\n/)[0] : '/bin/sh';
+          result = spawnSync(sh, [...args, command], { cwd: clone(), encoding: 'utf8', env: { ...process.env, PATH: noGit } });
+          assert.deepEqual([result.status, result.stdout.trim() !== ''], [0, true], 'a missing git is reported, not skipped silently');
+        }
 
         result = trial(plain);
         assert.deepEqual([result.status, result.stdout], [0, ''], 'a project without a kit gitlink is left alone');
