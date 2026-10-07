@@ -1041,6 +1041,9 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(conflicted.status, 1, 'Merge conflicts end the wait at once, however little CI there is');
   assert.match(conflicted.stdout, /^FAILED$/m);
   assert.match(conflicted.stdout, /^blocker: merge conflicts$/m);
+  writeFileSync(join(checkout, 'fail-rest'), '');
+  assert.equal(noCi('DIRTY').status, 1, 'A later read failure keeps the known conflict verdict');
+  rmSync(join(checkout, 'fail-rest'));
   for (const state of ['UNKNOWN', 'BEHIND']) assert.equal(noCi(state).status, 3, `${state} keeps waiting`);
   assert.equal(look({ ...pr({ contexts: [] }), mergeStateStatus: 'DIRTY' }).status, 3, 'A draft with conflicts keeps waiting');
   assert.equal(reviews(readied(5, { mergeStateStatus: 'BEHIND' }, 5)), 0, 'BEHIND is no conflict');

@@ -774,7 +774,13 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   } catch (error) {
     lines.push(`note: base movement unreadable (${error.message})`);
   }
-  // A known CI failure is the verdict; later review reads must not turn it into ERROR.
+  // Conflicts start no workflow, so the wait would never end; the fix is merging the base now. A draft is still
+  // being worked on, and UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
+  if (pr.mergeStateStatus === 'DIRTY' && !pr.isDraft) {
+    failed = true;
+    lines.push('blocker: merge conflicts');
+  }
+  // A known CI failure or conflict is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
   // A pull_request run skipped while the PR was still Draft (the usual `!draft` job guard) executed nothing, so it says
   // nothing about the Ready head. Ready normally starts a fresh run; until the workflow has an executed run created after
@@ -889,12 +895,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) {
     lines.push(`blocker: changes requested by ${login(review.author)}`);
   }
-  // Conflicts start no workflow, so waiting on CI would never end; the fix is merging the base now. A draft is
-  // still being worked on, and UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
-  if (pr.mergeStateStatus === 'DIRTY') {
-    lines.push('blocker: merge conflicts');
-    failed ||= !pr.isDraft;
-  }
+  if (pr.mergeStateStatus === 'DIRTY') lines.push('blocker: merge conflicts'); // a non-draft PR returned above
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
