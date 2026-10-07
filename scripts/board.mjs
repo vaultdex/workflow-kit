@@ -598,13 +598,45 @@ function mutateAll(calls, tolerate) {
   return results;
 }
 
+// GitHub also refuses a request by its cost ("Resource limits for this query exceeded"): 13 issues in one request failed on 2026-10-07.
+// ponytail: 5 issues per request is a guess below that point; a refused block is halved down to one issue, so raise it only when measured.
+const issuesPerRequest = 5;
+const resourceLimit = /Resource limits for this query exceeded/i;
+
+/** Run `step` on the rows; GitHub's cost limit halves the block and tries each half again, down to one row, which `refused` names. */
+function inBlocks(rows, step, refused, size = issuesPerRequest) {
+  for (let from = 0; from < rows.length; from += size) shrink(rows.slice(from, from + size), step, refused);
+}
+function shrink(block, step, refused) {
+  try { step(block); } catch (error) {
+    if (!resourceLimit.test(`${error.stderr}${error.stdout}`)) throw error;
+    if (block.length === 1) return refused(block[0]);
+    const half = Math.ceil(block.length / 2);
+    shrink(block.slice(0, half), step, refused);
+    shrink(block.slice(half), step, refused);
+  }
+}
+
 /**
- * Put freshly created issues on the Project and write their fields with a handful of requests, however many there are: one
- * to add them all, one to write every value, one to read every value back. `rows`: { id: issue node id, number, plans }.
- * Costs the same for one issue as for twenty-five.
+ * Put freshly created issues on the Project and write their fields in blocks of `issuesPerRequest` issues: per block one request
+ * to add them, one to write every value, one to read every value back. `rows`: { id: issue node id, number, plans }.
+ * An issue whose fields are not all written and read back (even alone GitHub refuses it, or a value differs) is not skipped:
+ * the failure lists every such issue with the `field` command that finishes it.
  */
 function setFields(rows) {
-  const onProject = rows.filter(row => row.plans.some(plan => !plan.linked));
+  const todo = new Map(); // row -> [{ plan, why }]
+  const miss = (row, plan, why) => todo.set(row, [...todo.get(row) ?? [], { plan, why }]);
+  const refuse = (what, row) => row.plans.forEach(plan => miss(row, plan, `GitHub refuses ${what} of #${row.number} even alone ("Resource limits for this query exceeded")`));
+  inBlocks(rows, writeBlock, row => refuse('the write', row));
+  inBlocks(rows.filter(row => !todo.has(row)), readBlock(miss), row => refuse('the read-back', row));
+  const word = text => /^[^\s"]+$/.test(text) ? text : quoted(text);
+  assert.ok(!todo.size, [...todo].map(([row, misses]) => `${[...new Set(misses.map(({ why }) => why))].join('; ')}; finish it with: board.mjs field ${row.number} ${
+    [...new Map(misses.map(({ plan }) => [plan.fieldName, plan.option.name]))].flat().map(word).join(' ')}`).join(' | '));
+}
+
+/** The Project item and the values of one block of rows. */
+function writeBlock(rows) {
+  const onProject = rows.filter(row => !row.item && row.plans.some(plan => !plan.linked));
   // The Project's own automation may have added an issue already: GitHub then refuses that one with "already exists", which is
   // no failure as long as its item can be read.
   const added = mutateAll(onProject.map(row => `addProjectV2ItemById(input:{projectId:${quoted(project.id)},contentId:${quoted(row.id)}}){item{id}}`),
@@ -621,7 +653,11 @@ function setFields(rows) {
   mutateAll(rows.flatMap(row => row.plans.map(({ field, linked, option }) => linked
     ? `setIssueFieldValue(input:{issueId:${quoted(row.id)},issueFields:[{fieldId:${quoted(linked.id)},singleSelectOptionId:${quoted(option.id)}}]}){clientMutationId}`
     : `updateProjectV2ItemFieldValue(input:{projectId:${quoted(project.id)},itemId:${quoted(row.item)},fieldId:${quoted(field.id)},value:{singleSelectOptionId:${quoted(option.id)}}}){projectV2Item{id}}`)));
-  // Read back by id, so a silent API no-op cannot pass; the read costs by the number of ids, not by the 100-value limits of an issue's lists.
+}
+
+/** Read one block back by id, so a silent API no-op cannot pass; a value that differs goes to `miss`. The read costs by the number of ids, not by the 100-value limits of an issue's lists. */
+const readBlock = miss => rows => {
+  const onProject = rows.filter(row => row.plans.some(plan => !plan.linked));
   const onIssue = rows.filter(row => row.plans.some(plan => plan.linked));
   const read = graphql(`query{
     ${onProject.length ? `items:nodes(ids:${quoted(onProject.map(row => row.item))}){...on ProjectV2Item{fieldValues(first:100){nodes{
@@ -630,12 +666,12 @@ function setFields(rows) {
       ...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}}}` : ''}}`);
   for (const row of rows) {
     const values = [...read.items?.[onProject.indexOf(row)]?.fieldValues.nodes ?? [], ...read.issues?.[onIssue.indexOf(row)]?.issueFieldValues.nodes ?? []];
-    for (const { fieldName, option } of row.plans) {
-      const stored = values.find(entry => entry?.field?.name === fieldName)?.name;
-      assert.equal(stored, option.name, `Read-back of ${fieldName} on #${row.number} shows ${stored ?? 'no value'}`);
+    for (const plan of row.plans) {
+      const stored = values.find(entry => entry?.field?.name === plan.fieldName)?.name;
+      if (stored !== plan.option.name) miss(row, plan, `Read-back of ${plan.fieldName} on #${row.number} shows ${stored ?? 'no value'}`);
     }
   }
-}
+};
 
 /**
  * Create an issue with everything the workflow requires and read every value back. All inputs are checked before the
@@ -692,7 +728,7 @@ const entryKeys = ['title', 'bodyFile', 'milestone', 'priority', 'labels', 'fiel
 /**
  * `new --from FILE`: FILE is a JSON list of `{ title, bodyFile, milestone, priority, labels: [..], fields: { NAME: VALUE } }`
  * (the flags of a single `new`; the Status is Backlog). Every entry is checked before the first issue exists, so one bad entry
- * creates nothing. The issues are created over REST, then all of them get their Project fields in a handful of GraphQL requests
+ * creates nothing. The issues are created over REST, then all of them get their Project fields in blocks of issues
  * (setFields), and one line per issue is printed after everything was read back. Later failures name every issue that exists.
  */
 function createMany([file, ...extra]) {
