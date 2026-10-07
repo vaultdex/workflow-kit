@@ -49,17 +49,18 @@ test('next reads the PRs of predecessors in one lookup, for the candidates for a
   // As GitHub answers the search: the predecessor has an id and no PRs; they come from a lookup by id (deliveries.json).
   const bare = (id, state = 'OPEN', stateReason = null) => ({ id, number: 2, state, stateReason, repository: { nameWithOwner: 'test/example' } });
   const ready = (number, nodes) => ({ ...issue('Ready', nodes), number, issueFieldValues: { nodes: [] } });
-  writeFileSync(join(checkout, 'search.json'), JSON.stringify([ready(1, [bare('P1')]), ready(2, [bare('P2')]), ready(3, [bare('P3', 'CLOSED', 'COMPLETED')])]));
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([ready(1, [bare('P1')]), ready(2, [bare('P2')]), ready(3, [bare('P3', 'CLOSED', 'COMPLETED')]), ready(5, [bare('P1')])]));
   writeFileSync(join(checkout, 'deliveries.json'), JSON.stringify({ P1: { totalCount: 1, nodes: [pr] }, P2: { totalCount: 0, nodes: [] } }));
 
   const result = run('next');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const [startable, stackable, held] = result.stdout.split('\n\n');
-  assert.deepEqual([startable, stackable, held].map(part => part.match(/^#\d+/gm)), [['#3'], ['#1'], ['#2']]);
+  assert.deepEqual([startable, stackable, held].map(part => part.match(/^#\d+/gm)), [['#3'], ['#1', '#5'], ['#2']]);
   assert.ok(stackable.includes('base PR #5'));
   const sent = queries();
   const lookups = sent.filter(query => query.includes('nodes(ids:'));
-  assert.equal(lookups.length, 1, 'One lookup for every candidate');
+  assert.equal(lookups.length, 1, 'One lookup for every candidate, also when two issues share a predecessor');
+  assert.equal(sent.length, 4, 'Two searches, the Project fields and the lookup');
   assert.ok(lookups[0].includes('nodes(ids:["P1","P2"])'), 'Only the open predecessors of the candidates');
   assert.ok(sent.filter(query => query.includes('search(')).every(query => !query.includes('includeClosedPrs')), 'The search does not ask for the PRs of predecessors');
 

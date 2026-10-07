@@ -86,12 +86,15 @@ const readIssue = (withSubIssues = false) => named(`${project.repository}#${numb
 
 /** Reads the PRs that close the predecessors that have none loaded yet, 100 predecessors per query (a lookup by id is any repository). */
 function loadDeliveries(predecessors) {
-  const missing = [...new Map(predecessors.filter(predecessor => !predecessor.closedByPullRequestsReferences).map(predecessor => [predecessor.id, predecessor])).values()];
-  for (let from = 0; from < missing.length; from += 100) {
-    const batch = missing.slice(from, from + 100);
-    const { nodes } = graphql(`query{nodes(ids:${JSON.stringify(batch.map(predecessor => predecessor.id))}){...on Issue{${deliveryFields}}}}`);
-    // An unreadable predecessor stays without the list, which stackBase reports as unreadable, never as "no PR".
-    batch.forEach((predecessor, index) => { predecessor.closedByPullRequestsReferences = nodes[index]?.closedByPullRequestsReferences; });
+  const missing = predecessors.filter(predecessor => !predecessor.closedByPullRequestsReferences);
+  const ids = [...new Set(missing.map(predecessor => predecessor.id))];
+  for (let from = 0; from < ids.length; from += 100) {
+    const batch = ids.slice(from, from + 100);
+    const { nodes } = graphql(`query{nodes(ids:${JSON.stringify(batch)}){...on Issue{${deliveryFields}}}}`);
+    // The same predecessor can hold several issues: every object of it gets the list. An unreadable one stays without it,
+    // which stackBase reports as unreadable, never as "no PR".
+    batch.forEach((id, index) => missing.filter(predecessor => predecessor.id === id)
+      .forEach(predecessor => { predecessor.closedByPullRequestsReferences = nodes[index]?.closedByPullRequestsReferences; }));
   }
 }
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
