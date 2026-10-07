@@ -121,6 +121,16 @@ function api(argv, input, stdout, stderr, exit) {
   }
   // Every query that reached GitHub, one JSON string per line: what a test reads to count queries and see what they ask for.
   fs.appendFileSync('queries', JSON.stringify(query) + '\n');
+  // resource-limit (a number): GitHub refuses a request that names more issues than that; resource-stuck (a node id): and every request that names this issue.
+  if (fs.existsSync('resource-limit') || fs.existsSync('resource-stuck')) {
+    const named = new Set([...query.matchAll(/(?:contentId|itemId|issueId):"(?:PI-)?([^"]*)"/g)].map(match => match[1]));
+    for (const [, ids] of query.matchAll(/nodes\(ids:(\[[^\]]*\])/g)) JSON.parse(ids).forEach(id => named.add(id.replace(/^PI-/, '')));
+    if ((fs.existsSync('resource-limit') && named.size > Number(fs.readFileSync('resource-limit', 'utf8'))) || named.has(fs.existsSync('resource-stuck') && fs.readFileSync('resource-stuck', 'utf8'))) {
+      answer(JSON.stringify({ errors: [{ type: 'RESOURCE_LIMITS_EXCEEDED', message: 'Resource limits for this query exceeded' }] }));
+      stderr('gh: Resource limits for this query exceeded\n');
+      exit(1);
+    }
+  }
   let data;
   if (query.startsWith('mutation')) {
     // mutation-fails: GitHub refuses every write.

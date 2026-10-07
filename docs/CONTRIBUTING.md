@@ -132,8 +132,8 @@ and keeps them after closing. Set the real fields, not text in the body. The sta
 `board.mjs new --title … --body-file FILE --milestone … --label … --priority … [--field NAME=VALUE …]`
 ([README](../README.md#board-commands)): it checks every value before creating the issue, sets the Status Backlog,
 and reads everything back. Several issues at once (a spec with its sub-issues, a batch of follow-ups): write them in
-a JSON list and run `board.mjs new --from FILE` ([README](../README.md#board-commands)), which needs a handful of GraphQL
-requests in all instead of nine per issue. Add `--start --agent claude|codex --session ID` only when a human request covers the
+a JSON list and run `board.mjs new --from FILE` ([README](../README.md#board-commands)), which needs 3 GraphQL
+requests per 5 issues instead of nine per issue. Add `--start --agent claude|codex --session ID` only when a human request covers the
 [start](#starting-work); it then runs steps 4 to 6 of [Start or resume](../AGENT_RULES.md#start-or-resume) (assignee, claim comment, In progress after the readiness check). Create the issue-linked branch and run `check ISSUE --session ID` right afterwards, before the first edit. For an existing issue use
 `board.mjs priority` and `board.mjs field` (several NAME VALUE pairs per call). Priority reflects
 impact and urgency (Urgent, High, Medium, Low). If unsure, give a provisional one

@@ -148,3 +148,42 @@ test('new --from checks every entry before creating, then costs few GraphQL requ
   assert.match(result.stdout, /^ERROR - creating the issue failed.*2 of 3 issues exist: \S*issues\/1 \S*issues\/2.*never an existing one again/);
   assert.ok(gone('mutations'), 'Nothing is written to the Project after a failed creation');
 });
+
+test('new --from halves a request GitHub refuses for its cost, and lists an issue it cannot finish with the command that does', t => {
+  const { checkout, run, queries } = fixture(t);
+  const write = (file, data) => writeFileSync(join(checkout, file), typeof data === 'string' ? data : JSON.stringify(data));
+  const count = 13;
+  const answers = () => write('create-responses.json', Array.from({ length: count }, (_, index) => ({ number: index + 1, node_id: `N${index + 1}`, html_url: `https://github.com/test/example/issues/${index + 1}` })));
+  const entry = number => ({ title: `T${number}`, bodyFile: 'body.md', milestone: '0.1.1', labels: ['enhancement'], priority: 'Low', fields: { Size: number % 2 ? 'XS' : 'S' } });
+  write('test-milestones.json', [{ number: 4, title: '0.1.1' }]);
+  write('test-labels.json', [{ name: 'enhancement' }]);
+  write('body.md', 'Text\n');
+  answers();
+  for (let number = 1; number <= count; number++) write(`backlink-${number}.json`, { number, state: 'open', comments: 0, milestone: { title: '0.1.1' }, labels: [{ name: 'enhancement' }], assignees: [] });
+  write('list.json', Array.from({ length: count }, (_, index) => entry(index + 1)));
+  write('resource-limit', '3');
+  queries();
+
+  // GitHub refuses every request that names more than 3 issues: all 13 still arrive complete.
+  let result = run('new', '--from', 'list.json');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(result.stdout.trim().split('\n').length, count);
+  const stored = JSON.parse(readFileSync(join(checkout, 'stored-items.json'), 'utf8'));
+  assert.deepEqual(stored, Object.fromEntries(Array.from({ length: count }, (_, index) => [`PI-N${index + 1}`, { F1: 'Backlog', F2: 'Low', F3: (index + 1) % 2 ? 'XS' : 'S' }])));
+  for (const line of readFileSync(join(checkout, 'mutations'), 'utf8').trim().split('\n')) {
+    assert.ok(new Set(line.match(/(?:contentId|itemId|issueId):"[^"]*"/g)?.map(id => id.replace('PI-', ''))).size <= 3, 'GitHub accepted a request of more than 3 issues');
+  }
+  assert.ok(queries().length > 4, 'The refused blocks were asked again in halves');
+
+  // One issue GitHub never accepts: the others are complete, and it is listed with the command that finishes it.
+  for (const file of ['creates', 'stored-items.json', 'stored-values.json', 'mutations']) rmSync(join(checkout, file), { force: true });
+  write('resource-stuck', 'N7');
+  answers();
+  result = run('new', '--from', 'list.json');
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /^ERROR - 13 of 13 issues exist: .*but setting the Project fields failed: .*#7.*board\.mjs field 7 Status Backlog Priority Low Size XS;/);
+  assert.equal(result.stdout.match(/board\.mjs field \d/g).length, 1, 'Only the stuck issue is listed');
+  const items = JSON.parse(readFileSync(join(checkout, 'stored-items.json'), 'utf8'));
+  assert.equal(Object.keys(items).length, count - 1, 'Every other issue was written');
+  assert.equal(items['PI-N7'], undefined);
+});

@@ -43,8 +43,8 @@ statt auf eine Reset-Zeit zu warten. `gh api rate_limit` ist kein Beleg: es zeig
 veralteten Wert. Wer die Zeit selbst braucht, fragt `gh api graphql -f query='query{rateLimit{remaining resetAt}}'`;
 diese Abfrage antwortet auch bei leerem Kontingent.
 Viele Issues auf einmal: `board.mjs new --from FILE` statt einer Schleife um `new`. Jede Abfrage und jede
-Mutation kostet 1 Punkt, ein einzelnes `new` braucht 4 Anfragen (vorher 8 bis 9), die Sammel-Anlage für bis zu 16
-Issues zusammen 4 ([README](../README.md#board-commands)). Lesen Sie Issues und Kommentare über REST
+Mutation kostet 1 Punkt, ein einzelnes `new` braucht 4 Anfragen (vorher 8 bis 9), die Sammel-Anlage 1 plus 3 je 5 Issues
+(13 Issues: 10, [README](../README.md#board-commands)). Lesen Sie Issues und Kommentare über REST
 (`gh api repos/OWNER/REPO/issues/N`): `gh issue view` und `gh pr view` fragen GraphQL.
 
 **Review-Bots im Quota.** Ein Reviewer, auf den das Projekt nicht angewiesen ist

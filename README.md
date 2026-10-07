@@ -176,10 +176,13 @@ the project from that directory instead. Other relative paths (`--body-file`) st
   the flags above, `bodyFile` relative to the working directory, Status Backlog, no `--start`. Every entry is checked
   before the first issue exists (an unknown key, label, milestone or option, or a missing required value creates
   nothing and names the entry). The issues are created over REST, which costs no GraphQL points; their Project items
-  and fields are then written in one request per 50 writes (aliased mutations) and read back in one more, so the
-  GraphQL cost is 4 requests (points) for up to 16 issues instead of 9 per issue. The output is one `NEW …` line per
-  issue. A failure after the first issue exists names every issue that exists: finish those by hand and create only the
-  missing ones. The field definitions are also read once per run by a single `new`, which therefore needs 4 requests (before: 8 to 9).
+  and fields are then written in blocks of 5 issues (aliased mutations: add, write, read back, 3 requests per block),
+  so the GraphQL cost is 1 request for the field definitions plus 3 per block: 4 for up to 5 issues, 10 for 13, 31 for 50
+  (instead of 9 per issue). When GitHub refuses a block with "Resource limits for this query exceeded", `new` halves it
+  and asks again, down to one issue. An issue that is still refused, or whose values do not read back, is listed with
+  the `board.mjs field ISSUE NAME VALUE …` command that finishes it; everything else is complete. The output is one
+  `NEW …` line per issue. A failure after the first issue exists names every issue that exists: finish those by hand and
+  create only the missing ones. The field definitions are also read once per run by a single `new`, which therefore needs 4 requests (before: 8 to 9).
 - `field ISSUE NAME VALUE [NAME VALUE ...]`: any single-select fields, all read back together after writing.
   Every pair is checked against the field definitions before the first write: one invalid pair writes
   nothing and names the valid options. `field`, `status` and `priority` report failures as one
