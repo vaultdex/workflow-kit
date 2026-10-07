@@ -122,3 +122,7 @@ test('a field write succeeds when the Project already added the issue itself, an
   assert.notEqual(run('priority', '1', 'High').status, 0, 'Any other refusal stays a failure');
   assert.equal(count('updateProjectV2ItemFieldValue'), 0);
 });
+
+test('field refuses an unknown flag before any write', t => {
+  fixture(t).refusesUnknownFlag('field', '1', 'Size', 'M');
+});

@@ -187,3 +187,7 @@ test('new --from halves a request GitHub refuses for its cost, and lists an issu
   assert.equal(Object.keys(items).length, count - 1, 'Every other issue was written');
   assert.equal(items['PI-N7'], undefined);
 });
+
+test('new refuses an unknown flag before creating anything', t => {
+  fixture(t).refusesUnknownFlag('new', '--title', 'T');
+});
