@@ -13,8 +13,16 @@ bekommen begrenzte Aufträge ([Delegation](CONTRIBUTING.md#starting-work)).
 **Nachweis-Sperre.** Schwere lokale Nachweise (Backend-E2E, Playwright-Suite)
 stören sich gegenseitig, sobald mehrere gleichzeitig laufen. Ein Symptom ist die
 Meldung „Could not find a valid Docker environment“ ohne echten Fehler im Test.
-Die Sperre dafür ist projektseitig geplant:
-[vaultdex/Vaultdex#1099](https://github.com/vaultdex/Vaultdex/issues/1099).
+Die Sperre dafür liegt im
+Projekt, nicht im Kit. In vaultdex/Vaultdex ([#1099](https://github.com/vaultdex/Vaultdex/issues/1099))
+stellen sich `verify-backend.mjs jvm` und die volle Playwright-Suite (`npm run test:e2e`
+in `frontend/web`) selbst in eine Warteschlange: Sie nehmen eine Sperre für den ganzen
+Rechner und warten, bis mindestens 10 GB RAM frei sind
+([`scripts/proof-lock.mjs`](https://github.com/vaultdex/Vaultdex/blob/main/scripts/proof-lock.mjs),
+[Details](https://github.com/vaultdex/Vaultdex/blob/main/docs/guides/backend-verification.md#one-heavy-proof-at-a-time-per-machine)).
+Eine Absprache von Hand (zum Beispiel ein Verzeichnis `.proof-lock`) ist dort nicht mehr
+nötig; fokussierte Playwright-Läufe (`npx playwright test <Datei>`) reihen sich nicht ein.
+Ein Projekt ohne eine solche Sperre spricht schwere Nachweise weiter ab.
 
 **Flyway-Migrationsnummern.** Legen zwei Driver parallel Migrationen an, können die
 Nummern kollidieren. Die Regel steht im Projekt, nicht im Kit: Vaultdex
