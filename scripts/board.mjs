@@ -105,9 +105,12 @@ const issueFields = predecessor => `id number title state body repository{nameWi
 // The login of the viewer comes along, so a claim check needs no query of its own. Sub-issues (only `check` lists them) are asked
 // for in the number given: each costs three lists, so the first page is short and a longer list is read again at 100.
 // ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
-const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){issue(number:$number){
+// `refs` finds the branches `<agent>/<number>-…` of the issue: a name filter on one flat list, no nested list.
+const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!,$branch:String!){viewer{login} repository(owner:$owner,name:$name){
+  refs(refPrefix:"refs/heads/",query:$branch,first:20){nodes{name}}
+  issue(number:$number){
   ${issueFields(predecessorFields)} bodyHTML
-  closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner} headRefName}}
   ${subIssues ? `subIssues(first:${subIssues}){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}` : ''}}}}`;
 /** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
 const named = (label, read) => {
@@ -115,9 +118,9 @@ const named = (label, read) => {
 };
 const readIssue = (withSubIssues = false, at = number) => named(`${project.repository}#${at}`, () => {
   for (let first = withSubIssues && 30; ; first = 100) {
-    const { viewer, repository } = graphql(issueQuery(first), { owner, name, number: at });
+    const { viewer, repository } = graphql(issueQuery(first), { owner, name, number: at, branch: `/${at}-` });
     const issue = repository.issue ?? assert.fail('issue not found');
-    if (!(issue.subIssues?.totalCount > issue.subIssues?.nodes.length) || first >= 100) return { ...issue, viewer };
+    if (!(issue.subIssues?.totalCount > issue.subIssues?.nodes.length) || first >= 100) return { ...issue, viewer, branches: repository.refs?.nodes ?? [] };
   }
 });
 
@@ -227,7 +230,9 @@ function waitReasons(body) {
 }
 
 // Claim comments of the own login carry "Agent: claude|codex, Session: ID"; "Handover: ID" passes the claim to that session.
-const claimField = /^Agent:[ \t]*(claude|codex)[ \t]*,[ \t]*Session:[ \t]*(\w[\w.-]*)(?![\w.-])/im;
+// The field may stand anywhere in a line (Codex wrote it at the end of a sentence), not quoted in code, and "Agent: codex" alone is
+// a claim of an unknown session: it can never be the caller's, so it holds the issue until a handover.
+const claimField = /(?<![\w`])Agent:[ \t]*(claude|codex)(?![\w-])(?:[ \t]*,[ \t]*Session:[ \t]*(\w[\w.-]*)(?![\w.-]))?/i;
 const handoverField = /^Handover:[ \t]*(\w[\w.-]*)[ \t]*$/im;
 // ponytail: sessions are told apart by the id the driver passes, not authenticated; Claude and Codex share one login.
 /** Blocks when the newest claim or handover of the own login belongs to another session; claims without the field only note. */
@@ -240,16 +245,30 @@ function claimReasons(issue, session) {
     if (comment.user?.login?.toLowerCase() !== viewer.login.toLowerCase()) continue;
     const body = comment.body ?? '', claim = claimField.exec(body), handover = handoverField.exec(body);
     if (handover) [holder, legacy] = [{ session: handover[1], comment }, undefined];
-    else if (claim) [holder, legacy] = [{ agent: claim[1], session: claim[2], comment }, undefined];
+    else if (claim) [holder, legacy] = [{ agent: claim[1].toLowerCase(), session: claim[2], comment }, undefined];
     // A claim without the field names no session: it never lifts a known holder, it is only shown.
     else if (/^Claim:/m.test(body)) legacy = comment;
   }
   const notes = [], blocked = [];
-  const about = ({ agent, session: id, comment }) => `${agent ? `Agent ${agent}, ` : ''}Session ${id}, ${comment.created_at}, ${comment.html_url}`;
+  const about = ({ agent, session: id, comment }) => `${agent ? `Agent ${agent}, ` : ''}${id ? `Session ${id}` : 'no session named'}, ${comment.created_at}, ${comment.html_url}`;
   if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
   else if (holder && !session) notes.push(`newest claim: ${about(holder)}; pass --session ID to compare it with yours`);
   if (legacy) notes.push(`claim without Agent/Session field, session unknown: ${legacy.html_url}`);
   return { blocked, notes, claim: holder ?? (legacy && { session: undefined, comment: legacy }) };
+}
+
+/**
+ * Work of someone on the issue that a claim comment may not show: an open PR that closes it (a Draft too) or a branch
+ * `<agent>/<number>-…`. Only the newest claim being the caller's own session lifts it, so a driver cannot start in parallel to
+ * an agent whose claim is missing, worded differently or posted after its branch.
+ */
+function workReasons(issue, session) {
+  const own = session ? `no claim of session ${session}` : 'pass --session ID to prove it is yours';
+  const prs = (issue.closedByPullRequestsReferences?.nodes ?? []).filter(pr => pr?.state === 'OPEN');
+  const heads = new Set(prs.map(pr => pr.headRefName));
+  const branches = (issue.branches ?? []).map(branch => branch.name).filter(branch => new RegExp(`^[\\w.-]+/${issue.number}-`).test(branch) && !heads.has(branch));
+  return [...prs.map(pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName})` : ''} closes this issue; ${own}`),
+    ...branches.map(branch => `branch ${branch} belongs to this issue; ${own}`)];
 }
 
 /** Base PR of the issue the last check() judged STACKABLE; handoff compares it with the PR's base branch. */
@@ -301,6 +320,7 @@ function check(issue = readIssue(), claims) {
     blocked.push(...found.blocked);
     notes.push(...found.notes);
     claim = found.claim;
+    if (!claims.session || claim?.session !== claims.session) blocked.push(...workReasons(issue, claims.session));
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;

@@ -283,7 +283,9 @@ function api(argv, input, stdout, stderr, exit) {
     if (fs.existsSync('handoff-fixture') && fs.existsSync('stored')) {
       issue.projectItems.nodes[0].status.name = fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8');
     }
-    data = { repository: { issue }, ...query.includes('{viewer{login}') && { viewer: { login: 'worker' } } };
+    // branches.json: the names the branch filter of the issue query finds.
+    const refs = fs.existsSync('branches.json') ? { nodes: JSON.parse(fs.readFileSync('branches.json')).map(name => ({ name })) } : { nodes: [] };
+    data = { repository: { issue, refs }, ...query.includes('{viewer{login}') && { viewer: { login: 'worker' } } };
   }
   // A query reports its cost (one point), a mutation none.
   answer(JSON.stringify({ data: data && query.startsWith('query') ? { ...data, rateLimit: { cost: 1 } } : data }));

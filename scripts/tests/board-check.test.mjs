@@ -200,6 +200,60 @@ test('board check blocks a newer claim of another session of the same login unle
 });
 
 
+// Vaultdex #1178: Codex claimed at the end of a sentence and had an open PR; check said STARTABLE and a second driver began.
+test('board check blocks an issue another agent works on: its open PR, its branch or a claim that names no session', t => {
+  const { checkout, run, writeIssue, queries } = fixture(t);
+  const pr = (state, changes) => ({ number: 7, state, repository: { nameWithOwner: 'test/example' }, headRefName: 'codex/1-work', ...changes });
+  const comments = (...bodies) => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(bodies.map((body, id) => ({ id, user: { login: 'worker', type: 'User' },
+    body, html_url: 'https://example.test/c1', created_at: '2026-10-06T10:00:00Z' }))));
+  const withWork = (prs, branches = []) => {
+    writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: prs.length, nodes: prs } });
+    writeFileSync(join(checkout, 'branches.json'), JSON.stringify(branches));
+  };
+  const check = (...args) => run('check', '1', ...args);
+
+  comments();
+  withWork([pr('OPEN')], ['codex/1-work']);
+  const found = check('--session', 'S2');
+  assert.equal(found.status, 1, found.stdout);
+  assert.match(found.stdout, /^- open PR #7 \(branch codex\/1-work\) closes this issue; no claim of session S2$/m);
+  assert.doesNotMatch(found.stdout, /^- branch /m, 'the branch of the PR is not named twice');
+  assert.match(check().stdout, /^- open PR #7 .*pass --session ID/m, 'without a session nobody proves the PR is theirs');
+  assert.equal(queries().length, 2, 'both checks read the PR and the branches with the one issue query');
+
+  comments('Agent: claude, Session: S2');
+  assert.equal(check('--session', 'S2').status, 0, 'the own claim lifts it');
+  assert.equal(check('--session', 'S3').status, 1, 'a claim of another session does not');
+  withWork([pr('MERGED'), pr('CLOSED')]);
+  comments();
+  assert.equal(check('--session', 'S2').status, 0, 'a merged or closed PR holds nothing');
+
+  withWork([], ['claude/1-first', 'claude/12-other', 'codex/10-1-nope', 'release/1-0']);
+  const branch = check('--session', 'S2');
+  assert.equal(branch.status, 1, branch.stdout);
+  assert.match(branch.stdout, /^- branch claude\/1-first belongs to this issue; no claim of session S2$/m);
+  assert.doesNotMatch(branch.stdout, /12-other|10-1-nope/, 'only <agent>/<number>- belongs to the issue');
+  assert.match(branch.stdout, /^- branch release\/1-0 /m, 'any prefix names a branch of the issue');
+  withWork([], ['claude/12-other']);
+  assert.equal(check('--session', 'S2').status, 0, 'a branch of another issue holds nothing');
+
+  withWork([]);
+  const sentence = 'Quota-Blocker aufgehoben: frischer board check ist STARTABLE. Agent: codex, Session: S1';
+  assert.equal(check('--session', 'S2').status, 0);
+  comments(sentence);
+  assert.equal(check('--session', 'S2').status, 1, 'the field counts at the end of a sentence');
+  assert.equal(check('--session', 'S1').status, 0, 'and names the session of its writer');
+  comments('Claim\n\nAgent: codex');
+  const unnamed = check('--session', 'S2');
+  assert.equal(unnamed.status, 1, 'a claim of an agent without a session is never the caller');
+  assert.match(unnamed.stdout, /claimed by another session \(Agent codex, no session named,/);
+  comments('Agent: codex', 'Handover: S2');
+  assert.equal(check('--session', 'S2').status, 0, 'a handover passes it on');
+  comments('Use `Agent: codex, Session: S1` as the claim line.');
+  assert.equal(check('--session', 'S2').status, 0, 'a quoted example is no claim');
+});
+
+
 test('board check lists the sub-issues of a spec with status, assignee and verdict, and leaves the verdict of the parent alone', t => {
   const { run, writeIssue } = fixture(t);
   const child = (number, status, nodes, assignee, changes) => ({ ...issue(status, nodes), number, repository: { nameWithOwner: 'test/example' },
