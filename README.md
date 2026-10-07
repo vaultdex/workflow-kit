@@ -200,7 +200,8 @@ the installer, so the kit's current one is copied.
   requires, unless a comment with the PR's URL exists, and reads the comments back
   (a missing comment after the write exits 2; the write is not repeated).
 - `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
-  repository ready for review, but only for the commit you pushed. It rereads the PR
+  repository ready for review, but only for the commit you pushed. `SHA` must be the full
+  40-character commit id (`git rev-parse HEAD`); a short id exits 2 with that reason. It rereads the PR
   (default 6 reads, 5 s apart; both waits, before the write and for the read-back, together
   stay within 30 minutes, else exit 2) until GitHub reports `SHA` as the head, because the
   metadata can still show the previous push right after it and Draft-payload events
@@ -254,8 +255,13 @@ the installer, so the kit's current one is copied.
   refusal or a read-back that differs: `ERROR`, exit 2). A layer of a [stack](docs/CONTRIBUTING.md#stacked-pull-requests)
   with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. It does not read the issue, claims or the
   [handoff comment](#handoff-comment).
-- `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
-  ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both take
+- `wait PR`: repeats `reviews` (first after 60 s, then at longer intervals up to 5 minutes, again from 60 s
+  when what it awaits changes; twice as long below 1000 quota points), prints `WAITING` lines on change and
+  ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both end
+  with a `quota: …` line (points left, points this run used, reset time). When GitHub's shared GraphQL
+  quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), these three sleep until the reset and
+  say so on stderr (`rate limited until …`); every other command stops with the reset time
+  ([parallel drivers](docs/parallel-drivers.md)). Both take
   `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3): for that long after
   the PR became ready (Ready event, or creation as non-draft) and after each push of the
   head (read from the branch's push log, so a reused commit counts too), whichever is later, they keep
