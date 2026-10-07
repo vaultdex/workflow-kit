@@ -1083,7 +1083,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // just after a quick Ready, so that window counts as Draft too.
   // Only the latest Draft period counts: a skip from before the latest conversion belongs to an earlier period (a PR opened
   // Ready) and is no Draft skip.
-  // ponytail: 10 s window for run creation lag after opening as Draft or a Draft conversion (a real Ready run inside it waits for the next push), and a Draft skip of an earlier period stays unseen
+  // ponytail: 10 s window for run creation lag after opening as Draft or a Draft conversion (a skipped Ready run inside it waits for the next push), and a Draft skip of an earlier period stays unseen
   // unless the latest period created a run too; replace both when the run's trigger action and the Draft history are readable.
   // It is judged over every run of the head, not only each job's decisive one: an executed push run of the same job from
   // before Ready must not hide the Draft skip. Only a run since Ready covers it: any run of the job, or an executed run of
@@ -1099,7 +1099,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const runs = contexts.nodes.filter(check => orderable(check) && !isOptionalCheck(check));
   const startedAt = check => Date.parse(check.checkSuite?.createdAt);
   const flowOf = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id]);
-  const sinceReady = check => startedAt(check) >= readyBoundary;
+  // Inside the window only a skip is ambiguous (the Draft guard skips); a run that executed after the Ready event is a Ready run.
+  const sinceReady = check => startedAt(check) >= (check.conclusion === 'SKIPPED' ? readyBoundary : readyEvent);
   const readyFlows = new Set(runs.filter(check => check.conclusion !== 'SKIPPED' && sinceReady(check)).map(flowOf));
   const readyJobs = new Set(runs.filter(sinceReady).map(jobKey));
   const draftSkipped = new Set();
@@ -1111,7 +1112,14 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     assert.ok(runs.filter(run => flowOf(run) === flowOf(check)).every(run => Number.isFinite(startedAt(run))), `A run of the workflow of skipped check ${check.name} has no readable start time`);
     if (!readyFlows.has(flowOf(check)) && !readyJobs.has(jobKey(check))) draftSkipped.add(check.name);
   }
-  for (const label of draftSkipped) waiting.push({ text: `check ${label} was skipped while Draft; no run since Ready`, since: Infinity });
+  // A workflow whose trigger does not fire on Ready (pull_request_target or pull_request without ready_for_review, a path filter) leaves
+  // its skip from opening as the only run. Ready starts a run within seconds, so none after this long is not coming: note it, stop waiting.
+  // ponytail: fixed 10 minutes for every workflow; replace by the workflow's own trigger types when they are readable.
+  for (const label of draftSkipped) {
+    const text = `check ${label} was skipped while Draft; no run since Ready`;
+    if (now - readyEvent > 10 * 60_000) lines.push(`note: ${text}; its workflow does not start on Ready`);
+    else waiting.push({ text, since: Infinity });
+  }
   // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final; a skipped check ran no analysis.
   for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
     const open = sonarIssues(check.detailsUrl, pr.number);
