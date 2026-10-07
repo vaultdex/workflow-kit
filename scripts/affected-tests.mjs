@@ -24,6 +24,7 @@ const NOT_BOARD = /^(?!board-).*\.test\.mjs$/;
 // A changed test file always runs itself; a file that matches no row is reported on stderr.
 export const TABLE = [
   [/^scripts\/(board|quota)\.mjs$|^scripts\/tests\/(board-(fixture|runner|worker)|fake-gh)\.mjs$/, [BOARD]],
+  [/^scripts\/quota-sample\.mjs$/, ['quota-sample.test.mjs']],
   [/^scripts\/affected-tests\.mjs$/, ['affected-tests.test.mjs']],
   [/^scripts\/checkout-root\.mjs$/, [ALL]],
   [/^scripts\/provider-links\.mjs$/, [NOT_BOARD]],

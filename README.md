@@ -236,6 +236,10 @@ and then work in that directory, their relative paths (changed files given to `a
   then skip the checks. It refuses closed PRs, forks and a head that stays different (exit 1),
   writes once and counts only a read-back showing that head ready; API errors exit 2.
   An already ready PR with that head succeeds without a write.
+- `quota-wait [--max-minutes N]`: returns (`DONE` with the `quota: …` line, exit 0) once GitHub's shared GraphQL quota has
+  300 points again, sleeping until the reset taken from the response headers; a pause that would end after `--max-minutes`
+  (default 9) is not slept through: it ends `still waiting: call quota-wait again after <time>` (exit 4). Use it, or `wait`, instead of a loop of your own around `gh`:
+  a refused `gh api graphql` prints the error and may still exit 0.
 - `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
   It also prints the merge state and `blocker:` lines (standing change requests,
   conflicts), because mergeable is not merge-ready. When the PR has a finished
@@ -305,11 +309,15 @@ and then work in that directory, their relative paths (changed files given to `a
   that PR); it prints `branch kept: …` with the reason. A failed or already done delete is a `note:` or `branch gone:` line,
   never an error of the merge. It does not read the issue, claims or the [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` (first after 60 s, then at longer intervals up to 5 minutes, again from 60 s
-  when what it awaits changes; twice as long below 1000 quota points), prints `WAITING` lines on change and
-  ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both end
+  when what it awaits changes; twice as long below 1000 quota points; `--interval SECONDS` sets a fixed pause instead), prints `WAITING` lines on change and
+  reads GraphQL only when REST shows a change since the last full read (head, update time, merge state, check runs, check suites,
+  commit statuses), at least every 5 minutes, and confirms every end with a full read; the other rounds cost no GraphQL points.
+  `wait PR --merged` reads REST only. It ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both end
   with a `quota: …` line (points left, points this run used, reset time). When GitHub's shared GraphQL
-  quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), these three sleep until the reset and
-  say so on stderr (`rate limited until 2026-10-07T04:20:34.000Z (in 7 min)`); every other command stops with the reset time, also as
+  quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), `reviews` and `handoff` sleep until the reset and
+  say so on stderr (`rate limited until 2026-10-07T04:20:34.000Z (in 7 min)`). `wait` does not sleep: it keeps reading the PR and its checks
+  over REST (the `waiting:` line counts pending, failed or cancelled and passed checks, older runs included, and gives no verdict),
+  and reads the threads and the verdict after the reset; at `--max-minutes` it ends `still waiting` with the reset time. Every other command stops with the reset time, also as
   minutes from now. Points left and the reset come from the `x-ratelimit-remaining` and `x-ratelimit-reset` headers of the
   command's own GraphQL answers, a refusal included, never from `gh api rate_limit`
   ([parallel drivers](docs/parallel-drivers.md)). Both take

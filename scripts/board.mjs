@@ -1,5 +1,5 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run in the project: board.mjs next | check | status | priority | field | new | block | sub | reviews | wait | merge (see usage below).
+// Run in the project: board.mjs next | check | status | priority | field | new | block | sub | reviews | wait | quota-wait | merge (see usage below).
 // `--cwd PATH` as the first argument runs it for the project in PATH from any directory: without it the
 // working directory decides the project, and a driver in another project would read and write the wrong board.
 import assert from 'node:assert/strict';
@@ -36,7 +36,7 @@ const value = command === 'ready' && typed === '--local' && Number.isSafeInteger
 // resets in its headers (`gh api -i`, also on a refusal), so no extra request asks for it; a query reads its own cost.
 // wait, reviews and handoff sleep until the reset instead of failing when it runs out or falls below their reserve;
 // every other command stops with the reset time.
-const sleepers = { wait: 300, reviews: 50, handoff: 50 };
+const sleepers = { wait: 300, reviews: 50, handoff: 50, 'quota-wait': 300 };
 let quota, spent = 0; // the latest { remaining, resetAt } a response reported, and the points this run has used
 // `wait` gives up at this time (--max-minutes), before the 10-minute limit of an agent's shell tool would push it into the background.
 let deadline = Infinity;
@@ -45,8 +45,14 @@ class StillWaiting extends Error {
   constructor(resetAt) { super('still waiting'); this.resetAt = resetAt; }
 }
 
+/** The quota is used up until `resetAt`: `wait` does not sleep through it but keeps looking over REST (pausedRound). */
+class QuotaPause extends Error {
+  constructor(resetAt) { super('quota pause'); this.resetAt = resetAt; }
+}
+
 /** Say so in one line (stderr keeps stdout for the verdict) and sleep until the reset. */
 function sleepUntilReset(resetAt) {
+  if (command === 'wait') throw new QuotaPause(resetAt);
   if (Date.parse(resetAt) > deadline) throw new StillWaiting(resetAt);
   console.error(`rate limited until ${untilText(resetAt)}`);
   sleep(Math.max(1, (Date.parse(resetAt) - Date.now()) / 1000 + 1));
@@ -64,9 +70,14 @@ function graphql(query, variables = {}, tolerate) {
   for (let sleeps = 0; ; sleeps++) {
     if (command in sleepers && quota?.remaining < sleepers[command] && Date.parse(quota.resetAt) > Date.now()) sleepUntilReset(quota.resetAt);
     try {
-      const { headers, body } = splitResponse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
-      const { data } = JSON.parse(body);
+      const response = execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 });
+      const { headers, body } = splitResponse(response);
+      const { data, errors } = JSON.parse(body);
       quota = quotaOf(headers) ?? quota;
+      if (errors?.length) {
+        const message = errors.map(({ type, message }) => `${type ?? ''} ${message ?? ''}`).join('\n').trim();
+        if (!(tolerate?.test(message) && data)) throw Object.assign(new Error(message), { stdout: response, stderr: message });
+      }
       // A mutation reports no cost; GitHub charges it one point.
       spent += data?.rateLimit?.cost ?? (query.startsWith('mutation') ? 1 : 0);
       return data;
@@ -915,6 +926,7 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
+  reviewThreads(first:100){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:1){nodes{url}}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title detailsUrl checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
@@ -925,13 +937,14 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
 // ponytail: checks, check suites, review requests and opinionated reviews stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
 
 /** Links of unresolved review threads across every page, including findings on earlier heads. */
-function unresolvedThreads(prNumber = number) {
+function unresolvedThreads(prNumber = number, firstPage) {
   const links = [];
   for (let after; ;) {
-    const { reviewThreads } = graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
+    const reviewThreads = firstPage ?? graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
       pullRequest(number:$number){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
         nodes{isResolved comments(first:1){nodes{url}}}}}}}`,
-    { owner, name, number: prNumber, ...(after && { after }) }).repository.pullRequest;
+    { owner, name, number: prNumber, ...(after && { after }) }).repository.pullRequest.reviewThreads;
+    firstPage = undefined;
     links.push(...reviewThreads.nodes.filter(thread => !thread.isResolved).map(thread => thread.comments.nodes[0]?.url ?? 'unreadable thread'));
     if (!reviewThreads.pageInfo.hasNextPage) return links;
     assert.ok(reviewThreads.pageInfo.endCursor && reviewThreads.pageInfo.endCursor !== after, 'Thread pagination did not advance');
@@ -1095,8 +1108,8 @@ function baseMovement(pr) {
 }
 const filesText = files => files.slice(0, 10).join(', ') + (files.length > 10 ? `, and ${files.length - 10} more` : '');
 
-/** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
-function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption()) {
+/** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. `threadsOf` reads the unresolved threads (wait reuses the last answer). */
+function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption(), threadsOf = current => unresolvedThreads(current.number, current.reviewThreads)) {
   isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
@@ -1338,7 +1351,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
   for (const comment of inline.filter(comment => after(comment.updated_at))) lines.push(`inline ${login(comment.user)} ${comment.html_url}`);
-  const threads = unresolvedThreads(pr.number);
+  const threads = threadsOf(pr);
   lines.push(`unresolved threads: ${threads.length}`, ...threads.map(link => `thread ${link}`));
   // Mergeable is not merge-ready: a standing change request, a ruleset or conflicts still block the human.
   lines.push(`merge: ${pr.mergeStateStatus}, review decision: ${pr.reviewDecision ?? 'none'}`);
@@ -1352,7 +1365,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, lines, pr, comments };
+  return { done: failed || !pending.length, failed, lines, pr, comments, threads };
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
@@ -1908,13 +1921,12 @@ function reviewsOnce() {
   process.exitCode = code;
 }
 
-/** Waiting for the human merge is the other recurring wait; it ends when the PR is no longer open. */
+/** Waiting for the human merge is the other recurring wait; it ends when the PR is no longer open. REST, so it costs no GraphQL points. */
 function mergeState() {
-  const { pullRequest } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-    pullRequest(number:$number){number state}}}`, { owner, name, number }).repository;
-  const open = pullRequest.state === 'OPEN';
+  const pull = rest(`repos/${project.repository}/pulls/${number}`);
+  const open = pull.state === 'open';
   // Closed without merge is the end of the wait, but never a delivery.
-  return { done: !open, failed: pullRequest.state === 'CLOSED', lines: [`#${pullRequest.number} ${pullRequest.state}`, ...open ? ['waiting: human merge'] : []] };
+  return { done: !open, failed: !open && !pull.merged, lines: [`#${pull.number} ${open ? 'OPEN' : pull.merged ? 'MERGED' : 'CLOSED'}`, ...open ? ['waiting: human merge'] : []] };
 }
 
 /** What the last query cost and what is left, so a driver sees the shared quota without a command of its own. */
@@ -1925,11 +1937,75 @@ const quotaLine = () => quota && `quota: ${quota.remaining} left, ${spent} point
  * (the full id just pushed) an open PR keeps waiting until it shows exactly that head.
  * ponytail: a head that never matches (wrong id, someone else pushed on top) waits on; stop it by hand.
  */
-function reviewsForHead() {
-  const pr = readPr(number), expected = headOption()?.toLowerCase();
-  if (!expected || pr.state !== 'OPEN' || pr.headRefOid === expected) return reviews(stallOption(), Date.now(), number, pr);
+function lookAtHead(pr, threads) {
+  const expected = headOption()?.toLowerCase();
+  if (!expected || pr.state !== 'OPEN' || pr.headRefOid === expected) return reviews(stallOption(), Date.now(), number, pr, undefined, threads ?? (current => unresolvedThreads(current.number, current.reviewThreads)));
   return { done: false, lines: [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`,
     `waiting: PR still shows head ${pr.headRefOid.slice(0, 7)}, expected ${expected.slice(0, 7)}`] };
+}
+
+/**
+ * What GraphQL shows of the PR changes only when REST shows a change too (head, state, draft, merge state, update time, check runs,
+ * check suites, commit statuses), so a round that finds the same marker reads GraphQL no more: comments, reviews and reactions are
+ * REST reads anyway and the clock is the current one. `head` is the commit the marker names; `pull`, `runs` and `statuses` are what
+ * REST answered (pausedRound shows them). Undefined when REST cannot say.
+ * ponytail: checks stop at 100 like the GraphQL query; replace when that query paginates.
+ */
+function changeMarker() {
+  try {
+    const pull = rest(`repos/${project.repository}/pulls/${number}`), commit = `repos/${project.repository}/commits/${pull.head.sha}`;
+    const listed = (path, key) => rest(`${commit}/${path}?per_page=100`)[key];
+    const [runs, suites, statuses] = [listed('check-runs', 'check_runs'), listed('check-suites', 'check_suites'), listed('status', 'statuses')];
+    return { head: pull.head.sha, pull, runs, statuses, text: JSON.stringify([pull.head.sha, pull.updated_at, pull.state, pull.draft, pull.mergeable_state,
+      runs.map(run => [run.id, run.status, run.conclusion]), suites.map(suite => [suite.id, suite.status, suite.conclusion]),
+      statuses.map(status => [status.context, status.state, status.description])]) };
+  } catch { return undefined; } // a failed marker read is a full read, never a verdict
+}
+
+/**
+ * The GraphQL quota is used up until `resetAt`: `wait` keeps looking over REST (PR state and checks) instead of sleeping, and the
+ * full read (threads, verdict) follows after the reset. It never ends the wait: REST lists every run of the head, so an older run
+ * that a newer one cancelled looks failed, and only the full read knows which run decides.
+ * ponytail: counts only, no verdict from REST; replace when the decisive run per job can be told apart over REST.
+ */
+function pausedRound(resetAt, marker) {
+  const lines = [];
+  let text = `GitHub quota used up until ${untilText(resetAt)}; threads and the verdict are read after it`;
+  if (marker) {
+    const checks = [...marker.runs.filter(run => !isOptional(run.app?.slug)).map(run => run.status === 'completed' ? run.conclusion : 'pending'),
+      ...marker.statuses.map(status => status.state)];
+    const count = names => checks.filter(result => names.includes(result)).length;
+    text += `; checks over REST: ${count(['pending'])} pending, ${count(['failure', 'error', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale'])} failed or cancelled, ${count(['success', 'neutral', 'skipped'])} passed`;
+    lines.unshift(`#${marker.pull.number} ${marker.pull.state.toUpperCase()} head ${marker.head.slice(0, 7)}`);
+  }
+  return { done: false, lines: [...lines, `waiting: ${text}`], pausedUntil: resetAt };
+}
+
+// The last full read of this wait: the marker REST showed before it, the PR and the unresolved threads.
+let lastRead;
+// A full read is repeated after this long even without a change, so a GraphQL answer that lagged behind REST heals.
+const fullReadEvery = 5 * 60_000;
+
+/**
+ * One round of `wait`. An unchanged marker answers from the last full read, brought up to date by the REST reads and the clock, and only
+ * while it still says "waiting": every end (DONE, FAILED, a closed PR) is confirmed by a full read, whose result is what is printed.
+ * Review thread resolutions leave no mark in REST, which is why no end is taken from the cache.
+ */
+function reviewsForHead() {
+  const marker = changeMarker(), started = Date.now();
+  try {
+    if (marker && lastRead?.marker.text === marker.text && started - lastRead.at < fullReadEvery) {
+      const result = lookAtHead(lastRead.pr, () => lastRead.threads);
+      if (!result.done) return result;
+    }
+    const pr = readPr(number), result = lookAtHead(pr);
+    // A PR that shows another head than REST is still catching up, and a result that ended early has no threads: read both again next round.
+    lastRead = marker && pr.headRefOid === marker.head && result.threads && { marker, pr, threads: result.threads, at: started };
+    return result;
+  } catch (error) {
+    if (error instanceof QuotaPause) return pausedRound(error.resetAt, marker);
+    throw error;
+  }
 }
 
 /** Looks again and again until `look` is done and returns that result; returns nothing after printing "still waiting" (exit 4). */
@@ -1940,7 +2016,8 @@ async function poll(look) {
   // Exit 4: not finished, call the command again (a driver's tool call must end before its 10-minute limit).
   const stillWaiting = resetAt => {
     process.exitCode = 4;
-    console.log(['WAITING', shown, `still waiting: call ${command} again${resetAt ? ` after ${resetAt} (GitHub quota pause)` : ''}`, quotaLine()].filter(Boolean).join('\n'));
+    const quotaReset = resetAt ?? (command === 'wait' && quota?.remaining < sleepers.wait ? quota.resetAt : undefined);
+    console.log(['WAITING', shown, `still waiting: call ${command} again${quotaReset ? ` after ${quotaReset} (GitHub quota pause)` : ''}`, quotaLine()].filter(Boolean).join('\n'));
   };
   try {
     for (;;) {
@@ -1952,8 +2029,10 @@ async function poll(look) {
         console.log(['WAITING', shown = waiting, quotaLine()].filter(Boolean).join('\n'));
         quiet = 0;
       }
-      if (Date.now() >= deadline) return stillWaiting();
-      await new Promise(resolve => setTimeout(resolve, Math.min(1000 * waitInterval(quiet++, quota?.remaining), deadline - Date.now())));
+      if (Date.now() >= deadline) return stillWaiting(result.pausedUntil);
+      // Little quota lengthens the pause, but not while REST is read in place of GraphQL.
+      const pause = command === 'wait' && process.argv.includes('--interval') ? numberOption('--interval', 0) : waitInterval(quiet++, result.pausedUntil ? undefined : quota?.remaining);
+      await new Promise(resolve => setTimeout(resolve, Math.min(1000 * pause, deadline - Date.now())));
     }
   } catch (error) {
     if (!(error instanceof StillWaiting)) throw error;
@@ -1967,6 +2046,22 @@ async function wait() {
   const [word, code] = outcome(result);
   process.exitCode = code;
   console.log([word, ...result.lines, quotaLine()].filter(Boolean).join('\n'));
+}
+
+/**
+ * Returns once the GraphQL quota has as many points as `wait` needs (300), so a driver never builds its own loop around `gh`: a
+ * refused `gh api graphql` prints the error and may still exit 0. The reset comes from the headers of the answer; after --max-minutes
+ * the command ends "still waiting" (exit 4) with the reset time, like `wait`.
+ */
+async function quotaWait() {
+  const result = await poll(() => {
+    for (;;) {
+      graphql('query{viewer{login}}'); // sleeps first while the last answer showed too few points, and again when a refusal comes
+      if (!(quota?.remaining < sleepers[command])) return { done: true }; // an answer without headers is an answer
+      sleepUntilReset(quota.resetAt);
+    }
+  });
+  if (result) console.log(['DONE', quotaLine()].join('\n'));
 }
 
 // OWNER/REPO#N names a blocker in another repository; N or #N one in this project's repository.
@@ -2000,12 +2095,13 @@ function sub() {
 }
 
 const commands = { next, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
-  reviews: reviewsOnce, wait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
+  reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
 const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | new --from FILE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] | wait PR --merged [--max-minutes N]'
+  + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
+  + ' | quota-wait [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
@@ -2051,7 +2147,7 @@ if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' &
   console.error(`wait --head needs the full 40-character commit id (git rev-parse HEAD), not ${headOption() ? `"${headOption()}"` : 'nothing'}`);
   process.exit(2);
 }
-if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeInteger(number))
+if (!commands[command] || (!['next', 'new', 'quota-wait'].includes(command) && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && !(process.argv.length > 5 && process.argv.slice(4).every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text))))
@@ -2060,10 +2156,12 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   || (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
   // sleep(NaN) would wait forever.
   || (['handoff', 'merge'].includes(command) && !(numberOption('--interval', 3) >= 0 && numberOption('--interval', 3) <= 60))
+  // wait: a fixed pause between reads instead of the growing one (60 to 300 s).
+  || (command === 'wait' && !(numberOption('--interval', 60) >= 0 && numberOption('--interval', 60) <= 300))
   // --head is the full id of the pushed commit (git rev-parse HEAD), as for ready; a short or missing one would wait on a head that never matches.
   || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{40}$/i.test(headOption())))
   // 0 = no limit; a missing or non-numeric value must not silently mean that.
-  || (process.argv.includes('--max-minutes') && (!['wait', 'merge'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
+  || (process.argv.includes('--max-minutes') && (!['wait', 'merge', 'quota-wait'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
@@ -2084,7 +2182,7 @@ try {
 } catch (error) {
   console.log = print;
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'merge', 'ready', 'link', 'body', 'body-replace', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'quota-wait', 'handoff', 'merge', 'ready', 'link', 'body', 'body-replace', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
   console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;
