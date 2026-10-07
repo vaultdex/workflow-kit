@@ -962,9 +962,20 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   // Bots that start on "ready for review" (Codex) or on new commits leave their first trace a minute or two
   // later, often after CI is green. Until the grace has passed since the PR became ready or the head was
-  // pushed, whichever is later, a missing trace is no answer yet.
+  // pushed, whichever is later, a missing trace is no answer yet. The grace ends as soon as one required bot has answered
+  // for good on this head (a review, a comment other than an unfinished Running summary, a final reaction, or a limit notice
+  // such as "usage limit" or "rate limited" in a comment or check): it has started, so more waiting for a silent one is guesswork.
+  // ponytail: any one answering bot ends the grace for all of them, and github-actions comments (coverage reports) are no review; replace with a per-bot expectation when one exists.
+  const limitNotice = /usage limit|rate.?limit/i;
+  const answeredBot = [
+    ...[...comments, ...inline].filter(comment => after(comment.updated_at)
+      && !(comment.body ?? '').split('\n').some(row => row.includes('Running') && row.includes(short))).map(comment => comment.user),
+    ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => review.user),
+    ...reactions.filter(reaction => reaction.content !== 'eyes' && after(reaction.created_at)).map(reaction => reaction.user),
+  ].some(user => isBot(user) && login(user) !== 'github-actions' && !isOptional(user.login))
+    || current.some(check => !isOptionalCheck(check) && check.checkSuite?.app?.slug !== 'github-actions' && limitNotice.test(`${check.title ?? ''} ${check.description ?? ''}`));
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
-  if (!pr.isDraft && graceMinutes > 0) {
+  if (!pr.isDraft && graceMinutes > 0 && !answeredBot) {
     const graceFrom = Math.max(readyAt, pushed, headSetAt(pr, pushes()));
     if (now - graceFrom < graceMinutes * 60_000) {
       waiting.push({ text: `reviewers may still start until ${new Date(graceFrom + graceMinutes * 60_000).toISOString()}`, since: Infinity });
@@ -1337,7 +1348,9 @@ function merge() {
 
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
 const stallOption = () => numberOption('--stall', 20);
-const graceOption = () => numberOption('--grace', 3);
+// "reviewerGraceMinutes" in the project file is the default of --grace; 0 turns the grace off. Only a missing field is allowed.
+const projectGrace = project.reviewerGraceMinutes === undefined ? 3 : project.reviewerGraceMinutes;
+const graceOption = () => numberOption('--grace', projectGrace);
 const headOption = () => process.argv.includes('--head') ? process.argv[process.argv.indexOf('--head') + 1] ?? '' : undefined;
 const sessionOption = () => process.argv.includes('--session') ? process.argv[process.argv.indexOf('--session') + 1] : undefined;
 
@@ -1492,6 +1505,10 @@ const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE
   + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
+if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFinite(projectGrace) && projectGrace >= 0)) {
+  console.error('reviewerGraceMinutes in .github/workflow-project.json must be a number of minutes, 0 or more (0 turns the grace off); omit the field for the default');
+  process.exit(2);
+}
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (command === 'ready' && Number.isSafeInteger(number) && !/^[0-9a-f]{40}$/i.test(value ?? '')) {
   // A short id is what git log shows; naming the reason saves the trip through the usage line.
