@@ -5,11 +5,7 @@ import { reviewsFixture, test } from './board-fixture.mjs';
 
 
 test('reviews tells the newest run of a job from cancelled, skipped and Draft runs', t => {
-  const { checkout, run, runBriefly, minutesAgo, codexUser, check, suite, pr, codex, reaction, look, reviews } = reviewsFixture(t);
-  // Draft then Ready starts a second run of the same job and cancels the first: only the newest run of a job counts.
-  // `run` is the workflow run the job belongs to; by default every job is the only one of its own run.
-  const job = (run, status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null, name = 'Backend', workflow = 'Backend importer', workflowId = `W-${workflow}`) =>
-    ({ ...check(status, conclusion), name, checkSuite: { databaseId: run * 10, app: { slug: 'github-actions' }, workflowRun: { databaseId: run, workflow: { id: workflowId, name: workflow } } } });
+  const { checkout, run, runBriefly, minutesAgo, job, draftRun, readyHead, oldTraces, codexUser, check, suite, pr, codex, reaction, look, reviews } = reviewsFixture(t);
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED')] })), 1, 'A single cancelled run is a failure');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), job(2, 'COMPLETED')] })), 0, 'A cancelled run followed by a green one is no failure');
   assert.equal(reviews(pr({ contexts: [job(2, 'COMPLETED'), job(1, 'COMPLETED', 'CANCELLED')] })), 0, 'The order of the list does not matter');
@@ -43,13 +39,6 @@ test('reviews tells the newest run of a job from cancelled, skipped and Draft ru
   assert.equal(reviews(pr({ contexts: [skipped(1), job(2, 'COMPLETED', 'SUCCESS', 'Lint')] })), 0, 'A skipped optional job next to a real success passes');
   assert.equal(reviews(pr({ contexts: [job(1, 'COMPLETED', 'CANCELLED'), job(2, 'COMPLETED', 'SKIPPED', 'Backend', 'Frontend')] })), 1,
     'A skipped run of another workflow does not stand in for it');
-  // Ready since 5 minutes: a pull_request run created before that was a Draft run, and its skipped job guard proves nothing.
-  const draftRun = (run, conclusion = 'SKIPPED', { minutes = 10, event = 'pull_request', time, ...names } = {}) => {
-    const base = job(run, conclusion === 'IN_PROGRESS' ? conclusion : 'COMPLETED', conclusion === 'IN_PROGRESS' ? null : conclusion, names.name, names.workflow);
-    return { ...base, checkSuite: { ...base.checkSuite, createdAt: time ?? minutesAgo(minutes), workflowRun: { ...base.checkSuite.workflowRun, event } } };
-  };
-  const readyHead = (contexts, extra) => ({ ...pr({ contexts, pushed: 10 }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] }, ...extra });
-  const oldTraces = { comments: [codex('Completed', 0)] };
   assert.equal(reviews(readyHead([draftRun(1)]), oldTraces), 3, 'A Ready head whose only runs were skipped while Draft is not proof');
   assert.equal(reviews(readyHead([draftRun(1), draftRun(2, 'SKIPPED', { name: 'Lint', workflow: 'Lint' }), job(3, 'COMPLETED', 'SUCCESS', 'Backend', 'Frontend')]), oldTraces), 3,
     'A green other workflow does not cover the missing path');
@@ -89,7 +78,7 @@ test('reviews tells the newest run of a job from cancelled, skipped and Draft ru
 
 
 test('reviews reads Codex rows, blockers and threads, and wait ends with the verdict', t => {
-  const { checkout, run, runBriefly, minutesAgo, codexUser, check, suite, pr, codex, reaction, look, reviews } = reviewsFixture(t);
+  const { checkout, run, runBriefly, minutesAgo, draftRun, readyHead, oldTraces, codexUser, check, suite, pr, codex, reaction, look, reviews } = reviewsFixture(t);
   let commentId = 1000; // after the ids of `codex`, so no two comments share one
   const headReview = { user: codexUser, commit_id: 'abcdef1234', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { comments: [codex('Running', 1)], reviewList: [headReview] }), 0, 'A head review ends a Running summary');
@@ -121,6 +110,50 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['sonarqubecloud'] }));
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 3, 'A listed analyzer waits until it reports');
   writeFileSync(config, plain);
+  // An optional reviewer (a bot on a free plan that is mostly rate limited) is shown but never awaited, stalled or red.
+  const rabbit = { login: 'coderabbitai[bot]', type: 'Bot' };
+  const rabbitStatus = (state, description = 'Review rate limited') => ({ __typename: 'StatusContext', context: 'CodeRabbit', state, description, creator: { login: 'coderabbitai' } });
+  const rabbitRunning = { ...codex('Running', 0.5), user: rabbit };
+  const rabbitRequest = { requestedReviewer: { __typename: 'Bot', login: 'coderabbitai' } };
+  const rabbitTraces = [
+    [pr({ contexts: [check('COMPLETED'), rabbitStatus('PENDING')] }), {}],
+    [pr({ contexts: [check('COMPLETED'), rabbitStatus('FAILURE')] }), {}],
+    [pr({ contexts: [check('COMPLETED'), { ...check('IN_PROGRESS'), name: 'CodeRabbit', checkSuite: { app: { slug: 'coderabbitai' } } }] }), {}],
+    [pr(), { comments: [rabbitRunning] }],
+    [pr(), { reactions: [{ ...reaction('eyes', 0), user: rabbit }] }],
+    [{ ...pr(), reviewRequests: { totalCount: 1, nodes: [rabbitRequest] }, requestEvents: { totalCount: 0, nodes: [] } }, {}]];
+  const waitingFor = [3, 1, 3, 3, 3, 3];
+  rabbitTraces.forEach(([data, traces], index) => assert.equal(reviews(data, traces), waitingFor[index], `Precondition: unlisted trace ${index} decides`));
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: [' CodeRabbitAI[bot] '] }));
+  rabbitTraces.forEach(([data, traces], index) => assert.equal(reviews(data, traces), 0, `Optional reviewer trace ${index} never waits or fails`));
+  assert.equal(reviews(pr({ pushed: 60, contexts: [check('IN_PROGRESS')] })), 3, 'Other checks still wait');
+  assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE'), rabbitStatus('SUCCESS')] })), 1, 'A listed reviewer does not hide red CI');
+  assert.equal(reviews(pr({ requests: ['maintainer'] })), 3, 'Other review requests still wait');
+  assert.match(look(rabbitTraces[0][0], rabbitTraces[0][1]).stdout, /^check CodeRabbit: pending/m, 'The optional trace is still shown');
+  assert.match(look(pr(), { comments: [rabbitRunning] }).stdout, /^comment coderabbitai /m, 'Optional comments are still listed');
+  const optionalFindings = look({ ...pr({ threadPages: [[false]] }), mergeStateStatus: 'BLOCKED', reviewDecision: 'CHANGES_REQUESTED',
+    latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'coderabbitai' } }] } });
+  assert.match(optionalFindings.stdout, /^unresolved threads: 1$/m, 'An open thread of an optional reviewer still counts');
+  assert.match(optionalFindings.stdout, /^blocker: changes requested by coderabbitai$/m, 'A change request of an optional reviewer still blocks');
+  // A workflow run of an optional app that was skipped while Draft is no missing Ready run either.
+  const rabbitDraftRun = draftRun(3, 'SKIPPED', { name: 'Review', workflow: 'Review' });
+  const rabbitReadyHead = readyHead([{ ...rabbitDraftRun, checkSuite: { ...rabbitDraftRun.checkSuite, app: { slug: 'coderabbitai' } } }, draftRun(2, 'SUCCESS', { minutes: 2 })]);
+  assert.equal(reviews(rabbitReadyHead, oldTraces), 0, 'A Draft-skipped run of an optional reviewer never waits');
+  // The list names bots and apps: a team of the same name is still a required reviewer.
+  const teamRequest = { ...pr(), reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { __typename: 'Team', name: 'coderabbitai' } }] }, requestEvents: { totalCount: 0, nodes: [] } };
+  assert.equal(reviews(teamRequest), 3, 'A team with an optional name is no optional reviewer');
+  assert.match(look(rabbitTraces[0][0]).stdout, /Review rate limited/, 'The optional trace keeps its description');
+  assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 3, 'An optional check alone is no CI: the first CI check is still awaited');
+  const rabbitSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'coderabbitai' } };
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['coderabbitai'] }));
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), rabbitSuite] })), 3, 'Precondition: an awaited app that is not optional waits');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['coderabbitai'], optionalReviewers: ['app/CodeRabbitAI'] }));
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), rabbitSuite] })), 0, 'An optional reviewer is never awaited, even when listed in awaitApps (gh spelling app/NAME)');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: 'coderabbitai' }));
+  assert.equal(reviews(pr()), 2, 'A malformed list is an error, never silently ignored');
+  writeFileSync(config, plain);
+  assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 0, 'Precondition: unlisted, the same lone status is CI');
+  assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
   assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'], requestedAgo: 1 })), 3, 'A late review request starts its own clock');

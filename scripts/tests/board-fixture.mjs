@@ -103,7 +103,18 @@ export function reviewsFixture(t) {
   };
   const reviews = (...args) => look(...args).status;
 
-  return { checkout, run, runBriefly, minutesAgo, codexUser, check, suite, pr, codex, reaction, look, reviews };
+  // Draft then Ready starts a second run of the same job and cancels the first: only the newest run of a job counts.
+  // `run` is the workflow run the job belongs to; by default every job is the only one of its own run.
+  const job = (run, status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null, name = 'Backend', workflow = 'Backend importer', workflowId = `W-${workflow}`) =>
+    ({ ...check(status, conclusion), name, checkSuite: { databaseId: run * 10, app: { slug: 'github-actions' }, workflowRun: { databaseId: run, workflow: { id: workflowId, name: workflow } } } });
+  // Ready since 5 minutes: a pull_request run created before that was a Draft run, and its skipped job guard proves nothing.
+  const draftRun = (run, conclusion = 'SKIPPED', { minutes = 10, event = 'pull_request', time, ...names } = {}) => {
+    const base = job(run, conclusion === 'IN_PROGRESS' ? conclusion : 'COMPLETED', conclusion === 'IN_PROGRESS' ? null : conclusion, names.name, names.workflow);
+    return { ...base, checkSuite: { ...base.checkSuite, createdAt: time ?? minutesAgo(minutes), workflowRun: { ...base.checkSuite.workflowRun, event } } };
+  };
+  const readyHead = (contexts, extra) => ({ ...pr({ contexts, pushed: 10 }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] }, ...extra });
+  const oldTraces = { comments: [codex('Completed', 0)] };
+  return { checkout, run, runBriefly, minutesAgo, job, draftRun, readyHead, oldTraces, codexUser, check, suite, pr, codex, reaction, look, reviews };
 }
 
 // GitHub's rendering of a task item, an issue reference and a code block (shape of its Markdown API output).
