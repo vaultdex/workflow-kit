@@ -101,6 +101,7 @@ test('handoff needs a retro section whose every line ends with its resolution', 
   rejected(retro('Zeile mit <code>#12</code>'), ['Zeile mit #12'], 'reference in code: ');
   rejected(retro('Keine Funde', 'Zusätzlicher Fund: ' + link), ['Keine Funde'], 'Keine Funde is allowed only alone: ');
   rejected(retro('Fund: ' + pullLink), ['Fund: #12'], 'a pull request is no follow-up issue: ');
+  rejected(retro('Fund.', 'Fund ' + link + ' danach noch Text.'), ['Fund.', 'Fund #12 danach noch Text.'], 'punctuation alone is no resolution, text after the link still is none: ');
   rejected('<h2 dir="auto">Übergabe</h2>\n<ul dir="auto">\n<li>Retro: keine Befunde</li>\n</ul>', [], 'no retro section: ');
   rejected('<h2 dir="auto">Übergabe</h2>\n<h3 dir="auto">Retro</h3>\n<p dir="auto">Nichts gefunden.</p>', [], 'section without lines: ');
   rejected(quote(retro('Keine Funde')), [], 'a quoted retro section is no section: ');
@@ -110,6 +111,7 @@ test('handoff needs a retro section whose every line ends with its resolution', 
     [retro('Keine Funde'), 'Keine Funde alone'],
     [retro('Kit-Init: ' + link, 'Reibung: behoben in ' + commit, 'Memory: persönlich gemeldet', 'Einzelfall: kein Handlungsbedarf: nur einmal aufgetreten'), 'every resolution'],
     [retro(`\n<p dir="auto">Fund: ${link}</p>\n`, `\n<p dir="auto">Reibung: behoben in ${commit}</p>\n`), 'loose list: GitHub wraps each line in a paragraph'],
+    [retro('Fund: ' + link + '.', 'Reibung: behoben in ' + commit + ' ;', 'Memory: persönlich gemeldet.', `\n<p dir="auto">Fund: ${link}.</p>\n`), 'closing punctuation and spaces after the resolution'],
     [retro('Fund: ' + link) + '\n<h3 dir="auto">Reviews</h3>\n<ul>\n<li>Befunde: keine</li>\n</ul>', 'lines after the next heading are not retro lines'],
     [quote(retro('Zitat ohne Erledigung')) + '\n' + retro('Keine Funde'), 'a real section beside a quoted one counts'],
   ]) {

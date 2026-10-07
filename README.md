@@ -326,7 +326,7 @@ comment, a comment for an earlier push does not count, and it works the same for
 a check suite or one that was pushed and checked on another branch first. Put the retro under
 the heading `Retro` (any level, usually `###`), one list line per finding, and, after another
 heading, the review findings with their disposition and, if a reviewer was unavailable or
-stalled, the reviewer, cause and evidence (an optional reviewer only when it found something). Every retro line ends with exactly one resolution:
+stalled, the reviewer, cause and evidence (an optional reviewer only when it found something). Every retro line ends with exactly one resolution (a closing `.`, `,` or `;` after it is ignored):
 
 - an issue link: `#N` or `OWNER/REPO#N` (the issue that owns the fix; a pull request link does not count),
 - `behoben in <SHA>`,

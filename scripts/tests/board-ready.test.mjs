@@ -113,4 +113,7 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
   assert.equal(mutations(), 1, 'The mutation is not repeated blindly');
 
   assert.equal(run('ready', '7', 'not-a-sha').status, 2, 'Only a full commit SHA is accepted');
+  const missing = run('ready', '7');
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /full 40-character commit id.*or --local/, 'A missing SHA names the way out, not just the usage line');
 });
