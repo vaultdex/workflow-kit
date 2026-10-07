@@ -216,6 +216,37 @@ test('handoff names every missing point at once, issue side and PR side together
 });
 
 
+test('handoff dismisses a stale change request of an optional reviewer, but no other', t => {
+  const { checkout, run, writeIssue } = handoffFixture(t);
+  const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: ['coderabbitai'] }));
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  const asked = author => handoffPr({ latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: author } }] } });
+  const review = (id, login, state) => ({ id, user: { login: `${login}[bot]`, type: 'Bot' }, state, commit_id: 'old', submitted_at: '2026-10-07T00:00:00Z', html_url: 'r' });
+  writeFileSync(join(checkout, 'pulls-reviews.json'), JSON.stringify([review(5, 'coderabbitai', 'COMMENTED'), review(6, 'coderabbitai', 'CHANGES_REQUESTED'), review(7, 'other', 'CHANGES_REQUESTED')]));
+  const calls = join(checkout, 'calls');
+  // An open thread keeps the optional reviewer a blocker; nothing is dismissed.
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ ...asked('coderabbitai'), threadPages: [[false]] }));
+  let result = run('handoff', '1', '7', '--interval', '0');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^blocker: changes requested by coderabbitai$/m);
+  assert.equal(existsSync(calls), false, 'An open thread never dismisses');
+  // A reviewer that is not optional keeps blocking, even with every thread resolved.
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(asked('other')));
+  result = run('handoff', '1', '7', '--interval', '0');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^blocker: changes requested by other$/m);
+  assert.equal(existsSync(calls), false, 'A non-optional reviewer is never dismissed');
+  // All threads resolved: the change request is dismissed (its own review, naming the head) and handoff goes through.
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(asked('coderabbitai')));
+  result = run('handoff', '1', '7', '--interval', '0');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^dismissed stale change request by coderabbitai/m);
+  assert.match(readFileSync(calls, 'utf8'), /^dismiss 6 .*abcdef1/);
+});
+
+
 test('handoff reads an undetermined merge state again before it gives up', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });

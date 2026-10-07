@@ -1109,7 +1109,7 @@ function baseMovement(pr) {
 const filesText = files => files.slice(0, 10).join(', ') + (files.length > 10 ? `, and ${files.length - 10} more` : '');
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. `threadsOf` reads the unresolved threads (wait reuses the last answer). */
-function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption(), threadsOf = current => unresolvedThreads(current.number, current.reviewThreads)) {
+function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption(), threadsOf = current => unresolvedThreads(current.number, current.reviewThreads), dismissStale = false) {
   isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
@@ -1357,7 +1357,15 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   lines.push(`merge: ${pr.mergeStateStatus}, review decision: ${pr.reviewDecision ?? 'none'}`);
   assert.equal(pr.latestOpinionatedReviews.nodes.length, pr.latestOpinionatedReviews.totalCount, 'Not every review decision is readable');
   for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) {
-    lines.push(`blocker: changes requested by ${login(review.author)}`);
+    // GitHub's ruleset blocks the merge on a standing change request, so an optional reviewer's answered one (all threads resolved)
+    // is dismissed here, on handoff only; it is never re-requested. The review id comes from the REST list read above.
+    const stale = dismissStale && !threads.length && isOptional(review.author?.login)
+      && reviewList.findLast(item => login(item.user) === login(review.author) && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(item.state));
+    if (stale?.state === 'CHANGES_REQUESTED') {
+      execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${pr.number}/reviews/${stale.id}/dismissals`, '-X', 'PUT', '-f',
+        `message=All review threads are resolved on head ${short}; the change request is stale.`], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
+      lines.push(`dismissed stale change request by ${login(review.author)}: all threads are resolved`);
+    } else lines.push(`blocker: changes requested by ${login(review.author)}`);
   }
   if (pr.mergeStateStatus === 'DIRTY') lines.push('blocker: merge conflicts'); // a non-draft PR returned above
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
@@ -1649,7 +1657,7 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
     process.exitCode = 1;
     return;
   }
-  const result = reviews(stallOption(), Date.now(), prNumber, pr);
+  const result = reviews(stallOption(), Date.now(), prNumber, pr, undefined, undefined, action === 'handoff');
   console.log(result.lines.join('\n'));
   if (!result.done || result.failed) {
     process.exitCode = result.failed || prior.length ? 1 : 3;

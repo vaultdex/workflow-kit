@@ -382,7 +382,8 @@ backlink never closes an issue.
    stands. A reviewer the project lists as
    `"optionalReviewers"` ([setup](../SETUP.md#3-board-and-labels)) is never awaited,
    re-requested or replaced by a self-review: `wait` and `handoff` ignore its traces,
-   while its findings, open threads and change requests count like any other.
+   while its findings, open threads and change requests count like any other. Once all threads
+   are resolved, `handoff` dismisses its standing change request itself (GitHub's ruleset would block the merge).
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
    (`board.mjs ready PR SHA`), set Automated review and wait again. When `reviews` or `wait` print
