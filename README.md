@@ -259,7 +259,7 @@ the installer, so the kit's current one is copied.
   [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` (first after 60 s, then at longer intervals up to 5 minutes, again from 60 s
   when what it awaits changes; twice as long below 1000 quota points), prints `WAITING` lines on change and
-  ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both end
+  ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both end
   with a `quota: …` line (points left, points this run used, reset time). When GitHub's shared GraphQL
   quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), these three sleep until the reset and
   say so on stderr (`rate limited until …`); every other command stops with the reset time
@@ -277,7 +277,8 @@ the installer, so the kit's current one is copied.
   review), bot 👀 reactions and review requests. Free-text announcements of other bots are not
   detected; check such reviewers by hand. Reviewers in `"optionalReviewers"`
   ([setup](SETUP.md#3-board-and-labels)) are skipped for all of these: their checks, comments and
-  reviews are listed, but they never wait, stall or fail; their open threads and change requests still block.
+  reviews are listed and their 👀 reaction is shown as a note, but they never wait, stall or fail; their open threads and
+  change requests still block, and an analyzer such as SonarCloud listed there still reports open issues as a blocker.
 
 ### Handoff comment
 
