@@ -123,7 +123,7 @@ yourself. Without `.githooks/` it does nothing.
 - `field ISSUE NAME VALUE [NAME VALUE ...]`: any single-select fields, all read back together after writing.
   Every pair is checked against the field definitions before the first write: one invalid pair writes
   nothing and names the valid options. `field`, `status` and `priority` report failures as one
-  `ERROR - reason` line (exit 2), not a stack trace. `check` and issue read errors name `OWNER/REPO#N`.
+  `ERROR - reason` line (exit 2, nothing else printed), not a stack trace. `check` and issue read errors name `OWNER/REPO#N`.
 - `status ISSUE "Automated review" PR [OTHER_ISSUE...]` (or `field ISSUE Status
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
   and comment backlink on every delivered issue before writing status. Post and

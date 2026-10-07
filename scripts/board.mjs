@@ -985,13 +985,20 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   console.error(usage);
   process.exit(2);
 }
+// field, status and priority report a failure as one "ERROR - reason" line: their output (verdicts, backlinks, confirmations)
+// is held until the command succeeds, so no failed call shows a write or a check as confirmed. The other commands keep ERROR
+// with "- reason" below it.
+const oneLine = ['field', 'status', 'priority'].includes(command), print = console.log, held = [];
+if (oneLine) console.log = (...parts) => held.push(parts.join(' '));
 try {
   await commands[command]();
+  console.log = print;
+  for (const line of held) print(line);
 } catch (error) {
+  console.log = print;
   // A failed read is never "no blockers" and never a finished review.
   if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link', 'body', 'field', 'status', 'priority'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
-  // field, status and priority report one "ERROR - reason" line; the others keep ERROR with "- reason" below it.
-  console.log(['field', 'status', 'priority'].includes(command) ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
+  console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;
 }

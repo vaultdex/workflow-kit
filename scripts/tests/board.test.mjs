@@ -68,6 +68,8 @@ const query = process.argv.find(arg => arg.startsWith('query=')).slice(6);
 if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('query{viewer'))) process.exit(1);
 let data;
 if (query.startsWith('mutation')) {
+  // mutation-fails: GitHub refuses every write.
+  if (fs.existsSync('mutation-fails')) process.exit(1);
   fs.appendFileSync('mutations', query + '\\n');
   const option = process.argv.find(arg => arg.startsWith('option='));
   if (option) fs.writeFileSync('stored', option.slice(7));
@@ -955,6 +957,13 @@ test('field, status and priority report failures as one ERROR line, and issue fa
   assert.equal(late.status, 2);
   assert.match(late.stdout, /^ERROR - [^\n]*\n$/);
   assert.equal(existsSync(join(checkout, 'mutations')), false);
+  // A write that fails after the guards passed leaves the check's output unprinted too.
+  writeFileSync(join(checkout, 'mutation-fails'), '');
+  const refused = run('status', '1', 'In progress');
+  assert.equal(refused.status, 2);
+  assert.match(refused.stdout, /^ERROR - [^\n]*\n$/);
+  assert.doesNotMatch(refused.stdout, /Assign yourself/, "The start guards passed; the write failed");
+  rmSync(join(checkout, 'mutation-fails'));
   writeIssue(issue());
   // GitHub refuses an unknown issue number: the message says which repository was meant.
   writeFileSync(join(checkout, 'fail'), '');
