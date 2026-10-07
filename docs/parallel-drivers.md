@@ -36,7 +36,16 @@ des Kontingents). `wait` und `reviews` melden den Rest in einer Zeile (`quota: �
 `wait`, `reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 300 (`wait`)
 beziehungsweise 50 Punkten bis zum Reset (`rate limited until …`) und fragen danach weiter; bei
 einer kurzen Drosselung („secondary rate limit“) warten sie 1, 2, dann 4 Minuten statt bis zum
-Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab. Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
+Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab (Uhrzeit und Minuten bis dahin). Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
+Rest und Reset stammen aus den Headern `x-ratelimit-remaining` und `x-ratelimit-reset` der eigenen Antworten
+(auch der abgewiesenen); zeigt eine Abweisung selbst freies Kontingent, fragt der Befehl sofort erneut,
+statt auf eine Reset-Zeit zu warten. `gh api rate_limit` ist kein Beleg: es zeigte am 07.10.2026 für GraphQL einen
+veralteten Wert. Wer die Zeit selbst braucht, fragt `gh api graphql -f query='query{rateLimit{remaining resetAt}}'`;
+diese Abfrage antwortet auch bei leerem Kontingent.
+Viele Issues auf einmal: `board.mjs new --from FILE` statt einer Schleife um `new`. Jede Abfrage und jede
+Mutation kostet 1 Punkt, ein einzelnes `new` braucht 4 Anfragen (vorher 8 bis 9), die Sammel-Anlage für bis zu 16
+Issues zusammen 4 ([README](../README.md#board-commands)). Lesen Sie Issues und Kommentare über REST
+(`gh api repos/OWNER/REPO/issues/N`): `gh issue view` und `gh pr view` fragen GraphQL.
 
 **Review-Bots im Quota.** Ein Reviewer, auf den das Projekt nicht angewiesen ist
 (CodeRabbit auf dem Free-Plan), steht als `"optionalReviewers"` in
@@ -115,8 +124,7 @@ Modellwahl stehen hier nicht.
      (`node.exe`) gehören auch anderen Drivern.
    - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
      und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
-   - `gh issue view N --json comments` liefert die Kommentare; `--comments` passt nicht
-     zu `--json`.
+   - Kommentare eines Issues: `gh api repos/OWNER/REPO/issues/N/comments`.
    - Board-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD check N` (die Option steht vor
      dem Befehl) liest `.github/workflow-project.json` aus dem Klon statt aus dem Arbeitsverzeichnis.
      Ohne sie bestimmt das Arbeitsverzeichnis das Projekt, und ein Status oder Kommentar kann im
