@@ -7,6 +7,9 @@ body:
         Braucht die Aufgabe eine menschliche Entscheidung oder Handlung? Dann nach dem Erstellen
         `## Menschliche Mitwirkung nötig` als ersten Abschnitt ergänzen und das Label
         `needs-human-input` setzen (Wer, Was fehlt, Wirkung, Antwortweg). Sonst weglassen.
+
+        Bei einer Spec oder längeren Aufgabe nach dem Erstellen `## Kurz gesagt` ergänzen (2 bis 4 Sätze in
+        einfacher Sprache, nach `## Menschliche Mitwirkung nötig`, falls vorhanden). Kurze Aufgaben brauchen es nicht.
   - type: textarea
     id: purpose
     attributes:

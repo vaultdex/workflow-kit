@@ -67,10 +67,12 @@ if (!path.startsWith('graphql')) {
   if (parts[3] === 'compare') {
     // compare.json: { behind: commits the base gained, own: files of the PR, base: files of the base }; by default the base has not moved.
     const moved = fs.existsSync('compare.json') ? JSON.parse(fs.readFileSync('compare.json')) : { behind: 0, own: [], base: [] };
-    const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
-    // The PR's base branch name holds a slash, so the first side tells the direction: BASE...HEAD lists the PR's files.
-    const forward = parts.slice(4).join('/').startsWith('release/0.1.1...');
-    const files = (forward ? moved.own : moved.base).slice((page - 1) * 100, page * 100).map(filename => ({ filename }));
+    // gh cuts a request at an unencoded "#", so a ref that is not encoded never reaches GitHub whole.
+    if (path.includes('#')) process.exit(1);
+    // BASE...HEAD lists the PR's files, HEAD...BASE those of the base. GitHub lists up to 300 files, all on page 1.
+    const base = decodeURIComponent(parts.slice(4).join('/')).split('...')[0];
+    const forward = base === JSON.parse(fs.readFileSync('pr.json')).baseRefName;
+    const files = (forward ? moved.own : moved.base).slice(0, 300).map(filename => ({ filename }));
     process.stdout.write(JSON.stringify({ behind_by: forward ? moved.behind : 0, files }));
     process.exit(0);
   }
@@ -192,6 +194,11 @@ else {
   data = { repository: { issue } };
 }
 process.stdout.write(JSON.stringify({ data }));`);
+  // `gh pr merge …` runs this script: it records the call; merge-fails is gh refusing, merge-noop a merge that never shows.
+  writeFileSync(join(checkout, 'pr'), `const fs = require('node:fs');
+fs.appendFileSync('merges', process.argv.slice(2).join(' ') + '\\n');
+if (fs.existsSync('merge-fails')) { process.stderr.write('gh: Head branch was modified\\n'); process.exit(1); }
+if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));`);
   const env = {};
   return {
     checkout, env,
@@ -1450,7 +1457,7 @@ test('reviews reports a moved base with the files both sides changed and never b
   assert.match(moved.stdout, /changed on both sides: b\.mjs$/m);
   assert.match(look({ behind: 1, own: ['a.mjs'], base: ['c.mjs'] }).stdout, /no file is changed on both sides/);
 
-  // Past the first page of 100 files, and more shared files than are listed.
+  // More than 100 files come on one page (GitHub's cap is 300), and more shared files than are listed.
   const many = Array.from({ length: 150 }, (_, index) => `file-${index}`);
   assert.match(look({ behind: 1, own: many, base: ['file-149'] }).stdout, /changed on both sides: file-149$/m);
   assert.match(look({ behind: 1, own: many.slice(0, 12), base: many.slice(0, 12) }).stdout, /, and 2 more$/m);
@@ -1462,7 +1469,70 @@ test('reviews reports a moved base with the files both sides changed and never b
   assert.equal(failed.status, 1);
   assert.match(failed.stdout, /base moved: 2 commits/);
 
+  // A branch name with "#" must reach GitHub whole.
+  assert.match(look({ behind: 1, own: ['a'], base: ['a'] }, { baseRefName: 'topic#1' }).stdout, /base moved: 1 commits since merge-base \(topic#1\)/);
+
   const unreadable = look('unreadable');
   assert.equal(unreadable.status, 0, 'An unreadable comparison keeps the verdict');
   assert.match(unreadable.stdout, /note: base movement unreadable/);
+});
+
+test('merge merges the checked head by its full id only when no review is running, and proves the merge', t => {
+  const { checkout, run } = fixture(t);
+  const merges = join(checkout, 'merges');
+  const oid = 'abcdef1' + '0'.repeat(33);
+  const commit = handoffPr().commits.nodes[0].commit;
+  const withHead = (headRefOid, changes) => handoffPr({ headRefOid, commits: { nodes: [{ commit: { ...commit, oid: headRefOid } }] }, ...changes });
+  const write = (pr, comments = []) => {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr));
+    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
+  };
+  const codexRunning = { id: 1, user: { login: 'chatgpt-codex-connector[bot]', type: 'Bot' }, html_url: 'u', created_at: pushedAt(), updated_at: pushedAt(),
+    body: `| Code Review | ⏳ **Running** <relative-time datetime="${pushedAt()}"></relative-time> | \`abcdef1\` |` };
+  const failedCi = { ...commit, oid, statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } };
+  const refused = [
+    ['a reviewer that is still running', withHead(oid), [codexRunning], 3],
+    ['an open review request', withHead(oid, { reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { login: 'reviewer' } }] },
+      requestEvents: { totalCount: 1, nodes: [{ createdAt: pushedAt(), requestedReviewer: { login: 'reviewer' } }] } }), [], 3],
+    ['red CI', withHead(oid, { commits: { nodes: [{ commit: failedCi }] } }), [], 1],
+    ['a Draft', withHead(oid, { isDraft: true }), [], 1],
+    ['a merged PR', withHead(oid, { state: 'MERGED' }), [], 1],
+    ['an unresolved thread', withHead(oid, { threadPages: [[false]] }), [], 1],
+    ['conflicts', withHead(oid, { mergeStateStatus: 'DIRTY' }), [], 1],
+    ['an undetermined merge state', withHead(oid, { mergeStateStatus: 'UNKNOWN' }), [], 3],
+    ['a standing change request', withHead(oid, { latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'reviewer' } }] } }), [], 1],
+    ['a short head id, which gh --match-head-commit refuses', handoffPr(), [], 2],
+  ];
+  for (const [label, pr, comments, status] of refused) {
+    write(pr, comments);
+    const result = run('merge', '7');
+    assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
+    assert.equal(existsSync(merges), false, `${label}: gh pr merge is never called`);
+  }
+  // The refusal names the reviewer that is still running.
+  write(withHead(oid), [codexRunning]);
+  assert.match(run('merge', '7').stdout, /waiting: chatgpt-codex-connector running since/);
+  write(withHead(oid));
+  writeFileSync(join(checkout, 'fail'), '');
+  assert.equal(run('merge', '7').status, 2, 'An API read failure is unknown, never a merge');
+  rmSync(join(checkout, 'fail'));
+  assert.equal(existsSync(merges), false);
+  assert.equal(run('merge', '7', '--stall', '0').status, 2, 'A bad option is rejected');
+  assert.equal(run('merge', '7', '8').status, 2, 'A stray argument is rejected');
+
+  const merged = run('merge', '7');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.equal(readFileSync(merges, 'utf8'), `merge 7 --repo test/example --merge --match-head-commit ${oid}\n`, 'gh gets the full head id');
+  assert.match(merged.stdout, new RegExp(`^MERGED #7 head ${oid} merge commit f{40}$`, 'm'));
+
+  for (const flag of ['merge-fails', 'merge-noop']) {
+    rmSync(merges);
+    write(withHead(oid));
+    writeFileSync(join(checkout, flag), '');
+    const result = run('merge', '7');
+    assert.equal(result.status, 2, `${flag}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /^ERROR$/m);
+    assert.doesNotMatch(result.stdout, /^MERGED/m, 'Only a read-back showing the merge counts');
+    rmSync(join(checkout, flag));
+  }
 });
