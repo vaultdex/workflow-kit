@@ -18,10 +18,15 @@ function graphql(query, variables = {}) {
   return JSON.parse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 })).data;
 }
 
-const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
-  id number title state body bodyHTML assignees(first:10){nodes{login}}
+// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query.
+const issueFields = `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
-  blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}}}}`;
+  blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}`;
+// ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
+const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
+  ${issueFields} bodyHTML
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
+  subIssues(first:100){totalCount nodes{${issueFields}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
@@ -104,10 +109,11 @@ function claimReasons(issue, session) {
   if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
   else if (holder && !session) notes.push(`newest claim: ${about(holder)}; pass --session ID to compare it with yours`);
   if (legacy) notes.push(`claim without Agent/Session field, session unknown: ${legacy.html_url}`);
-  return { blocked, notes };
+  return { blocked, notes, claim: holder ?? (legacy && { session: undefined, comment: legacy }) };
 }
 
-function check(issue = readIssue(), claims) {
+/** Verdict inputs of one issue, shared by the issue itself and its sub-issues. */
+function issueReasons(issue) {
   const status = projectItem(issue)?.status?.name;
   const blocked = [], unknown = [];
   if (issue.state !== 'OPEN') blocked.push('issue is closed');
@@ -121,19 +127,45 @@ function check(issue = readIssue(), claims) {
   const waits = waitReasons(issue.body);
   blocked.push(...waits.blocked);
   unknown.push(...waits.unknown);
+  return { status, blocked, unknown };
+}
+const verdictOf = ({ blocked, unknown }) => blocked.length ? 'BLOCKED' : unknown.length ? 'UNKNOWN' : 'STARTABLE';
+// #N in the project's repository, OWNER/REPO#N elsewhere: a bare number must never name a same-number issue or PR of another repository.
+const refOf = (repository, number) => `${repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() ? '' : repository.nameWithOwner}#${number}`;
+const logins = issue => issue.assignees.nodes.map(assignee => assignee.login).join(', ');
+const ago = ms => {
+  const minutes = Math.max(0, Math.floor(ms / 60_000)), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60);
+  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+};
+
+/** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
+function check(issue = readIssue(), claims) {
+  const { status, blocked, unknown } = issueReasons(issue);
   const notes = [];
+  let claim;
   if (claims) try {
     const found = claimReasons(issue, claims.session);
     blocked.push(...found.blocked);
     notes.push(...found.notes);
+    claim = found.claim;
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
-  let verdict = 'STARTABLE';
-  if (unknown.length) verdict = 'UNKNOWN';
-  if (blocked.length) verdict = 'BLOCKED';
-  const assignees = issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none';
-  console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${assignees}\n${verdict}`);
+  const verdict = verdictOf({ blocked, unknown });
+  console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
   for (const note of notes) console.log(`note: ${note}`);
+  if (claim) {
+    const linked = issue.closedByPullRequestsReferences;
+    const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => refOf(pr.repository, pr.number));
+    // A list cut at 100 is never presented as complete.
+    const cut = linked?.totalCount > linked?.nodes?.length ? ` (first ${linked.nodes.length} of ${linked.totalCount})` : '';
+    console.log(`claim: ${ago(Date.now() - Date.parse(claim.comment.created_at))} ago (Session ${claim.session ?? 'unknown'}), open PR: ${prs ? prs.join(', ') || 'none' : 'unknown'}${cut}`);
+  }
+  if (claims && issue.subIssues?.nodes?.length) {
+    if (issue.subIssues.totalCount > issue.subIssues.nodes.length) console.log(`note: ${issue.subIssues.nodes.length} of ${issue.subIssues.totalCount} sub-issues listed`);
+    for (const child of issue.subIssues.nodes) {
+      console.log(`${refOf(child.repository, child.number)}  ${projectItem(child)?.status?.name ?? '-'}  ${logins(child) || '-'}  ${verdictOf(issueReasons(child))}`);
+    }
+  }
   process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2 }[verdict];
   return verdict;
 }
@@ -297,6 +329,27 @@ function restAll(path, expected) {
   }
 }
 
+/** Every comment of an open issue, complete and unique, or an exception: a partial list must never read as "no backlink". */
+function issueComments(repository, issueNumber) {
+  const issue = rest(`repos/${repository}/issues/${issueNumber}`);
+  assert.ok(issue?.number === issueNumber && issue.state === 'open' && !issue.pull_request,
+    `#${issueNumber} is not an open issue`);
+  assert.ok(Number.isSafeInteger(issue.comments) && issue.comments >= 0, 'Issue comment count is unreadable');
+  const comments = restAll(`repos/${repository}/issues/${issueNumber}/comments`, issue.comments);
+  assert.equal(comments.length, issue.comments, `Not every comment on #${issueNumber} is readable; retry the read`);
+  assert.ok(comments.every(comment => Number.isSafeInteger(comment?.id) && typeof comment.body === 'string'), 'Unreadable issue comment');
+  assert.equal(new Set(comments.map(comment => comment.id)).size, comments.length, 'Duplicate comment page');
+  return comments;
+}
+
+/** The comment that `status ... "Automated review"` accepts: it names the PR's full URL, whatever surrounds it. Shared by that guard and `link`. */
+const findBacklink = (comments, prUrl) => comments.find(comment => (comment.body.match(/https?:\/\/[^\s<>()[\]`"']+/g) ?? []).some(link => {
+  try {
+    const target = new URL(link.replace(/[.,;:!?]+$/, ''));
+    return target.origin === prUrl.origin && target.pathname.replace(/\/$/, '') === prUrl.pathname;
+  } catch { return false; } // An unrelated malformed URL is not a backlink.
+}));
+
 /** Explicit scope works with Refs on release branches; native closing links remain a separate proof. */
 function verifyBacklinks() {
   const [prRef, ...extraIssues] = process.argv.slice(command === 'field' ? 6 : 5);
@@ -316,21 +369,9 @@ function verifyBacklinks() {
     const qualifier = `(?:${RegExp.escape(repository)})${repository === project.repository ? '?' : ''}`;
     const reference = new RegExp(`(?<![\\w/])${qualifier}#${issueNumber}(?!\\w)`, 'i');
     assert.ok(reference.test(pr.body), `PR #${prNumber} does not reference ${issueRef}`);
-    const issue = rest(`repos/${repository}/issues/${issueNumber}`);
-    assert.ok(issue?.number === issueNumber && issue.state === 'open' && !issue.pull_request,
-      `#${issueNumber} is not an open issue`);
-    assert.ok(Number.isSafeInteger(issue.comments) && issue.comments >= 0, 'Issue comment count is unreadable');
-    const comments = restAll(`repos/${repository}/issues/${issueNumber}/comments`, issue.comments);
-    assert.equal(comments.length, issue.comments, `Not every comment on #${issueNumber} is readable; retry the read`);
-    assert.ok(comments.every(comment => Number.isSafeInteger(comment?.id) && typeof comment.body === 'string'), 'Unreadable issue comment');
-    assert.equal(new Set(comments.map(comment => comment.id)).size, comments.length, 'Duplicate comment page');
-    const backlink = comments.find(comment => (comment.body.match(/https?:\/\/[^\s<>()[\]`"']+/g) ?? []).some(link => {
-      try {
-        const target = new URL(link.replace(/[.,;:!?]+$/, ''));
-        return target.origin === url.origin && target.pathname.replace(/\/$/, '') === url.pathname;
-      } catch { return false; } // An unrelated malformed URL is not a backlink.
-    }));
-    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; post the full URL and retry`);
+    const backlink = findBacklink(issueComments(repository, issueNumber), url);
+    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; ${repository === project.repository
+      ? `run board.mjs link ${issueNumber} ${prNumber}` : 'post the full URL as a comment'} and retry`);
     console.log(`backlink ${issueRef}: ${backlink.html_url}`);
   }
 }
@@ -670,13 +711,15 @@ function body() {
   console.log(`BODY #${number} written and read back`);
 }
 
-/** Connect the issue natively to the PR (what a closing keyword does only on the default branch) and read it back. */
+/** Connect the issue natively to the PR (what a closing keyword does only on the default branch), post the backlink comment `status` requires, and read both back. */
 function link() {
   const prNumber = Number(value);
   const issue = readIssue();
   assert.ok(issue?.id, 'Issue identity is unreadable');
+  // The backlink comment belongs on an open issue (the guard requires one); refuse before any write instead of half-way.
+  assert.equal(issue.state, 'OPEN', `#${number} is not an open issue`);
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-    pullRequest(number:$number){id number state headRefOid}}}`, { owner, name, number: prNumber }).repository;
+    pullRequest(number:$number){id number state url headRefOid}}}`, { owner, name, number: prNumber }).repository;
   assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${value} is not an open pull request of ${project.repository}`);
   // Already connected is a success without a write; a Draft PR can be connected too.
   if (!connectedIssues(pr, true).has(issue.id)) {
@@ -690,6 +733,16 @@ function link() {
     }
   }
   console.log(`#${number} is natively linked to PR #${value}`);
+  // An existing comment is a success without a write. The text goes over stdin, like in `body`; the guard's reader proves it.
+  const prUrl = new URL(pr.url);
+  let backlink = findBacklink(issueComments(project.repository, number), prUrl);
+  if (!backlink) {
+    execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}/comments`, '-X', 'POST', '-F', 'body=@-'],
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `PR: ${pr.url}\n` });
+    backlink = findBacklink(issueComments(project.repository, number), prUrl);
+    assert.ok(backlink, `Backlink read-back differs: the comment with ${pr.url} is not readable on #${number}; read the comments before writing again`);
+  }
+  console.log(`backlink #${number}: ${backlink.html_url}`);
 }
 
 /**
