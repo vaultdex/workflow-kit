@@ -921,7 +921,7 @@ function createMany([file, ...extra]) {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state isDraft createdAt headRefName headRefOid baseRefName mergeStateStatus reviewDecision isCrossRepository headRepository{nameWithOwner}
+  number state isDraft createdAt headRefName headRefOid baseRefName mergeStateStatus reviewDecision isCrossRepository headRepository{nameWithOwner}${project.selfReview === undefined ? '' : ' bodyHTML'}
   readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
@@ -1572,20 +1572,51 @@ function handoffIssue(issue, viewer, reviewedHead, currentPrNumber) {
 const findHandoffComment = (comments, viewer, headRefOid) => comments.findLast(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
   && /^## Übergabe\s*$/m.test(comment.body ?? '') && new RegExp(`^Head:\\s*${headRefOid.slice(0, 7)}`, 'im').test(comment.body ?? ''));
 
+// ponytail: relies on GitHub's markup (h1-h6, li, issue-link); replace when GitHub changes it.
+const text = html => html.replace(/<\/?(?:br|p|div|li|h[1-6]|ul|ol|blockquote)\b[^>]*>/gi, ' ')
+  .replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+const headingText = part => text(part.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/)?.[1] ?? '');
+/** A quoted template is no section: drop quotes (innermost first, so nesting works) before searching. */
+function withoutQuotes(html) {
+  let unquoted = html;
+  for (let previous; previous !== unquoted;) { previous = unquoted; unquoted = unquoted.replace(/<blockquote[\s>](?:(?!<blockquote[\s>])[\s\S])*?<\/blockquote>/g, ''); }
+  return unquoted;
+}
+
+/**
+ * Why the PR body, as GitHub renders it, does not carry the self-review the project asks for: the project file's
+ * "selfReview" lists the checks (for example "ponytail-review", "code-review") that the section "Selbstprüfung" (a heading of
+ * any level; its sub-headings belong to it) must name. Whether a check was good is not judged. Without the field nothing is asked.
+ */
+// ponytail: a name counts when the section mentions it, the section is not proof the check ran; replace when a check leaves a trace.
+function selfReviewChecks() {
+  const checks = project.selfReview === undefined ? [] : project.selfReview; // only a missing field is allowed; null is malformed
+  assert.ok(Array.isArray(checks) && checks.every(check => typeof check === 'string' && check.trim()), 'selfReview must be a list of non-empty check names');
+  return checks;
+}
+function selfReviewReasons(bodyHtml, checks) {
+  if (!checks.length) return [];
+  assert.equal(typeof bodyHtml, 'string', 'The rendered PR body is unreadable');
+  const parts = withoutQuotes(bodyHtml).split(/(?=<h[1-6][\s>])/), level = part => Number(/^<h([1-6])[\s>]/.exec(part)?.[1]);
+  const start = parts.findIndex(part => level(part) && headingText(part) === 'Selbstprüfung');
+  if (start < 0) return [`the PR body needs a "## Selbstprüfung" section that names ${checks.join(', ')} (docs/CONTRIBUTING.md#review-loop, step 1)`];
+  let end = start + 1;
+  while (end < parts.length && level(parts[end]) > level(parts[start])) end++;
+  const section = text(parts.slice(start, end).join(''));
+  const missing = checks.filter(check => !new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_-])${RegExp.escape(check.trim())}(?![\\p{L}\\p{M}\\p{N}_-])`, 'iu').test(section));
+  return missing.length ? [`the "Selbstprüfung" section of the PR body does not name: ${missing.join(', ')}`] : [];
+}
+
 /**
  * Why the retro section of the handoff comment, as GitHub renders it, does not pass: a heading "Retro" with one list
  * line per finding, each ending with its resolution (an issue link, "behoben in <SHA>", "persönlich gemeldet" or
  * "kein Handlungsbedarf: <Grund>"), or the single line "Keine Funde". Whether a finding is justified is not judged.
  * GitHub's rendering decides what a heading, a list line and an issue reference are, so no Markdown is parsed here.
  */
-// ponytail: relies on GitHub's markup (h1-h6, li, issue-link); replace when GitHub changes it.
 function retroReasons(bodyHtml) {
   assert.equal(typeof bodyHtml, 'string', 'The rendered handoff comment is unreadable');
-  const text = html => html.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
-  // A quoted template is no section: drop quotes (innermost first, so nesting works) before searching.
-  let unquoted = bodyHtml;
-  for (let previous; previous !== unquoted;) { previous = unquoted; unquoted = unquoted.replace(/<blockquote[\s>](?:(?!<blockquote[\s>])[\s\S])*?<\/blockquote>/g, ''); }
-  const section = unquoted.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && text(part.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/)?.[1] ?? '') === 'Retro');
+  const unquoted = withoutQuotes(bodyHtml);
+  const section = unquoted.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && headingText(part) === 'Retro');
   const lines = [...(section ?? '').matchAll(/<li[^>]*>([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>])/g)].map(([, line]) => [line, text(line)]);
   if (!lines.length) return ['the handoff comment needs a "Retro" section with one list line per finding, each ending with its resolution, or the single line "Keine Funde" (README: Handoff comment)'];
   if (lines.length === 1 && /^keine funde\.?$/i.test(lines[0][1])) return [];
@@ -1600,14 +1631,17 @@ function retroReasons(bodyHtml) {
 /**
  * The PR gate handoff and merge share: an open non-draft PR whose CI and every traced review have finished, without
  * blockers or open threads, and with a determined merge state. Prints the verdict and sets the exit code; returns the
- * review result only when it holds. `extra` adds the caller's own reasons (it runs only once the shared gate holds).
+ * review result only when it holds. Its own reasons include the self-review section of the PR body ("selfReview" of the project file).
+ * `extra` adds the caller's own further reasons (it runs only once the shared gate holds).
  * `prior` are reasons the caller found before (the issue side of handoff): they are listed with the PR's, in one run.
  * GitHub computes the merge state late: an undetermined one is read again a few times (`--interval` seconds apart, at
  * 1 point each) before it counts as waiting.
  */
 const mergeStates = ['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'], mergeReads = 4;
 function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []) {
+  const checks = selfReviewChecks();
   const pr = readPr(prNumber);
+  if (checks.length) assert.equal(typeof pr.bodyHTML, 'string', 'The rendered PR body is unreadable');
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
   const blockers = reasons => reasons.map(reason => `blocker: ${reason}`);
   if (pr.state !== 'OPEN' || pr.isDraft) {
@@ -1627,7 +1661,7 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push(`resolve review blockers and threads before ${action}`);
   }
-  reasons.push(...extra(result));
+  reasons.push(...selfReviewReasons(result.pr.bodyHTML, checks), ...extra(result));
   const undetermined = state => !state || state === 'UNKNOWN';
   let state = result.pr.mergeStateStatus;
   for (let read = 1; undetermined(state) && read < mergeReads; read++) {

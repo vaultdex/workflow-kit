@@ -276,7 +276,10 @@ and then work in that directory, their relative paths (changed files given to `a
   span or glued to letters is no reference). The handoff comment must also carry a
   `Retro` section whose every list line ends with its resolution (exit 1 otherwise, status
   untouched, every line without one is printed); it is read as GitHub renders it too.
-  One run lists every missing point together (open acceptance, assignment, handoff comment, retro, native link, blockers
+  When the project file lists `"selfReview"` (for example `["ponytail-review", "code-review"]`), the PR body must also
+  carry a `## Selbstprüfung` section that names each of those checks (`merge` asks for it too); a heading of any level counts,
+  quoted templates do not, and whether a check was good is not judged. Without the field nothing changes.
+  One run lists every missing point together (open acceptance, assignment, handoff comment, retro, self-review section, native link, blockers
   and threads; a refused issue state, an unreadable read or running reviews are reported alone or first), so one fix round
   suffices. An undetermined merge state (`UNKNOWN`) is read again up to 3 times, `--interval SECONDS` apart (default 3,
   1 point per read; `merge` too) before `handoff` reports it as waiting.
@@ -286,7 +289,7 @@ and then work in that directory, their relative paths (changed files given to `a
 - `merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]`: the only way for an agent with merge
   authority to merge ([review loop](docs/CONTRIBUTING.md#review-loop) step 7). It applies the review gates of
   `handoff` (open non-draft PR, CI green, every reviewer with a trace on the head finished or
-  stalled, no `blocker:` line, no open thread, determined merge state) and prints the same
+  stalled, no `blocker:` line, no open thread, determined merge state, the PR body's `Selbstprüfung` section when the project lists `"selfReview"`) and prints the same
   lines; a running reviewer ends `WAITING` (exit 3) and names it, a red check or blocker
   `FAILED` (exit 1), and nothing is merged. If the base moved and `changed on both sides` lists files, it first
   merges the base into the PR branch (`PUT pulls/N/update-branch` with the checked head as `expected_head_sha`),
