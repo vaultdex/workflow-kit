@@ -125,6 +125,10 @@ Modellwahl stehen hier nicht.
    - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
      und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
    - Kommentare eines Issues: `gh api repos/OWNER/REPO/issues/N/comments`.
+   - Board-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD check N` (die Option steht vor
+     dem Befehl) liest `.github/workflow-project.json` aus dem Klon statt aus dem Arbeitsverzeichnis.
+     Ohne sie bestimmt das Arbeitsverzeichnis das Projekt, und ein Status oder Kommentar kann im
+     falschen Issue landen; ein `cd … &&` ist dafür nicht nötig.
    - Worktree: der Driver arbeitet im eigenen Worktree, nie in dem der Eltern-Session;
      hat er keinen, legt er ihn als Erstes an. Scratch-Dateien tragen die Issue-Nummer.
    - Kit-Stand: Hooks und Skills eines Subagenten kommen aus dem Start-Worktree der

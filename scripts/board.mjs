@@ -1,17 +1,26 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
 // Run in the project: board.mjs next | check | status | priority | field | new | block | sub | reviews | wait | merge (see usage below).
+// `--cwd PATH` as the first argument runs it for the project in PATH from any directory: without it the
+// working directory decides the project, and a driver in another project would read and write the wrong board.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { externalTool } from './checkout-root.mjs';
 import { isRateLimited, quotaOf, retryAt, splitResponse, untilText, waitInterval } from './quota.mjs';
 
+// Taken off here: the commands below read their arguments by position.
+const projectDirectory = process.argv[2] === '--cwd' ? process.argv.splice(2, 2)[1] : '.';
+if (!projectDirectory || projectDirectory.startsWith('--')) {
+  console.error('--cwd needs the directory of the project (the one holding .github/workflow-project.json)');
+  process.exit(2);
+}
 const [command, ref, value] = process.argv.slice(2);
-const project = JSON.parse(readFileSync('.github/workflow-project.json', 'utf8'));
+const project = JSON.parse(readFileSync(join(projectDirectory, '.github/workflow-project.json'), 'utf8'));
 const [owner, name] = project.repository.split('/');
 // `new` has no issue yet and assigns the number it creates.
 let number = Number(String(ref).replace(/^#/, ''));
-const gh = externalTool('gh', process.cwd());
+const gh = externalTool('gh', process.cwd(), projectDirectory);
 
 // The account's GraphQL quota (5000 points an hour) is shared by every agent on it. Every response carries what is left and when it
 // resets in its headers (`gh api -i`, also on a refusal), so no extra request asks for it; a query reads its own cost.
@@ -1654,7 +1663,7 @@ function sub() {
 
 const commands = { next, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
   reviews: reviewsOnce, wait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
-const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
+const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | new --from FILE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
