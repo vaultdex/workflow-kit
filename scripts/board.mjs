@@ -1575,9 +1575,19 @@ const mergeGate = () => finishedPr(number, 'merge', undefined, () => {
     .filter(member => member.state === 'open').map(member => `PR #${member.number} below it in its stack is still open: merge it first, merging this layer would merge it too`));
 });
 
-/** Merge the moved base into the PR branch (update-branch, only if the head is still `head`), then wait until the PR shows the new head. */
-function updateBranch(head) {
-  execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/update-branch`, '-X', 'PUT', '-f', `expected_head_sha=${head}`], { encoding: 'utf8', env: gh.env });
+/**
+ * Merge the moved base into the PR branch (update-branch, only if the head is still `head`), then wait until the PR shows the new head.
+ * GitHub answers 403 for a PR with stacked children (#321): that ends the run with the manual way (nobody pushes for the caller) and returns nothing.
+ */
+function updateBranch(head, base) {
+  try {
+    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/update-branch`, '-X', 'PUT', '-f', `expected_head_sha=${head}`], { encoding: 'utf8', env: gh.env });
+  } catch (error) {
+    if (!/\b403\b/.test(`${error.stderr}${error.stdout}`)) throw error;
+    console.log(['FAILED', `blocker: GitHub refuses the branch update with 403 (typical for a PR with stacked children): run \`git merge origin/${base}\` in the PR's worktree, push once, then run \`board.mjs merge ${number}\` again`].join('\n'));
+    process.exitCode = 1;
+    return;
+  }
   // update-branch answers 202 before the new head exists, and the PR reports the previous head for a moment.
   for (let read = 1; ; read++) {
     const fresh = graphql(readyQuery, { owner, name, number }).repository.pullRequest.headRefOid;
@@ -1617,7 +1627,8 @@ function deleteHeadBranch(pr) {
  * thread). When the base moved under files the PR changes too (#190), the base is merged into the PR branch first and the
  * gate runs again on the new head after its CI; a base that moved without overlap does not hold the merge. Then exactly the
  * checked head: `--match-head-commit` needs the full object id, and it also refuses a push that lands after the check, so
- * no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR. Afterwards the head branch goes (see deleteHeadBranch).
+ * no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR, except the 403 of a PR with stacked children (#321),
+ * which goes once to merge-async with the same head and is read back until merged. Afterwards the head branch goes (see deleteHeadBranch).
  */
 async function merge() {
   let result = mergeGate();
@@ -1627,18 +1638,37 @@ async function merge() {
   const moved = baseMovement(result.pr);
   if (moved?.shared.length) {
     console.log(`update: ${baseRefName} gained ${moved.behind} commits that change ${filesText(moved.shared)} like this PR; merging it into the PR branch first`);
-    console.log(`updated: head ${before.slice(0, 7)} -> ${updateBranch(before).slice(0, 7)}; waiting for CI`);
+    const updated = updateBranch(before, baseRefName);
+    if (!updated) return;
+    console.log(`updated: head ${before.slice(0, 7)} -> ${updated.slice(0, 7)}; waiting for CI`);
     // The new head's CI (and any reviewer that answers the push) decides, so the gate runs again; one update per run.
     if (!await poll(() => reviews(stallOption()))) return;
     result = mergeGate();
     if (!result) return;
   }
   const { headRefOid } = result.pr;
-  execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
-    { encoding: 'utf8', env: gh.env });
-  const { state, mergeCommit } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-    pullRequest(number:$number){state mergeCommit{oid}}}}`, { owner, name, number }).repository.pullRequest;
-  assert.equal(state, 'MERGED', `Merge read-back shows #${number} as ${state}`);
+  let asynchronous = false;
+  try {
+    execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
+      { encoding: 'utf8', env: gh.env });
+  } catch (error) {
+    // A PR with stacked children (#321) is refused with 403, but accepted by merge-async: same merge, same head, the answer is 202 and the merge follows in the background.
+    // ponytail: gh prints no fixed text for it (gh pr merge goes through GraphQL), so 403, "forbidden" and "stack" count; narrow it once a real refusal is captured.
+    if (!/\b403\b|forbidden|\bstack/i.test(`${error.stderr}${error.stdout}`)) throw error;
+    console.log('note: gh pr merge was refused (403, typical for a PR with stacked children); merging the same head with merge-async');
+    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/merge-async`, '-X', 'PUT', '-f', 'merge_action=direct_merge', '-f', 'merge_method=merge', '-f', `sha=${headRefOid}`],
+      { encoding: 'utf8', env: gh.env });
+    asynchronous = true;
+  }
+  let merged;
+  for (let read = 1; ; read++) {
+    merged = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+      pullRequest(number:$number){state mergeCommit{oid}}}}`, { owner, name, number }).repository.pullRequest;
+    if (!asynchronous || merged.state === 'MERGED' || read >= 10) break;
+    sleep(numberOption('--interval', 3));
+  }
+  const { state, mergeCommit } = merged;
+  assert.equal(state, 'MERGED', `Merge read-back shows #${number} as ${state}${asynchronous ? '; merge-async was accepted and may still land: read the PR before merging again' : ''}`);
   console.log(`MERGED #${number} head ${headRefOid} merge commit ${mergeCommit?.oid}`);
   // The merge is done and read back: nothing about the branch may turn it into an ERROR.
   try { console.log(deleteHeadBranch(result.pr)); } catch (error) {

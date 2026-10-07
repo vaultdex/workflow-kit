@@ -74,9 +74,21 @@ function api(argv, input, stdout, stderr, exit) {
       // update-fails: GitHub refuses (conflict, or the head is not the expected one). Otherwise the base is part of the branch now;
       // the new head shows through pr-reads.json, which GitHub also shows late.
       fs.appendFileSync('calls', `update-branch ${argv.find(arg => arg.startsWith('expected_head_sha=')).slice(18)}\n`);
-      if (fs.existsSync('update-fails')) { stderr('gh: merge conflict (HTTP 422)\n'); exit(1); }
+      // update-fails: GitHub refuses; "403" in the file: the refusal of a PR with stacked children.
+      if (fs.existsSync('update-fails')) { stderr(fs.readFileSync('update-fails', 'utf8') === '403' ? 'gh: Forbidden (HTTP 403)\n' : 'gh: merge conflict (HTTP 422)\n'); exit(1); }
       fs.rmSync('compare.json', { force: true });
       stdout('{"message":"Updating pull request branch."}');
+      exit(0);
+    }
+    if (parts[3] === 'pulls' && parts[5] === 'merge-async' && argv.includes('PUT')) {
+      // merge-async answers 202 and merges in the background: merge-async-late shows the merge from the second read on, merge-async-fails is GitHub refusing.
+      fs.appendFileSync('calls', 'merge-async\n');
+      fs.appendFileSync('async-merges', argv.filter(arg => /^(merge_action|merge_method|sha)=/.test(arg)).join(' ') + '\n');
+      if (fs.existsSync('merge-async-fails')) { stderr('gh: Forbidden (HTTP 403)\n'); exit(1); }
+      const merged = { state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } };
+      if (fs.existsSync('merge-async-late')) fs.writeFileSync('pr-reads.json', JSON.stringify([{}, merged]));
+      else fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...merged }));
+      stdout('{"status":"pending"}');
       exit(0);
     }
     if (parts[3] === 'pulls' && parts.length === 4) {
@@ -324,6 +336,8 @@ function pr(argv, input, stdout, stderr, exit) {
   fs.appendFileSync('merges', argv.slice(2).join(' ') + '\n');
   fs.appendFileSync('calls', 'merge\n');
   if (fs.existsSync('merge-fails')) { stderr('gh: Head branch was modified\n'); exit(1); }
+  // merge-403: the refusal of a PR with stacked children.
+  if (fs.existsSync('merge-403')) { stderr('gh: Forbidden (HTTP 403)\n'); exit(1); }
   if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));
 }
 

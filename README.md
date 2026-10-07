@@ -285,9 +285,13 @@ and then work in that directory, their relative paths (changed files given to `a
   merges the base into the PR branch (`PUT pulls/N/update-branch` with the checked head as `expected_head_sha`),
   waits for the new head and its CI like `wait` (`--max-minutes`, default 9: then `still waiting: call merge again`,
   exit 4; run `merge` again), checks the gates again and merges that head; a base that moved without
-  an overlap does not hold the merge. Then it runs `gh pr merge --merge
-  --match-head-commit <full head id>` once (a push after the check makes gh refuse) and counts
-  only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; gh
+  an overlap does not hold the merge. If GitHub refuses that update with 403 (a PR with stacked children), `merge` ends
+  `FAILED` (exit 1) and tells you to run `git merge origin/<base>` in the PR's worktree, push once and call `merge` again;
+  it never pushes for you. Then it runs `gh pr merge --merge
+  --match-head-commit <full head id>` once (a push after the check makes gh refuse; a 403 of a PR with stacked children
+  goes once to `PUT pulls/N/merge-async` with `merge_action=direct_merge`, `merge_method=merge` and `sha` = the same head,
+  and the merge is read back until it shows) and counts
+  only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; any other gh
   refusal or a read-back that differs: `ERROR`, exit 2). A layer of a [stack](docs/CONTRIBUTING.md#stacked-pull-requests)
   with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. After the merge it
   deletes the head branch (`branch deleted: …`) unless the repository's setting "Automatically delete head branches" does it,
