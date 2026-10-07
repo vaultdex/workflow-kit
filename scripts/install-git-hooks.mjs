@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { externalTool, projectRoot } from './checkout-root.mjs';
 
-// Explicit setup: points Git at the project's versioned .githooks, per clone, and adds its post-checkout kit sync.
-// Automatic hooks never run this file. The relative path lets every worktree run the hooks of its own branch. --check only reports.
+// Explicit setup, per clone: copies the project's .githooks (plus the kit's post-checkout kit sync) into the clone's
+// Git directory and points core.hooksPath there, so a checked-out branch cannot replace the hooks Git runs (#194).
+// Only a rerun updates the copy. Automatic hooks never run this file. --check only reports.
 const root = projectRoot();
 const check = process.argv.includes('--check');
 const git = externalTool('git', root);
@@ -29,25 +30,6 @@ if (!statSync(join(root, '.githooks'), { throwIfNoEntry: false })?.isDirectory()
   process.exit(0);
 }
 
-// The project versions its own post-checkout (kit sync). A file that differs byte for byte (a CRLF copy cannot run
-// on POSIX) is the project's: kept and reported.
-const hookSource = readFileSync(new URL('./git-hooks/post-checkout', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
-const hookFile = join(root, '.githooks', 'post-checkout');
-const existingHook = lstatSync(hookFile, { throwIfNoEntry: false });
-if (!existingHook) {
-  if (!check) writeFileSync(hookFile, hookSource, { flag: 'wx', mode: 0o755 });
-  console.log(`post-checkout: ${check ? 'would create' : 'created'} .githooks/post-checkout (kit sync after branch checkout); commit it with: git add --chmod=+x .githooks/post-checkout`);
-} else if (existingHook.isFile() && readFileSync(hookFile, 'utf8') === hookSource) {
-  // Git skips a hook without the executable bit; Windows has none to check, there only the index mode counts.
-  const runnable = process.platform === 'win32' || (existingHook.mode & 0o111) !== 0;
-  if (!runnable && !check) chmodSync(hookFile, 0o755);
-  console.log(`post-checkout: .githooks/post-checkout is current${runnable ? '' : check ? ' (would make it executable)' : ' (made executable)'}`);
-  if (out('ls-files', '-s', '--', '.githooks/post-checkout').startsWith('100644'))
-    console.log('post-checkout: tracked without executable bit, so Git skips it elsewhere; run: git update-index --chmod=+x .githooks/post-checkout');
-} else {
-  console.log('post-checkout: kept existing .githooks/post-checkout; integrate scripts/git-hooks/post-checkout there by hand');
-}
-
 // Every worktree's .githooks counts as ours, so an absolute path into another worktree is migrated too.
 // Existing paths are canonicalized (symlinks, Windows 8.3 names); missing ones compare as written.
 const fold = path => {
@@ -58,9 +40,11 @@ const fold = path => {
 // -z: NUL-separated attributes, so worktree paths may contain newlines.
 const tops = out('worktree', 'list', '--porcelain', '-z').split('\0')
   .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
-const ours = new Set(tops.map(top => fold(join(top, '.githooks'))));
-// Git resolves a relative hooks path in whichever worktree runs the hook, so only .githooks itself is
-// ours in every worktree; any other relative value may point elsewhere there and stays foreign.
+const hooksDir = join(resolve(root, out('rev-parse', '--git-common-dir')), 'workflow-kit-hooks');
+const hooksValue = hooksDir.replaceAll('\\', '/');
+const ours = new Set([hooksDir, ...tops.map(top => join(top, '.githooks'))].map(fold));
+// Git resolves a relative hooks path in whichever worktree runs the hook, so only .githooks itself (the
+// pre-#194 setting, migrated) is ours in every worktree; any other relative value may point elsewhere and stays foreign.
 const isOurs = value => isAbsolute(value) ? ours.has(fold(value)) : normalize(value) === '.githooks';
 
 /** Every core.hooksPath entry of one config source as { value, origin }, including include/includeIf
@@ -131,27 +115,46 @@ if (foreignConditional.length) {
 // Local config wins over global and system; an unset local must not shadow someone's global hooks.
 const local = entries('--file', localFile);
 const inherited = local.length ? [] : [...entries('--global'), ...entries('--system')];
-let relative = false;
+let ready = false;
 if (inherited.some(entry => !isOurs(entry.value))) {
   report(`kept foreign ${describe(inherited)}; integrate .githooks there by hand`);
-} else if (local.length && local.every(entry => entry.value === '.githooks')) {
-  relative = true;
-  report('.githooks');
+} else if (local.length && local.every(entry => isAbsolute(entry.value) && fold(entry.value) === fold(hooksDir))) {
+  ready = true;
+  report(hooksValue);
 } else if (local.length && !owned(localFile, local)) {
   report(`kept ${describe(local)}; integrate .githooks there by hand`);
 } else {
-  if (!check) out('config', '--file', localFile, '--replace-all', 'core.hooksPath', '.githooks');
-  relative = true;
-  report(`${check ? 'would set' : 'set'} .githooks${local.length ? ` (was ${describe(local)})` : ''}`);
+  if (!check) out('config', '--file', localFile, '--replace-all', 'core.hooksPath', hooksValue);
+  ready = true;
+  report(`${check ? 'would set' : 'set'} ${hooksValue}${local.length ? ` (was ${describe(local)})` : ''}`);
 }
-// Own overrides go only once the local path is relative.
+// Own overrides go only once the local path is ours.
 for (const file of worktreeFiles) {
   const list = entries('--file', file);
   if (!list.length) continue;
-  if (relative && owned(file, list)) {
+  if (ready && owned(file, list)) {
     if (!check) out('config', '--file', file, '--unset-all', 'core.hooksPath');
     report(`${check ? 'would remove' : 'removed'} worktree override ${describe(list)}`);
   } else {
     report(`kept worktree override ${describe(list)}`);
+  }
+}
+
+// The copy is the trusted part: replaced on every explicit run, so removed hooks disappear too.
+// Symlinks stay out. A project post-checkout of its own wins over the kit's.
+if (ready) {
+  const hook = join(hooksDir, 'post-checkout');
+  if (check) {
+    console.log(`hooks: would copy .githooks into ${hooksValue}`);
+  } else {
+    rmSync(hooksDir, { recursive: true, force: true });
+    mkdirSync(hooksDir, { recursive: true });
+    cpSync(join(root, '.githooks'), hooksDir, { recursive: true, filter: source => !lstatSync(source).isSymbolicLink() });
+    const kitHook = readFileSync(new URL('./git-hooks/post-checkout', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+    if (!existsSync(hook)) writeFileSync(hook, kitHook);
+    else if (readFileSync(hook, 'utf8') !== kitHook)
+      console.log('hooks: kept the project post-checkout; integrate scripts/git-hooks/post-checkout there by hand');
+    for (const name of readdirSync(hooksDir)) if (lstatSync(join(hooksDir, name)).isFile()) chmodSync(join(hooksDir, name), 0o755);
+    console.log(`hooks: copied .githooks (and the kit post-checkout) into ${hooksValue}; rerun after changing a hook`);
   }
 }
