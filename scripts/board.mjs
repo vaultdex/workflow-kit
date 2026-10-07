@@ -253,18 +253,20 @@ function resolveOption(fieldName, optionName) {
   return { fieldName, field, linked, option };
 }
 
-/** Guards of a transition. They print (check, backlinks), so run them only after every pair is valid. False: a guard refused. */
+/** Guards of a transition; a refusal throws. They print (backlinks), so run them only after every pair is valid. */
 function guardOption(issue, { fieldName, option }) {
   if (fieldName === 'Status' && option.name === 'In progress') {
-    // Assignment first: a refusal is then one ERROR line, not the check's verdict block followed by an error.
+    // Assignment first, so a missing assignment is named even when the issue is also blocked.
     const { viewer } = graphql('query{viewer{login}}');
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     assert.ok(issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase()),
       `Assign yourself first: gh issue edit ${number} --repo ${project.repository} --add-assignee "@me". Verify session ownership before assigning.`);
-    if (check(issue) !== 'STARTABLE') return false;
+    // A refusal is an error like the others: its verdict lines become the one ERROR line instead of a second output format.
+    const log = console.log, verdict = [];
+    console.log = (...parts) => verdict.push(parts.join(' '));
+    try { if (check(issue) !== 'STARTABLE') throw new Error(verdict.join('; ')); } finally { console.log = log; }
   }
   if (fieldName === 'Status' && option.name === 'Automated review') verifyBacklinks();
-  return true;
 }
 
 function writeOption(issue, { fieldName, field, linked, option }) {
@@ -290,7 +292,7 @@ function writeOption(issue, { fieldName, field, linked, option }) {
 function set(fieldName, optionName = value, beforeWrite) {
   let issue = readIssue();
   const plan = resolveOption(fieldName, optionName);
-  if (!guardOption(issue, plan)) return;
+  guardOption(issue, plan);
   // A guarded handoff rechecks current ownership/readiness after the potentially lengthy review reads.
   if (beforeWrite) {
     issue = beforeWrite();
@@ -314,7 +316,7 @@ function fieldPairs() {
 function setField() {
   const issue = readIssue();
   const plans = fieldPairs().map(([fieldName, optionName]) => resolveOption(fieldName, optionName));
-  if (!plans.every(plan => guardOption(issue, plan))) return;
+  for (const plan of plans) guardOption(issue, plan);
   // Confirmation lines come after the read-back, so a failed call never shows a write as confirmed.
   const written = plans.map(plan => writeOption(issue, plan));
   const { repository } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
@@ -997,7 +999,7 @@ function block() {
     { owner: blockerOwner, name: blockerName, number: Number(blockerNumber) }).repository.issue ?? assert.fail('issue not found'));
   graphql(`mutation($issue:ID!,$blocker:ID!){addBlockedBy(input:{issueId:$issue,blockingIssueId:$blocker}){issue{number}}}`,
     { issue: readIssue().id, blocker: id });
-  console.log(`#${number} is blocked by ${value}`);
+  console.log(`${project.repository}#${number} is blocked by ${blockerOwner}/${blockerName}#${blockerNumber}`);
 }
 
 // Attaches CHILD as a native sub-issue of ISSUE and reads the parent link back; an existing link is a success.
@@ -1012,7 +1014,7 @@ function sub() {
   if (!underParent(child)) graphql(`mutation($issue:ID!,$sub:ID!){addSubIssue(input:{issueId:$issue,subIssueId:$sub}){issue{number}}}`,
     { issue: readIssue().id, sub: child.id });
   assert.ok(underParent(read()), `#${number} did not take ${value} as sub-issue (read-back shows another parent)`);
-  console.log(`#${number} has sub-issue ${value.includes('/') ? value : `#${childNumber}`}`);
+  console.log(`${project.repository}#${number} has sub-issue ${childOwner}/${childName}#${childNumber}`);
 }
 
 const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField,

@@ -969,6 +969,13 @@ test('field, status and priority report failures as one ERROR line, and issue fa
   assert.equal(late.status, 2);
   assert.match(late.stdout, /^ERROR - [^\n]*\n$/);
   assert.equal(existsSync(join(checkout, 'mutations')), false);
+  // Assigned but blocked: the refusal is the one ERROR line too, and nothing is written.
+  writeIssue({ ...issue(), assignees: { nodes: [{ login: 'worker' }] }, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } });
+  const held = run('status', '1', 'In progress');
+  assert.equal(held.status, 2);
+  assert.match(held.stdout, /^ERROR - [^\n]*\n$/);
+  assert.equal(existsSync(join(checkout, 'mutations')), false);
+  writeIssue({ ...issue(), assignees: { nodes: [{ login: 'worker' }] } });
   // A write that fails after the guards passed leaves the check's output unprinted too.
   writeFileSync(join(checkout, 'mutation-fails'), '');
   const refused = run('status', '1', 'In progress');
