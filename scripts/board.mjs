@@ -53,9 +53,11 @@ function predecessorReasons({ totalCount, nodes }) {
 }
 
 /**
- * The one open PR a dependent issue can be stacked on (docs/CONTRIBUTING.md#stacked-pull-requests): every open predecessor
+ * The one PR a dependent issue can be stacked on (docs/CONTRIBUTING.md#stacked-pull-requests): every open predecessor
  * lives in this repository and is delivered by the same single open, ready PR from a branch of this repository. Anything else
- * says why not (`refused`); incomplete PR data is `unknown`, never "no PR".
+ * says why not (`refused`); incomplete PR data is `unknown`, never "no PR". A delivering PR that is already merged (into a
+ * release branch, where the predecessor issue stays open until the release) is the base too: the layer above it is then a plain
+ * PR on the trunk, `pr.state` says MERGED.
  */
 function stackBase(open) {
   const refused = [], unknown = [], prs = new Map();
@@ -65,8 +67,8 @@ function stackBase(open) {
     if (predecessor.repository.nameWithOwner.toLowerCase() !== project.repository.toLowerCase()) refused.push(`${label} is in another repository`);
     else if (!links?.nodes || links.nodes.filter(Boolean).length < links.totalCount) unknown.push(`the pull requests of ${label} are not completely readable`);
     else {
-      const delivering = links.nodes.filter(pr => pr.state === 'OPEN');
-      if (!delivering.length) refused.push(`${label} has no open PR`);
+      const delivering = links.nodes.filter(pr => ['OPEN', 'MERGED'].includes(pr.state));
+      if (!delivering.length) refused.push(`${label} has no open or merged PR`);
       // A closing keyword can also come from a PR of another repository, which is no local branch to stack on.
       for (const pr of delivering) {
         if (pr.repository?.nameWithOwner?.toLowerCase() === project.repository.toLowerCase()) prs.set(pr.number, pr);
@@ -74,9 +76,9 @@ function stackBase(open) {
       }
     }
   }
-  if (!refused.length && !unknown.length && prs.size > 1) refused.push(`the predecessors are delivered by ${prs.size} open PRs (#${[...prs.keys()].join(', #')}), not one`);
+  if (!refused.length && !unknown.length && prs.size > 1) refused.push(`the predecessors are delivered by ${prs.size} PRs (#${[...prs.keys()].join(', #')}), not one`);
   const [pr] = prs.values();
-  if (!refused.length && !unknown.length) {
+  if (!refused.length && !unknown.length && pr.state === 'OPEN') {
     if (pr.isDraft) refused.push(`PR #${pr.number} is still Draft`);
     if (pr.isCrossRepository) refused.push(`PR #${pr.number} comes from a fork`);
   }
@@ -215,7 +217,9 @@ function check(issue = readIssue(), claims) {
   const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;
   console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
-  if (stackedOn) console.log(`stack base: PR #${stackedOn.number} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
+  if (stackedOn) console.log(stackedOn.state === 'MERGED'
+    ? `stack base: PR #${stackedOn.number} is already merged into ${stackedOn.baseRefName}: no stack, work on ${stackedOn.baseRefName}; see docs/CONTRIBUTING.md#stacked-pull-requests`
+    : `stack base: PR #${stackedOn.number} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
   for (const note of notes) console.log(`note: ${note}`);
   if (claim) {
     const linked = issue.closedByPullRequestsReferences;
@@ -277,7 +281,7 @@ function next() {
   for (const issue of startable) console.log(line(issue));
   console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
   if (stackable.length) console.log('\nReady and stackable on an open PR (check ISSUE shows STACKABLE; see docs/CONTRIBUTING.md#stacked-pull-requests):');
-  for (const issue of stackable) console.log(`${line(issue)}\n  - base PR #${issue.base.number} (branch ${issue.base.headRefName})`);
+  for (const issue of stackable) console.log(`${line(issue)}\n  - base PR #${issue.base.number} (${issue.base.state === 'MERGED' ? `merged into ${issue.base.baseRefName}` : `branch ${issue.base.headRefName}`})`);
   if (held.length) console.log('\nReady but not startable:');
   for (const issue of held) console.log([line(issue), ...issue.reasons.map(reason => `  - ${reason}`)].join('\n'));
 }
@@ -837,7 +841,8 @@ function handoffIssue(issue, viewer, reviewedHead) {
   const status = projectItem(issue)?.status?.name;
   const reasons = [];
   // An upper layer may be handed off before the base is merged, but only as a layer on that base.
-  if (stackedOn) {
+  // A merged base leaves a plain PR on the trunk: nothing stack-specific to verify any more.
+  if (stackedOn?.state === 'OPEN') {
     const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
       pullRequest(number:$number){baseRefName headRefOid isCrossRepository headRepository{nameWithOwner}}}}`, { owner, name, number: Number(value) }).repository;
     if (reviewedHead && pr?.headRefOid !== reviewedHead) reasons.push(`PR #${value} changed its head from ${reviewedHead.slice(0, 7)} during handoff; read it again`);

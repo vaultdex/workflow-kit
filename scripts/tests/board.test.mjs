@@ -443,10 +443,10 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
 
   const stackable = check(open(2, [pr(5)]));
   assert.equal(stackable.status, 4, stackable.stdout);
-  assert.match(stackable.stdout, /^STACKABLE$/m);
-  assert.match(stackable.stdout, /stack base: PR #5 \(branch claude\/5-base/);
   assert.equal(check(open(2, [pr(5)]), open(3, [pr(5)]), predecessor('CLOSED', 'COMPLETED')).status, 4, 'Several predecessors delivered by one PR');
-  assert.equal(check(open(2, [pr(5), pr(6, { state: 'MERGED' })])).status, 4, 'Only open PRs count');
+  assert.equal(check(open(2, [pr(5), pr(6, { state: 'CLOSED' })])).status, 4, 'A closed PR delivers nothing');
+  assert.equal(check(open(2, [pr(5, { state: 'MERGED' })])).status, 4, 'A base merged into the release branch (its issue stays open) still counts');
+  assert.equal(check(open(2, [pr(5, { state: 'MERGED' }), pr(6)])).status, 1, 'A merged and an open PR are two deliveries');
   const refused = [
     ['no PR', open(2, [])],
     ['only a Draft PR', open(2, [pr(5, { isDraft: true })])],
@@ -485,41 +485,47 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   writeFileSync(join(checkout, 'stored'), 'Automated review');
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
-  const onRelease = run('handoff', '1', '7');
-  assert.equal(onRelease.status, 1, onRelease.stdout);
-  assert.match(onRelease.stdout, /not merged: PR #7 must target its branch claude\/5-base/);
+  // Every rejection changes one thing about the accepted case below and must leave the status untouched.
+  const stored = () => readFileSync(join(checkout, 'stored'), 'utf8');
+  const rejected = (label, status = 1) => {
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, status, `${label}: ${result.stdout}`);
+    assert.equal(stored(), 'Automated review', `${label} must not write Human review`);
+  };
   const upper = { baseRefName: 'claude/5-base', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
+  rejected('a PR on the release branch while its base is open');
   for (const fork of [{ isCrossRepository: true, headRepository: { nameWithOwner: 'someone/example' } }, { headRepository: { nameWithOwner: 'someone/example' } }, { isCrossRepository: undefined }]) {
     writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ ...upper, ...fork })));
-    const result = run('handoff', '1', '7');
-    assert.equal(result.status, 1, result.stdout);
-    assert.match(result.stdout, /fork or another repository/);
+    rejected('a fork PR');
   }
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(upper)));
   for (const status of ['behind', 'diverged']) {
     writeFileSync(join(checkout, 'compare.json'), JSON.stringify({ status }));
-    const result = run('handoff', '1', '7');
-    assert.equal(result.status, 1, result.stdout);
-    assert.match(result.stdout, /does not contain the current head ba5e000 of PR #5/);
+    rejected(`a head that is ${status} the base head`);
   }
   rmSync(join(checkout, 'compare.json'));
   for (const stacks of [[], [{ open: true, pull_requests: [{ number: 7 }] }], [{ open: false, pull_requests: [{ number: 5 }, { number: 7 }] }]]) {
     writeFileSync(join(checkout, 'stacks.json'), JSON.stringify(stacks));
-    const result = run('handoff', '1', '7');
-    assert.equal(result.status, 1, result.stdout);
-    assert.match(result.stdout, /not linked as a stack on GitHub/);
+    rejected('no linked open stack');
   }
   rmSync(join(checkout, 'stacks.json'));
   // The upper head moves after the proof was gathered (4th PR read, inside the guarded write): the proof belongs to the old head.
   writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([{}, {}, {}, { headRefOid: 'abcdef9999' }]));
-  const moved = run('handoff', '1', '7');
-  assert.equal(moved.status, 1, moved.stdout);
-  assert.match(moved.stdout, /changed its head/);
+  rejected('a head that moved during handoff');
   rmSync(join(checkout, 'pr-reads.json'));
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(upper)));
   const handed = run('handoff', '1', '7');
   assert.equal(handed.status, 0, handed.stdout + handed.stderr);
-  assert.match(handed.stdout, /HANDOFF #1 PR #7/);
+  assert.equal(stored(), 'Human review');
+
+  // After the base merged into the release branch GitHub has retargeted the layer: a plain PR there, nothing stack-specific left to prove.
+  writeIssue(assigned({ projectItems: issue('Automated review').projectItems, blockedBy: { totalCount: 1, nodes: [open(2, [pr(5, { state: 'MERGED' })])] } }));
+  writeFileSync(join(checkout, 'stored'), 'Automated review');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
+  writeFileSync(join(checkout, 'stacks.json'), '[]');
+  assert.equal(run('handoff', '1', '7').status, 0);
+  assert.equal(stored(), 'Human review');
 });
 
 test('next lists stackable Ready issues with their base PR apart from blocked ones', t => {

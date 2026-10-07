@@ -34,7 +34,7 @@ does not replace it.
 | Verdict | Meaning |
 | --- | --- |
 | STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed, every `Wartet bis` condition met. |
-| STACKABLE | Held only by open native predecessors, all in this repository and all delivered by the same single open, non-Draft PR from a branch of this repository. `check` names it (`stack base: PR #N`); work starts as a [stacked pull request](#stacked-pull-requests) on that PR. Exit code 4, never 0. |
+| STACKABLE | Held only by open native predecessors, all in this repository and all delivered by the same single open, non-Draft PR from a branch of this repository (or by the same single PR once it is merged into a release branch, where the predecessor issue stays open until the release: then there is no stack, only a plain PR on that branch). `check` names it (`stack base: PR #N`); work starts as a [stacked pull request](#stacked-pull-requests) on that PR. Exit code 4, never 0. |
 | BLOCKED | An open predecessor that is not STACKABLE (no open PR, only a Draft PR, a fork PR, several PRs, another repository), a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, or an unmet `Wartet bis` condition. |
 | UNKNOWN | API error, incomplete dependency data (including the PR list of an open predecessor), an inaccessible predecessor, an unset or unknown status, the issue is missing from the Project, or an unreadable `Wartet bis` line. Retry the read; never read it as "no blockers". |
 
@@ -215,7 +215,7 @@ otherwise: every correction below restarts CI and reviews above.
    needs its upstream; the fork-point logic drops your commits that GitHub rewrote and replays only the
    local ones, so no `reset --hard` is needed), then `git diff --stat backup/<branch> HEAD`, which must
    show nothing but what the base branch gained meanwhile, then a plain `git push` and `git branch -D
-   backup/<branch>`. After that check the base branch and CI on the new head. If the base PR is closed
+   backup/<branch>`. After that check the base branch and CI on the new head. On a release branch the base PR's issue stays open after the merge, so `check` keeps saying STACKABLE ("already merged"): your layer is then a plain PR on the release branch, and `handoff` skips the stack checks. If the base PR is closed
    without merge, your layer stops: run `check` again and report; don't retarget your PR on your own.
 6. **Handoff.** Your layer may go to Human review before the base PR is merged. `board.mjs handoff`
    then requires your PR to come from this repository, to be linked with the base PR as a stack on GitHub
