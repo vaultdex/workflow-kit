@@ -461,4 +461,6 @@ including skills and hooks ([#244](https://github.com/vaultdex/workflow-kit/issu
 risk is accepted: vendored skills and hooks steer agents or load executable code, and nobody
 reads them before the merge. `platformAutomerge` is off; `main` is protected by the "Reviewed
 main" ruleset requiring the "Workflow Kit checks" verification. Renovate treats a head without
-any check as pending, so it waits for the regenerated commit's CI run.
+any check as pending, so it waits for the regenerated commit's CI run. `rebaseWhen` is
+`conflicted`: the ruleset does not require up-to-date branches, and constant rebases after every
+`main` merge kept CI pending whenever Renovate checked, so the automerge never fired.
