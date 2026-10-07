@@ -222,8 +222,8 @@ comment, a comment for an earlier push does not count, and it works the same for
 a check suite or one that was pushed and checked on another branch first. Put the retro result
 and the list of all findings with their disposition (fixed, linked follow-up issue, or none)
 under the heading, and, if a reviewer was unavailable or stalled, the reviewer, cause and
-evidence (an optional reviewer only when it found something). The command checks heading, head and author, not the content, which is for the human
-reviewer:
+evidence. Name an optional reviewer only when it found something. The command checks heading,
+head and author, not the content, which is for the human reviewer:
 
 ```md
 ## Übergabe

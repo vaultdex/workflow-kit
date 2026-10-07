@@ -379,9 +379,17 @@ const login = user => user?.login?.replace(/\[bot\]$/, '');
 const isBot = user => user?.type === 'Bot';
 // "optionalReviewers" lists bot logins or app slugs whose traces are shown but never awaited, stalled or counted as red
 // (a review bot on a free plan that is rate limited most of the time). Their open threads and change requests still block.
-const reviewerKey = name => name?.toLowerCase().replace(/\[bot\]$/, '');
-const optionalReviewers = new Set((project.optionalReviewers ?? []).map(reviewerKey));
-const isOptional = name => optionalReviewers.has(reviewerKey(name));
+const reviewerKey = name => name?.toLowerCase().replace(/^(@|app\/)/, '').replace(/\[bot\]$/, '');
+// Read on use, so a malformed list is an ERROR of the review commands, not a crash of every command.
+const optionalReviewers = () => {
+  const list = project.optionalReviewers ?? [];
+  assert.ok(Array.isArray(list) && list.every(name => typeof name === 'string' && name.trim()),
+    'optionalReviewers must be a list of non-empty bot logins or app slugs');
+  return new Set(list.map(reviewerKey));
+};
+let optional;
+const isOptional = name => (optional ??= optionalReviewers()).has(reviewerKey(name));
+const isOptionalCheck = check => isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 const readPr = prNumber => graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
@@ -440,6 +448,7 @@ function headSetAt(pr, log = pushLog(pr)) {
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
 function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption()) {
+  isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
   if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', lines, pr };
@@ -484,8 +493,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     const label = check.name ?? check.context;
     const pending = check.__typename === 'CheckRun' ? check.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(check.state);
     // An optional reviewer's check is shown and never decides: not awaited, not red.
-    if (isOptional(check.checkSuite?.app?.slug ?? check.creator?.login)) {
-      lines.push(`check ${label}: ${pending ? 'pending' : check.conclusion ?? check.state} (optional reviewer, not awaited)`);
+    if (isOptionalCheck(check)) {
+      lines.push(`check ${label}: ${pending ? 'pending' : check.conclusion ?? check.state}${check.title || check.description ? ` (${check.title || check.description})` : ''} [optional reviewer, not awaited]`);
       continue;
     }
     // CI never stalls: a running check is not success however long it takes.
@@ -495,7 +504,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // Descriptions carry results such as "Review rate limited" behind a green state.
     lines.push(`check ${label}: ${result}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);
   }
-  if (!contexts.nodes.length) waiting.push({ text: 'first CI check', since: Infinity });
+  if (contexts.nodes.every(isOptionalCheck)) waiting.push({ text: 'first CI check', since: Infinity });
   // An Actions suite without runs is a triggered workflow about to report. Other apps (Sonar, CodeRabbit,
   // Renovate …) open a suite on every push and often never run it, so they count only when the project
   // lists them in "awaitApps" (analyzers such as SonarCloud create their run only when finished). Both may stall.

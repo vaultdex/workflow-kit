@@ -218,7 +218,7 @@ backlink never closes an issue.
    revision) and set Automated review with the PR number and
    all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
-3. Wait for CI and every review with a trace on the current head with `board.mjs
+3. Wait for CI and every non-optional review with a trace on the current head with `board.mjs
    wait PR` in the background (a driver subagent: foreground, see
    [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
@@ -258,7 +258,7 @@ backlink never closes an issue.
    human instead of editing it. List every finding and its disposition, or none,
    in the [handoff comment](../README.md#handoff-comment).
 6. Run `board.mjs handoff ISSUE PR` for the fully delivered issue only when CI
-   passes, every review with a trace on the current head has finished or stalled,
+   passes, every non-optional review with a trace on the current head has finished or stalled,
    each finding is fixed or linked to a follow-up, the
    final proof has passed, the retro is recorded and no prerequisite is open. Name an
    optional reviewer in the handoff only when it found something. If a
