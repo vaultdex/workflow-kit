@@ -23,7 +23,14 @@ function realExecFileSync(file, args, options) {
 }
 // A `git` that board.mjs finds is an empty placeholder in the test's bin (the tests run with that bin as PATH); the call goes to the host's real git.
 const hostPath = process.env.PATH;
-childProcess.execFileSync = (file, args, options) => /(^|[\\/])gh(\.exe)?$/.test(file) ? fakeGh(args, options?.input)
+// Like execFileSync: without `stdio`, the stderr of a failed gh is copied to the caller's stderr as well as thrown (#332).
+function echoingFakeGh(args, options) {
+  try { return fakeGh(args, options?.input); } catch (error) {
+    if (error.stderr && !options?.stdio) results.postMessage({ stream: 'stderr', text: error.stderr });
+    throw error;
+  }
+}
+childProcess.execFileSync = (file, args, options) => /(^|[\\/])gh(\.exe)?$/.test(file) ? echoingFakeGh(args, options)
   : /(^|[\\/])git(\.exe)?$/.test(file) ? realExecFileSync('git', args, { ...options, env: { ...options?.env, PATH: hostPath } })
     : realExecFileSync(file, args, options);
 syncBuiltinESMExports();

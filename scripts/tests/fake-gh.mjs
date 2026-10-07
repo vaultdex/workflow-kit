@@ -74,8 +74,12 @@ function api(argv, input, stdout, stderr, exit) {
       // update-fails: GitHub refuses (conflict, or the head is not the expected one). Otherwise the base is part of the branch now;
       // the new head shows through pr-reads.json, which GitHub also shows late.
       fs.appendFileSync('calls', `update-branch ${argv.find(arg => arg.startsWith('expected_head_sha=')).slice(18)}\n`);
-      // update-fails: GitHub refuses; "403" in the file: the refusal of a PR with stacked children.
-      if (fs.existsSync('update-fails')) { stderr(fs.readFileSync('update-fails', 'utf8') === '403' ? 'gh: Forbidden (HTTP 403)\n' : 'gh: merge conflict (HTTP 422)\n'); exit(1); }
+      // update-fails: GitHub refuses; "403" in the file: the refusal of a PR with stacked children, "no-code": the same text without the status.
+      if (fs.existsSync('update-fails')) {
+        const kind = fs.readFileSync('update-fails', 'utf8'), text = 'Updating a stacked PR\'s branch via this endpoint is not supported.';
+        stderr(kind === '403' ? `gh: ${text} (HTTP 403)\n` : kind === 'no-code' ? `gh: ${text}\n` : 'gh: merge conflict (HTTP 422)\n');
+        exit(1);
+      }
       fs.rmSync('compare.json', { force: true });
       stdout('{"message":"Updating pull request branch."}');
       exit(0);
