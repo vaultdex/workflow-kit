@@ -189,8 +189,8 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
   `<details><summary>Technische Details</summary>`. Vereinfachen heißt umformulieren,
   nicht löschen; Entscheidungen mit Quelle, Blocker, Teiltickets, Links und
   Abnahmekriterien bleiben.
-- Specs und längere Issues beginnen mit `## Kurz gesagt` (nach `## Menschliche
-  Mitwirkung nötig`, falls vorhanden): 2 bis 4 Sätze, was heute stört, was anders wird und
+- Specs und längere Issues beginnen mit dem Abschnitt „Kurz gesagt“ (nach `## Menschliche
+  Mitwirkung nötig`, falls vorhanden; die Überschriftenebene ist offen, das Formular erzeugt `###`): 2 bis 4 Sätze, was heute stört, was anders wird und
   wer es merkt. Eine Spec trägt außerdem den Titelpräfix `(Spec) ` und das Label `spec`;
   das Formular „Spec oder längere Aufgabe“ setzt beides.
 - PRs und Kommentare beginnen mit dem Ergebnis in einem Satz, Details danach. Das gilt
