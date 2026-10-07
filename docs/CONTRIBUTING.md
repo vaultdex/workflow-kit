@@ -296,14 +296,15 @@ to the same open PR on resume; after a partial write or an API error, read first
 before retrying. A link in the chat or PR body does not replace the issue comment.
 `board.mjs link ISSUE PR` does both for an issue of this repository: the native
 connection and, if no comment with the PR's URL exists yet, that comment, read back
-afterwards. A second run writes nothing twice. `status` never writes it; its
-refusal names `link` as the remedy.
+afterwards. A second run writes nothing twice. `status ISSUE "Automated review" PR`
+runs the same logic for a missing backlink on an issue of this repository, so `link`
+is not needed beforehand; only a failing link or read-back refuses.
 
 Before Automated review, run `board.mjs status ISSUE "Automated review" PR
 [OTHER_ISSUE...]` with the PR number and all other issues it delivers in this
 repository (numbers), or another repository (`OWNER/REPO#N`). The command checks
 the open PR's explicit issue references and every issue's complete comment list
-before changing status. Missing/wrong/old backlinks,
+before changing status. Wrong/old backlinks, a missing one it cannot set,
 unreadable or incomplete API data fail without changing status. The `field ISSUE
 Status "Automated review" PR [OTHER_ISSUE...]` route performs the same check.
 
@@ -331,7 +332,8 @@ backlink never closes an issue.
    Then mark it Ready for Review with `board.mjs ready PR SHA` (the full 40-character id of the commit you just
    pushed: it waits until GitHub reports that head, so CI starts for the right
    revision) and set Automated review with the PR number and
-   all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional
+   all delivered issues ([PR backlinks](#pr-backlinks); `status` sets a missing
+   backlink itself, no `link` call needed). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
 3. Wait for CI and every non-optional review with a trace on the current head with `board.mjs
    wait PR --head SHA` (SHA: full id of the head you just pushed; the flag keeps it from ending
