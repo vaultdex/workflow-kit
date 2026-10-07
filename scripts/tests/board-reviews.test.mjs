@@ -84,6 +84,8 @@ test('the reviewer grace ends when a required bot has answered and follows revie
   assert.equal(reviews(readied, { comments: [say('coverage', { login: 'github-actions[bot]', type: 'Bot' })] }), 3, 'A CI comment does not end the grace');
   const limited = { ...check('COMPLETED'), name: 'CodeRabbit', description: 'Review rate limited', checkSuite: { app: { slug: 'coderabbitai' } } };
   assert.equal(reviews({ ...readied, ...pr({ contexts: [check('COMPLETED'), limited] }), isDraft: false, createdAt: readied.createdAt, readyEvents: readied.readyEvents }), 0, 'A limit notice on a check ends the grace');
+  const ciLimited = { ...limited, name: 'CI', checkSuite: { app: { slug: 'github-actions' } } };
+  assert.equal(reviews({ ...readied, ...pr({ contexts: [ciLimited] }), isDraft: false, createdAt: readied.createdAt, readyEvents: readied.readyEvents }), 3, 'A limit text in a CI check does not end the grace');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: ['chatgpt-codex-connector'] }));
   assert.equal(reviews(readied, { comments: [say('usage limits')] }), 3, 'An optional reviewer never ends the grace');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), reviewerGraceMinutes: 0 }));

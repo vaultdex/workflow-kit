@@ -973,7 +973,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => review.user),
     ...reactions.filter(reaction => reaction.content !== 'eyes' && after(reaction.created_at)).map(reaction => reaction.user),
   ].some(user => isBot(user) && login(user) !== 'github-actions' && !isOptional(user.login))
-    || current.some(check => !isOptionalCheck(check) && limitNotice.test(`${check.title ?? ''} ${check.description ?? ''}`));
+    || current.some(check => !isOptionalCheck(check) && check.checkSuite?.app?.slug !== 'github-actions' && limitNotice.test(`${check.title ?? ''} ${check.description ?? ''}`));
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
   if (!pr.isDraft && graceMinutes > 0 && !answeredBot) {
     const graceFrom = Math.max(readyAt, pushed, headSetAt(pr, pushes()));
