@@ -18,9 +18,9 @@ test('merge merges the checked head by its full id only when no review is runnin
     body: `| Code Review | ⏳ **Running** <relative-time datetime="${pushedAt()}"></relative-time> | \`abcdef1\` |` };
   const failedCi = { ...commit, oid, statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } };
   const refused = [
-    ['a reviewer that is still running', withHead(oid), [codexRunning], 3],
+    ['a reviewer that is still running', withHead(oid), [codexRunning], 4],
     ['an open review request', withHead(oid, { reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { login: 'reviewer' } }] },
-      requestEvents: { totalCount: 1, nodes: [{ createdAt: pushedAt(), requestedReviewer: { login: 'reviewer' } }] } }), [], 3],
+      requestEvents: { totalCount: 1, nodes: [{ createdAt: pushedAt(), requestedReviewer: { login: 'reviewer' } }] } }), [], 4],
     ['red CI', withHead(oid, { commits: { nodes: [{ commit: failedCi }] } }), [], 1],
     ['a Draft', withHead(oid, { isDraft: true }), [], 1],
     ['a merged PR', withHead(oid, { state: 'MERGED' }), [], 1],
@@ -32,7 +32,7 @@ test('merge merges the checked head by its full id only when no review is runnin
   ];
   for (const [label, pr, comments, status] of refused) {
     write(pr, comments);
-    const result = run('merge', '7', '--interval', '0');
+    const result = run('merge', '7', '--interval', '0', '--max-minutes', '0.01');
     assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
     assert.equal(existsSync(merges), false, `${label}: gh pr merge is never called`);
   }
@@ -44,7 +44,7 @@ test('merge merges the checked head by its full id only when no review is runnin
   rmSync(join(checkout, 'stacks.json'));
   // The refusal names the reviewer that is still running.
   write(withHead(oid), [codexRunning]);
-  assert.match(run('merge', '7').stdout, /waiting: chatgpt-codex-connector running since/);
+  assert.match(run('merge', '7', '--max-minutes', '0.01').stdout, /waiting: chatgpt-codex-connector running since/);
   write(withHead(oid));
   writeFileSync(join(checkout, 'fail'), '');
   assert.equal(run('merge', '7').status, 2, 'An API read failure is unknown, never a merge');
@@ -100,6 +100,23 @@ test('merge refuses a PR body without the Selbstprüfung section the project ask
   show({ bodyHTML: '<h2 dir="auto">Selbstprüfung</h2>\n<p>ponytail-review: nichts zu streichen.</p>' });
   assert.equal(run('merge', '7').status, 0);
   assert.deepEqual(calls(), ['merge', 'delete claude/7-topic']);
+});
+
+test('merge looks again at a running check from the first look on, merges once it is green, and ends with exit 4 when --max-minutes runs out', t => {
+  const { run, show, calls, json, first, headOf } = mergeFixture(t);
+  const running = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS', conclusion: null }] } } };
+
+  show();
+  json('pr-reads.json', [headOf(first, running), headOf(first)]);
+  const merged = run('merge', '7', '--interval', '0', '--max-minutes', '1');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.deepEqual(calls(), ['merge', 'delete claude/7-topic']);
+
+  show(headOf(first, running));
+  const waiting = run('merge', '7', '--interval', '0', '--max-minutes', '0.01');
+  assert.equal(waiting.status, 4, waiting.stdout + waiting.stderr);
+  assert.match(waiting.stdout, /call merge again/);
+  assert.deepEqual(calls(), [], 'nothing is merged');
 });
 
 test('merge merges a base that moved under the same files into the PR branch, waits for CI on the new head, then merges', t => {

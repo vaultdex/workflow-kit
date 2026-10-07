@@ -1850,6 +1850,8 @@ function deleteHeadBranch(pr) {
  * which goes once to merge-async with the same head and is read back until merged. Afterwards the head branch goes (see deleteHeadBranch).
  */
 async function merge() {
+  // Like `wait`: look again until CI and the reviewers have finished (or --max-minutes runs out: exit 4); the gate then decides once.
+  if (!await poll(() => reviews(stallOption()))) return;
   let result = mergeGate();
   if (!result) return;
   const { baseRefName, headRefOid: before } = result.pr;
@@ -2082,7 +2084,7 @@ async function poll(look) {
       }
       if (Date.now() >= deadline) return stillWaiting(result.pausedUntil);
       // Little quota lengthens the pause, but not while REST is read in place of GraphQL.
-      const pause = command === 'wait' && process.argv.includes('--interval') ? numberOption('--interval', 0) : waitInterval(quiet++, result.pausedUntil ? undefined : quota?.remaining);
+      const pause = ['wait', 'merge'].includes(command) && process.argv.includes('--interval') ? numberOption('--interval', 0) : waitInterval(quiet++, result.pausedUntil ? undefined : quota?.remaining);
       await new Promise(resolve => setTimeout(resolve, Math.min(1000 * pause, deadline - Date.now())));
     }
   } catch (error) {
@@ -2154,7 +2156,7 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | sweep | check ISSUE [
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
   + ' | quota-wait [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
-  + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]'
+  + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // --help (-h) is the one flag that never writes: usage on stdout, success.
