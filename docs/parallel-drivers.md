@@ -98,7 +98,8 @@ Modellwahl stehen hier nicht.
    Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung) oder bei einem Blocker
    (`board.mjs check` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
    [Blockers and scope](CONTRIBUTING.md#blockers-and-scope)): erst im Issue
-   kommentieren, dann berichten.
+   kommentieren, dann berichten. „Human review“ heißt mergebar: Meldet `board.mjs sweep` danach
+   einen Konflikt (Issue zurück auf „Automated review“, Kommentar), löst der Owner ihn und ruft `handoff` erneut auf.
 2. **Regeln vom Ziel-Release-Branch lesen.** AGENTS.md und Kit-Regeln stammen vom
    Release-Branch, auf den die PR zielt, nicht nur von `main`; eine Regel kann nur
    dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume) mit

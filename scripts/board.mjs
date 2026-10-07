@@ -484,6 +484,39 @@ function check(issue = readIssue(), claims, currentPrNumber) {
   return verdict;
 }
 
+/**
+ * Human review means mergeable (docs/parallel-drivers.md): a Human-review issue whose open PR has conflicts (DIRTY) goes back to
+ * "Automated review" with a comment; its owner resolves them and hands off again. One search reads the open issues with their
+ * closing PRs (a further page only beyond 100); only a reset writes (the status, the comment) and reads the Project fields.
+ * ponytail: UNKNOWN (GitHub still computing) is left alone and caught by the next sweep.
+ */
+function sweep() {
+  const reset = [];
+  for (let after; ;) {
+    const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
+      pageInfo{hasNextPage endCursor} nodes{...on Issue{id number
+      projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
+      closedByPullRequestsReferences(first:10){nodes{number url mergeStateStatus repository{nameWithOwner}}}}}}}`,
+    { q: `repo:${project.repository} is:issue is:open`, ...(after && { after }) });
+    for (const issue of search.nodes) {
+      if (projectItem(issue)?.status?.name !== 'Human review') continue;
+      const pr = issue.closedByPullRequestsReferences.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
+      if (pr) reset.push({ issue, pr });
+    }
+    if (!search.pageInfo.hasNextPage) break;
+    assert.ok(search.pageInfo.endCursor && search.pageInfo.endCursor !== after, 'Search pagination did not advance');
+    after = search.pageInfo.endCursor;
+  }
+  if (!reset.length) return console.log('clean');
+  const plan = resolveOption('Status', 'Automated review');
+  for (const { issue, pr } of reset) {
+    writeOption(issue, plan);
+    graphql('mutation($issue:ID!,$body:String!){addComment(input:{subjectId:$issue,body:$body}){clientMutationId}}', { issue: issue.id,
+      body: `Der PR ${pr.url} hat Konflikte mit seiner Basis, ein Issue in Human review muss aber mergebar sein. Das Issue geht zurück auf Automated review. Konflikt lösen, dann neu übergeben (\`board.mjs handoff\`).` });
+    console.log(`#${issue.number} reset to Automated review: PR #${pr.number} has merge conflicts`);
+  }
+}
+
 function next() {
   // Advanced issue search understands -is:blocked (open native predecessors). Separate searches keep blocked issues
   // from crowding unblocked ones out of the 1,000-result search cap; read every page of both before sorting. A page costs by its size, not by its hits
@@ -2108,9 +2141,9 @@ function sub() {
   console.log(`${project.repository}#${number} has sub-issue ${childOwner}/${childName}#${childNumber}`);
 }
 
-const commands = { next, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
+const commands = { next, sweep, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
   reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
-const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
+const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | sweep | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | new --from FILE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
@@ -2127,7 +2160,7 @@ if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
 }
 // A writing command takes only its own flags (value 1: followed by a value) and as many plain words as it names (the issue or PR
 // included); any other argument is a mistake that must not reach a write. `field` and `status ISSUE "Automated review"` check their own trailing words.
-const writeArgs = { status: { words: 2 }, priority: { words: 2 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2 },
+const writeArgs = { sweep: { words: 0 }, status: { words: 2 }, priority: { words: 2 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2 },
   body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
   new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1 } },
   ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1 } },
@@ -2160,7 +2193,7 @@ if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' &
   console.error(`wait --head needs a commit id of 7 to 40 characters (git rev-parse HEAD), not ${headOption() ? `"${headOption()}"` : 'nothing'}`);
   process.exit(2);
 }
-if (!commands[command] || (!['next', 'new', 'quota-wait'].includes(command) && !Number.isSafeInteger(number))
+if (!commands[command] || (!['next', 'sweep', 'new', 'quota-wait'].includes(command) && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && !(process.argv.length > 5 && process.argv.slice(4).every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text))))
