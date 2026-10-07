@@ -69,7 +69,8 @@ The script preserves an existing policy rather than choosing one.
 If an analyzer reports through a GitHub App that creates its check only when it
 finishes (SonarCloud), list the app slug in `"awaitApps"`, for example
 `"awaitApps": ["sonarqubecloud"]`, so `board.mjs wait` waits for it. The script
-keeps this setting too.
+keeps this setting too. Likewise `"requiredFields": ["Size"]` names Project fields that
+`board.mjs new` demands besides Priority.
 
 For first installation, add the setup issue to this Project, complete its
 [metadata](docs/CONTRIBUTING.md#issues), and set Ready under the explicit setup
