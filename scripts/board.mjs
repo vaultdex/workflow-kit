@@ -1534,23 +1534,25 @@ function handoffIssueReasons(issue, viewer, reviewedHead, currentPrNumber) {
     } else {
       // An aligned branch chain is no stack: GitHub must list both PRs in one open stack (the read-back of the docs, step 2).
       const stacks = rest(`repos/${project.repository}/stacks?pull_request=${Number(value)}`);
-      const stackedImmediatelyAfterBase = Array.isArray(stacks) && stacks.length === 1 && (() => {
-        const [stack] = stacks;
-        const members = stack.pull_requests;
-        if (stack.open !== true || !Array.isArray(members)) return false;
-        const baseIndex = members?.findIndex(member => member.number === stackedOn.number) ?? -1;
-        const ownIndex = members?.findIndex(member => member.number === Number(value)) ?? -1;
-        return baseIndex >= 0 && ownIndex === baseIndex + 1;
-      })();
-      if (!stackedImmediatelyAfterBase) {
-        reasons.push(`PR #${value} is not immediately above PR #${stackedOn.number} in one open native stack (GET repos/${project.repository}/stacks?pull_request=${value}); link it (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
+      // The base PR may sit anywhere below this PR; the head and target checks below concern the layer directly under it.
+      let lower;
+      if (Array.isArray(stacks) && stacks.length === 1 && stacks[0].open === true && Array.isArray(stacks[0].pull_requests)) {
+        const members = stacks[0].pull_requests;
+        const baseIndex = members.findIndex(member => member.number === stackedOn.number);
+        const ownIndex = members.findIndex(member => member.number === Number(value));
+        const under = members[ownIndex - 1];
+        if (baseIndex >= 0 && ownIndex > baseIndex && typeof under.head?.ref === 'string' && typeof under.head.sha === 'string') lower = under;
       }
-      // Proof of the upper head only counts when that head contains the base PR's current head (a later push below leaves the branch name unchanged).
-      if (!reasons.length && pr?.baseRefName === stackedOn.headRefName) {
-        const { status } = rest(`repos/${project.repository}/compare/${stackedOn.headRefOid}...${pr.headRefOid}`);
-        if (!['ahead', 'identical'].includes(status)) reasons.push(`PR #${value} does not contain the current head ${stackedOn.headRefOid.slice(0, 7)} of PR #${stackedOn.number} (compare says ${status}): rebase onto it and push with the lease`);
+      if (!lower) {
+        reasons.push(`PR #${value} is not above PR #${stackedOn.number} in one open native stack (GET repos/${project.repository}/stacks?pull_request=${value}); link it (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
       }
-      if (pr?.baseRefName !== stackedOn.headRefName) reasons.push(`the open predecessor PR #${stackedOn.number} is not merged: PR #${value} must target its branch ${stackedOn.headRefName}, not ${pr?.baseRefName}`);
+      const { number: lowerNumber, ref: lowerRef, sha: lowerSha } = lower ? { number: lower.number, ref: lower.head.ref, sha: lower.head.sha } : { number: stackedOn.number, ref: stackedOn.headRefName, sha: stackedOn.headRefOid };
+      // Proof of the upper head only counts when that head contains the lower PR's current head (a later push below leaves the branch name unchanged).
+      if (!reasons.length && pr?.baseRefName === lowerRef) {
+        const { status } = rest(`repos/${project.repository}/compare/${lowerSha}...${pr.headRefOid}`);
+        if (!['ahead', 'identical'].includes(status)) reasons.push(`PR #${value} does not contain the current head ${lowerSha.slice(0, 7)} of PR #${lowerNumber} (compare says ${status}): rebase onto it and push with the lease`);
+      }
+      if (pr?.baseRefName !== lowerRef) reasons.push(`the open predecessor PR #${lowerNumber} is not merged: PR #${value} must target its branch ${lowerRef}, not ${pr?.baseRefName}`);
     }
   }
   if (!['Automated review', 'Human review'].includes(status)) reasons.push(`status is ${status ?? 'unset'}: when the work is done, run board.mjs status ISSUE "Automated review" PR, then post a new handoff comment for the current head`);

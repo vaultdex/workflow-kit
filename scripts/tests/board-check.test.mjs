@@ -117,6 +117,22 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   assert.equal(handed.status, 0, handed.stdout + handed.stderr);
   assert.equal(stored(), 'Human review');
 
+  // The base PR (6) may sit further below: another layer (8) between it and this PR is fine when the PR targets that layer;
+  // a stack read that puts this PR under the base PR is not.
+  writeFileSync(join(checkout, 'stored'), 'Automated review');
+  rmSync(join(checkout, 'stacks.json'));
+  writeFileSync(join(checkout, 'stack-prs.json'), JSON.stringify({ 6: middle, 8: { ...middle, number: 8, baseRefName: 'claude/6-base', headRefName: 'claude/8-base', headRefOid: 'sha-8' } }));
+  writeFileSync(join(checkout, 'stacks-reads.json'), JSON.stringify([stack([5, 6, 7]), stack([7, 5, 6])]));
+  rejected('a PR below the base PR');
+  writeFileSync(join(checkout, 'stacks-reads.json'), JSON.stringify([stack([5, 6, 7]), stack([5, 6, 8, 7])]));
+  rejected('a PR on the base PR branch while another layer sits between');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ ...upper, baseRefName: 'claude/8-base' })));
+  writeFileSync(join(checkout, 'stacks-reads.json'), JSON.stringify([stack([5, 6, 7]), stack([5, 6, 8, 7])]));
+  const above = run('handoff', '1', '7');
+  assert.equal(above.status, 0, above.stdout + above.stderr);
+  assert.equal(stored(), 'Human review');
+  rmSync(join(checkout, 'stacks-reads.json'));
+
   // After the base merged into the release branch GitHub has retargeted the layer: a plain PR there, nothing stack-specific left to prove.
   writeIssue(assigned({ projectItems: issue('Automated review').projectItems, blockedBy: { totalCount: 1, nodes: [open(2, [pr(5, { state: 'MERGED' })])] },
     closedByPullRequestsReferences: { totalCount: 1, nodes: [

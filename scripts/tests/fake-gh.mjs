@@ -116,6 +116,13 @@ function api(argv, input, stdout, stderr, exit) {
     if (parts[3] === 'stacks') {
       // The stack read-back: by default PR 5 and PR 7 are linked in one open stack.
       if (fs.existsSync('fail-stacks')) exit(1);
+      // stacks-reads.json: a stack that changes between reads; each read takes the first entry, the last one stays.
+      if (fs.existsSync('stacks-reads.json')) {
+        const reads = JSON.parse(fs.readFileSync('stacks-reads.json'));
+        stdout(JSON.stringify(reads.length > 1 ? reads.shift() : reads[0]));
+        fs.writeFileSync('stacks-reads.json', JSON.stringify(reads));
+        exit(0);
+      }
       stdout(fs.existsSync('stacks.json') ? fs.readFileSync('stacks.json') : '[]');
       exit(0);
     }
