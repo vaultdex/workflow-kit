@@ -107,6 +107,8 @@ function api(argv, input, stdout, stderr, exit) {
     stderr('gh: API rate limit already exceeded for user ID 1.\n');
     exit(1);
   }
+  // Every query that reached GitHub, one JSON string per line: what a test reads to count queries and see what they ask for.
+  fs.appendFileSync('queries', JSON.stringify(query) + '\n');
   let data;
   if (query.startsWith('mutation')) {
     // mutation-fails: GitHub refuses every write.
@@ -148,6 +150,11 @@ function api(argv, input, stdout, stderr, exit) {
       data = { addProjectV2ItemById: { item: { id: 'PI1' } } };
     } else data = {};
   } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
+  else if (query.includes('nodes(ids:')) {
+    // The PRs that close predecessors, read by id: deliveries.json maps an id to its closedByPullRequestsReferences; an id it lacks is unreadable.
+    const deliveries = JSON.parse(fs.readFileSync('deliveries.json'));
+    data = { nodes: JSON.parse(/nodes\(ids:(\[[^\]]*\])/.exec(query)[1]).map(id => deliveries[id] ? { closedByPullRequestsReferences: deliveries[id] } : {}) };
+  }
   else if (query.includes('fieldValues(first:100)')) {
     const names = { F1: 'Status', F2: 'Priority', F3: 'Size' };
     const values = JSON.parse(fs.readFileSync('stored-values.json'));
@@ -208,7 +215,7 @@ function api(argv, input, stdout, stderr, exit) {
     if (fs.existsSync('handoff-fixture') && fs.existsSync('stored')) {
       issue.projectItems.nodes[0].status.name = fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8');
     }
-    data = { repository: { issue } };
+    data = { repository: { issue }, ...query.includes('{viewer{login}') && { viewer: { login: 'worker' } } };
   }
   // quota-left: the points GitHub reports as left, to be spent until three seconds from now.
   const rateLimit = fs.existsSync('quota-left') && { cost: 1, remaining: Number(fs.readFileSync('quota-left', 'utf8')), resetAt: new Date(Date.now() + 3000).toISOString() };

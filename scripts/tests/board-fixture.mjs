@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import nodeTest from 'node:test';
@@ -41,6 +41,12 @@ export function fixture(t) {
     // What board.mjs printed in the first `ms` milliseconds, for a command that waits on purpose.
     runBriefly: (ms, ...args) => runBoard({ cwd: checkout, env: { ...process.env, PATH: bin, ...env }, args, timeout: ms }).stdout,
     writeIssue: issue => writeFileSync(join(checkout, 'issue.json'), JSON.stringify(issue)),
+    // The GraphQL queries the fake gh received since the last call of this, oldest first (GitHub charges a query by what it asks for).
+    queries: () => {
+      const file = join(checkout, 'queries'), sent = existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : [];
+      rmSync(file, { force: true });
+      return sent;
+    },
   };
 }
 

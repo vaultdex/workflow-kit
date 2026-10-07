@@ -55,25 +55,45 @@ function graphql(query, variables = {}) {
   }
 }
 
-// A predecessor with the PRs that close it (closed ones included, so a merged one stays visible; stackBase keeps open and merged): the base of a stack is found through the native closing links (manual ones included).
-const predecessorFields = `number state stateReason repository{nameWithOwner}
-  closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
-// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query. Only the issue
-// itself reads the PRs of its predecessors (to find a stack base); the sub-issues' verdicts stay without them.
+// GitHub charges a query by its nested lists, not by what they return: every list inside a list (and every node of a list of
+// up to 100) multiplies the cost. So a query asks for little, and the rest is read only where a verdict needs it.
+// The PRs that close a predecessor (closed ones included, so a merged one stays visible; stackBase keeps open and merged) find the
+// base of a stack through the native closing links (manual ones included). They are read by loadDeliveries, only where a stack is judged.
+const predecessorFields = 'id number state stateReason repository{nameWithOwner}';
+const deliveryFields = `closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
+// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query.
 const issueFields = predecessor => `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
   blockedBy(first:100){totalCount nodes{${predecessor}}}`;
+// The login of the viewer comes along, so a claim check needs no query of its own. Sub-issues (only `check` lists them) are asked
+// for in the number given: each costs three lists, so the first page is short and a longer list is read again at 100.
 // ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
-const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
+const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){issue(number:$number){
   ${issueFields(predecessorFields)} bodyHTML
   closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
-  subIssues(first:100){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}}}}`;
+  ${subIssues ? `subIssues(first:${subIssues}){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}` : ''}}}}`;
 /** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
 const named = (label, read) => {
   try { return read(); } catch (error) { throw new Error(`${label}: ${String(error.stderr || error.message).trim()}`, { cause: error }); }
 };
-const readIssue = () => named(`${project.repository}#${number}`,
-  () => graphql(issueQuery, { owner, name, number }).repository.issue ?? assert.fail('issue not found'));
+const readIssue = (withSubIssues = false) => named(`${project.repository}#${number}`, () => {
+  for (let first = withSubIssues && 30; ; first = 100) {
+    const { viewer, repository } = graphql(issueQuery(first), { owner, name, number });
+    const issue = repository.issue ?? assert.fail('issue not found');
+    if (!(issue.subIssues?.totalCount > issue.subIssues?.nodes.length) || first >= 100) return { ...issue, viewer };
+  }
+});
+
+/** Reads the PRs that close the predecessors that have none loaded yet, 100 predecessors per query (a lookup by id is any repository). */
+function loadDeliveries(predecessors) {
+  const missing = [...new Map(predecessors.filter(predecessor => !predecessor.closedByPullRequestsReferences).map(predecessor => [predecessor.id, predecessor])).values()];
+  for (let from = 0; from < missing.length; from += 100) {
+    const batch = missing.slice(from, from + 100);
+    const { nodes } = graphql(`query{nodes(ids:${JSON.stringify(batch.map(predecessor => predecessor.id))}){...on Issue{${deliveryFields}}}}`);
+    // An unreadable predecessor stays without the list, which stackBase reports as unreadable, never as "no PR".
+    batch.forEach((predecessor, index) => { predecessor.closedByPullRequestsReferences = nodes[index]?.closedByPullRequestsReferences; });
+  }
+}
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
@@ -102,6 +122,7 @@ function predecessorReasons({ totalCount, nodes }) {
  * PR on the trunk, `pr.state` says MERGED.
  */
 function stackBase(open) {
+  loadDeliveries(open);
   const refused = [], unknown = [], prs = new Map();
   for (const predecessor of open) {
     const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
@@ -171,7 +192,7 @@ const handoverField = /^Handover:[ \t]*(\w[\w.-]*)[ \t]*$/im;
 // ponytail: sessions are told apart by the id the driver passes, not authenticated; Claude and Codex share one login.
 /** Blocks when the newest claim or handover of the own login belongs to another session; claims without the field only note. */
 function claimReasons(issue, session) {
-  const { viewer } = graphql('query{viewer{login}}');
+  const viewer = issue.viewer ?? graphql('query{viewer{login}}').viewer;
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
   let holder, legacy;
   // GitHub lists comments oldest first, so for equal times the later one in order wins.
@@ -283,10 +304,11 @@ function check(issue = readIssue(), claims) {
 
 function next() {
   // Advanced issue search understands -is:blocked (open native predecessors). Separate searches keep blocked issues
-  // from crowding unblocked ones out of the 1,000-result search cap; read every page of both before sorting.
+  // from crowding unblocked ones out of the 1,000-result search cap; read every page of both before sorting. A page costs by its size, not by its hits
+  // (4 lists per issue), so it is short: a repository with few open issues pays one point per search.
   const nodes = [];
   for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
-    const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
+    const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:30,after:$after){
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body assignees(first:10){nodes{login}}
       blockedBy(first:100){totalCount nodes{${predecessorFields}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
@@ -317,8 +339,9 @@ function next() {
     + ` (assignees: ${issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none'})`;
   const startable = ready.filter(issue => !issue.reasons.length);
   // Held only by open predecessors that one open PR delivers: stackable on that PR.
-  const stackable = ready.filter(issue => issue.reasons.length && heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors))
-    .map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
+  const candidates = ready.filter(issue => issue.reasons.length && heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors));
+  loadDeliveries(candidates.flatMap(issue => issue.predecessors.open));
+  const stackable = candidates.map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
   const held = ready.filter(issue => issue.reasons.length && !stackable.some(candidate => candidate.number === issue.number));
   for (const issue of startable) console.log(line(issue));
   console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
@@ -1409,7 +1432,7 @@ function sub() {
   console.log(`${project.repository}#${number} has sub-issue ${childOwner}/${childName}#${childNumber}`);
 }
 
-const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
+const commands = { next, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
   reviews: reviewsOnce, wait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'

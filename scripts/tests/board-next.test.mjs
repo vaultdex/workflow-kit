@@ -41,3 +41,29 @@ test('next lists blocked and unreadable Ready issues apart from startable ones',
   writeFileSync(join(checkout, 'truncate'), '');
   assert.notEqual(run('next').status, 0, 'A capped search is never reported as the complete Ready set');
 });
+
+
+test('next reads the PRs of predecessors in one lookup, for the candidates for a stack only', t => {
+  const { checkout, run, queries } = fixture(t);
+  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base' };
+  // As GitHub answers the search: the predecessor has an id and no PRs; they come from a lookup by id (deliveries.json).
+  const bare = (id, state = 'OPEN', stateReason = null) => ({ id, number: 2, state, stateReason, repository: { nameWithOwner: 'test/example' } });
+  const ready = (number, nodes) => ({ ...issue('Ready', nodes), number, issueFieldValues: { nodes: [] } });
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([ready(1, [bare('P1')]), ready(2, [bare('P2')]), ready(3, [bare('P3', 'CLOSED', 'COMPLETED')])]));
+  writeFileSync(join(checkout, 'deliveries.json'), JSON.stringify({ P1: { totalCount: 1, nodes: [pr] }, P2: { totalCount: 0, nodes: [] } }));
+
+  const result = run('next');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const [startable, stackable, held] = result.stdout.split('\n\n');
+  assert.deepEqual([startable, stackable, held].map(part => part.match(/^#\d+/gm)), [['#3'], ['#1'], ['#2']]);
+  assert.ok(stackable.includes('base PR #5'));
+  const sent = queries();
+  const lookups = sent.filter(query => query.includes('nodes(ids:'));
+  assert.equal(lookups.length, 1, 'One lookup for every candidate');
+  assert.ok(lookups[0].includes('nodes(ids:["P1","P2"])'), 'Only the open predecessors of the candidates');
+  assert.ok(sent.filter(query => query.includes('search(')).every(query => !query.includes('includeClosedPrs')), 'The search does not ask for the PRs of predecessors');
+
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([ready(3, [bare('P3', 'CLOSED', 'COMPLETED')]), ready(4, [])]));
+  assert.equal(run('next').status, 0);
+  assert.ok(queries().every(query => !query.includes('nodes(ids:')), 'Without a candidate there is no lookup');
+});
