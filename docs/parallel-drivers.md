@@ -134,8 +134,9 @@ Modellwahl stehen hier nicht.
    - Suchen: auf Pfade eingrenzen oder erst mit `-l` die Dateien finden.
    - Ziel-Stand: Suchen und Lesen laufen gegen den Stand des Ziel-Branches, bei abweichendem
      Checkout mit `git grep … origin/<Ziel-Branch>`.
-   - Such- und Explore-Subagenten im Vordergrund (`run_in_background: false`), damit genau ein
-     Bericht zurückkommt; Hintergrund nur für lange Prüfläufe mit eigener Benachrichtigung.
+   - Jeder eigene Subagent (Suche, Explore, die Review-Agenten von `code-review`) im Vordergrund
+     (`run_in_background: false`): ein Hintergrund-Ergebnis landet bei der Eltern-Session,
+     nicht beim Driver. Hintergrund nur für lange Prüfläufe mit eigener Benachrichtigung.
    - Warten: auf die Benachrichtigung der eigenen Hintergrundaufgabe; Prozessnamen
      (`node.exe`) gehören auch anderen Drivern.
    - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
