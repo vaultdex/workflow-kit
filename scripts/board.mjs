@@ -1910,7 +1910,6 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   // 0 = no limit; a missing or non-numeric value must not silently mean that.
   || (process.argv.includes('--max-minutes') && (!['wait', 'merge'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
-  || (command === 'merge' && value && !value.startsWith('--'))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
   || (command === 'body-replace' && !(process.argv.length === 8 && value === '--from' && process.argv[6] === '--to' && process.argv[5] && process.argv[7]))

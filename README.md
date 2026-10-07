@@ -158,7 +158,7 @@ and then work in that directory, their relative paths (changed files given to `a
 
 - `--help` or `-h` (any command) prints the usage and exits 0 without calling GitHub. A writing command (`status`, `priority`, `field`, `new`,
   `block`, `sub`, `link`, `body`, `body-replace`, `ready`, `handoff`, `merge`) refuses any flag (`--flag` or `-f`) and any extra word it does not
-  take with the usage line (exit 2) before it reads or writes anything (`field` and `status ISSUE "Automated review"` keep their own trailing arguments).
+  take with the usage line (exit 2) before it reads or writes anything. `field` and `status ISSUE "Automated review"` take further words of their own.
 - `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open
   predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);
   `next` lists such issues apart, with the base PR; shows the age and open PR of a claim and one line per

@@ -196,6 +196,8 @@ test('status and priority refuse an unknown flag or extra word, and --help or -h
   writeIssue(issue('Ready'));
   refusesUnknownFlag('status', '1', 'In progress');
   refusesUnknownFlag('priority', '1', 'High');
+  // "Automated review" keeps its trailing PR and issues, but a flag among them is still refused.
+  assert.equal(run('status', '1', 'Automated review', '7', '-x').status, 2);
   for (const flag of ['--help', '-h']) {
     const help = run('status', '1', 'In progress', flag);
     assert.equal(help.status, 0, help.stderr);
