@@ -10,6 +10,10 @@ Besonderheiten des Issues.
 eigenen Issue-Branch. Nur der Driver claimt und ändert den Status; Subagents
 bekommen begrenzte Aufträge ([Delegation](CONTRIBUTING.md#starting-work)).
 
+**Übergeben vor Starten.** Solange eigene Issues in „Automated review“ liegen, startet eine
+Chief-Session keinen neuen Driver und kein neues Issue: zuerst dort Konflikte lösen, rote Checks
+reparieren, Reviews abarbeiten und nach „Human review“ übergeben.
+
 **Nachweis-Sperre.** Schwere lokale Nachweise (Backend-E2E, Playwright-Suite)
 stören sich gegenseitig, sobald mehrere gleichzeitig laufen. Ein Symptom ist die
 Meldung „Could not find a valid Docker environment“ ohne echten Fehler im Test.
