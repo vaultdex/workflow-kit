@@ -1,5 +1,5 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run in the project: board.mjs next | check | status | priority | field | block | sub | reviews | wait | merge (see usage below).
+// Run in the project: board.mjs next | check | status | priority | field | new | block | sub | reviews | wait | merge (see usage below).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -8,7 +8,8 @@ import { externalTool } from './checkout-root.mjs';
 const [command, ref, value] = process.argv.slice(2);
 const project = JSON.parse(readFileSync('.github/workflow-project.json', 'utf8'));
 const [owner, name] = project.repository.split('/');
-const number = Number(String(ref).replace(/^#/, ''));
+// `new` has no issue yet and assigns the number it creates.
+let number = Number(String(ref).replace(/^#/, ''));
 const gh = externalTool('gh', process.cwd());
 
 function graphql(query, variables = {}) {
@@ -18,15 +19,19 @@ function graphql(query, variables = {}) {
   return JSON.parse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 })).data;
 }
 
-// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query.
-const issueFields = `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
+// A predecessor with the PRs that close it (closed ones included, so a merged one stays visible; stackBase keeps open and merged): the base of a stack is found through the native closing links (manual ones included).
+const predecessorFields = `number state stateReason repository{nameWithOwner}
+  closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
+// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query. Only the issue
+// itself reads the PRs of its predecessors (to find a stack base); the sub-issues' verdicts stay without them.
+const issueFields = predecessor => `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
-  blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}`;
+  blockedBy(first:100){totalCount nodes{${predecessor}}}`;
 // ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
-  ${issueFields} bodyHTML
+  ${issueFields(predecessorFields)} bodyHTML
   closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
-  subIssues(first:100){totalCount nodes{${issueFields}}}}}}`;
+  subIssues(first:100){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}}}}`;
 /** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
 const named = (label, read) => {
   try { return read(); } catch (error) { throw new Error(`${label}: ${String(error.stderr || error.message).trim()}`, { cause: error }); }
@@ -37,12 +42,12 @@ const projectItem = issue => issue.projectItems.nodes.find(item => item.project.
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
 function predecessorReasons({ totalCount, nodes }) {
-  const blocked = [], unknown = [];
+  const blocked = [], unknown = [], open = [];
   const readable = nodes.filter(Boolean);
   if (readable.length < totalCount) unknown.push(`only ${readable.length} of ${totalCount} predecessors are readable`);
   for (const predecessor of readable) {
     const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
-    if (predecessor.state === 'OPEN') blocked.push(`blocked by ${label} (open)`);
+    if (predecessor.state === 'OPEN') { blocked.push(`blocked by ${label} (open)`); open.push(predecessor); }
     else if (!predecessor.stateReason) unknown.push(`${label} is closed without a readable reason`);
     // Only a completed predecessor delivered; not planned or duplicate needs a recorded decision.
     else if (predecessor.stateReason !== 'COMPLETED') {
@@ -50,7 +55,40 @@ function predecessorReasons({ totalCount, nodes }) {
       blocked.push(`blocked by ${label} (closed as ${reason}; record a decision)`);
     }
   }
-  return { blocked, unknown };
+  return { blocked, unknown, open };
+}
+
+/**
+ * The one PR a dependent issue can be stacked on (docs/CONTRIBUTING.md#stacked-pull-requests): every open predecessor
+ * lives in this repository and is delivered by the same single open, ready PR from a branch of this repository. Anything else
+ * says why not (`refused`); incomplete PR data is `unknown`, never "no PR". A delivering PR that is already merged (into a
+ * release branch, where the predecessor issue stays open until the release) is the base too: the layer above it is then a plain
+ * PR on the trunk, `pr.state` says MERGED.
+ */
+function stackBase(open) {
+  const refused = [], unknown = [], prs = new Map();
+  for (const predecessor of open) {
+    const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
+    const links = predecessor.closedByPullRequestsReferences;
+    if (predecessor.repository.nameWithOwner.toLowerCase() !== project.repository.toLowerCase()) refused.push(`${label} is in another repository`);
+    else if (!links?.nodes || links.nodes.filter(Boolean).length < links.totalCount) unknown.push(`the pull requests of ${label} are not completely readable`);
+    else {
+      const delivering = links.nodes.filter(pr => ['OPEN', 'MERGED'].includes(pr.state));
+      if (!delivering.length) refused.push(`${label} has no open or merged PR`);
+      // A closing keyword can also come from a PR of another repository, which is no local branch to stack on.
+      for (const pr of delivering) {
+        if (pr.repository?.nameWithOwner?.toLowerCase() === project.repository.toLowerCase()) prs.set(pr.number, pr);
+        else refused.push(`PR #${pr.number} of ${label} belongs to ${pr.repository?.nameWithOwner ?? 'an unreadable repository'}`);
+      }
+    }
+  }
+  if (!refused.length && !unknown.length && prs.size > 1) refused.push(`the predecessors are delivered by ${prs.size} PRs (#${[...prs.keys()].join(', #')}), not one`);
+  const [pr] = prs.values();
+  if (!refused.length && !unknown.length && pr.state === 'OPEN') {
+    if (pr.isDraft) refused.push(`PR #${pr.number} is still Draft`);
+    if (pr.isCrossRepository) refused.push(`PR #${pr.number} comes from a fork`);
+  }
+  return { pr: refused.length || unknown.length ? undefined : pr, refused, unknown };
 }
 
 /** Git's Regeln für Ref-Namen (git check-ref-format): jeder gültige Tag wird nachgeschlagen, kein ungültiger. */
@@ -117,6 +155,19 @@ function claimReasons(issue, session) {
   return { blocked, notes, claim: holder ?? (legacy && { session: undefined, comment: legacy }) };
 }
 
+/** Base PR of the issue the last check() judged STACKABLE; handoff compares it with the PR's base branch. */
+let stackedOn;
+
+/** True when open predecessors are the only thing holding the issue: a stack may then replace the wait. */
+const heldOnlyByOpenPredecessors = (reasons, predecessors) => predecessors.open.length > 0 && reasons.length === predecessors.open.length;
+
+/** STARTABLE and STACKABLE both allow work; check() reports the latter with exit 4, which a successful guarded command must not keep. */
+function mayStart(verdict) {
+  if (!['STARTABLE', 'STACKABLE'].includes(verdict)) return false;
+  process.exitCode = 0;
+  return true;
+}
+
 /** Verdict inputs of one issue, shared by the issue itself and its sub-issues. */
 function issueReasons(issue) {
   const status = projectItem(issue)?.status?.name;
@@ -132,7 +183,7 @@ function issueReasons(issue) {
   const waits = waitReasons(issue.body);
   blocked.push(...waits.blocked);
   unknown.push(...waits.unknown);
-  return { status, blocked, unknown };
+  return { status, blocked, unknown, predecessors };
 }
 const verdictOf = ({ blocked, unknown }) => blocked.length ? 'BLOCKED' : unknown.length ? 'UNKNOWN' : 'STARTABLE';
 // #N in the project's repository, OWNER/REPO#N elsewhere: a bare number must never name a same-number issue or PR of another repository.
@@ -145,7 +196,7 @@ const ago = ms => {
 
 /** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
 function check(issue = readIssue(), claims) {
-  const { status, blocked, unknown } = issueReasons(issue);
+  const { status, blocked, unknown, predecessors } = issueReasons(issue);
   const notes = [];
   let claim;
   if (claims) try {
@@ -154,9 +205,27 @@ function check(issue = readIssue(), claims) {
     notes.push(...found.notes);
     claim = found.claim;
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
-  const verdict = verdictOf({ blocked, unknown });
+  // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
+  stackedOn = undefined;
+  if (heldOnlyByOpenPredecessors(blocked, predecessors) && !unknown.length) {
+    const stack = stackBase(predecessors.open);
+    if (stack.pr) {
+      stackedOn = stack.pr;
+      notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
+      blocked.length = 0;
+    } else if (stack.unknown.length && !stack.refused.length) {
+      unknown.push(...stack.unknown);
+      blocked.length = 0;
+    // A definitive refusal stays BLOCKED, whatever else is unreadable: a retry cannot lift it.
+    } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
+  }
+  const plain = verdictOf({ blocked, unknown });
+  const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;
   console.log(`${project.repository}#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
+  if (stackedOn) console.log(stackedOn.state === 'MERGED'
+    ? `stack base: PR #${stackedOn.number} is already merged into ${stackedOn.baseRefName}: no stack, work on ${stackedOn.baseRefName}; see docs/CONTRIBUTING.md#stacked-pull-requests`
+    : `stack base: PR #${stackedOn.number} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
   for (const note of notes) console.log(`note: ${note}`);
   if (claim) {
     const linked = issue.closedByPullRequestsReferences;
@@ -171,7 +240,8 @@ function check(issue = readIssue(), claims) {
       console.log(`${refOf(child.repository, child.number)}  ${projectItem(child)?.status?.name ?? '-'}  ${logins(child) || '-'}  ${verdictOf(issueReasons(child))}`);
     }
   }
-  process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2 }[verdict];
+  // STACKABLE is not 0: a caller that knows only STARTABLE must not start it without the stack rules.
+  process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2, STACKABLE: 4 }[verdict];
   return verdict;
 }
 
@@ -182,7 +252,7 @@ function next() {
   for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body assignees(first:10){nodes{login}}
-      blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}
+      blockedBy(first:100){totalCount nodes{${predecessorFields}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
@@ -203,16 +273,21 @@ function next() {
     .filter(issue => issue.item?.status?.name === 'Ready')
     .map(issue => {
       const predecessors = predecessorReasons(issue.blockedBy), waits = waitReasons(issue.body);
-      return { ...issue, reasons: [...predecessors.blocked, ...waits.blocked, ...predecessors.unknown, ...waits.unknown], priority: issue.item.priority?.name
+      return { ...issue, predecessors, reasons: [...predecessors.blocked, ...waits.blocked, ...predecessors.unknown, ...waits.unknown], priority: issue.item.priority?.name
         ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name };
     })
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);
   const line = issue => `#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`
     + ` (assignees: ${issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none'})`;
-  const held = ready.filter(issue => issue.reasons.length);
   const startable = ready.filter(issue => !issue.reasons.length);
+  // Held only by open predecessors that one open PR delivers: stackable on that PR.
+  const stackable = ready.filter(issue => issue.reasons.length && heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors))
+    .map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
+  const held = ready.filter(issue => issue.reasons.length && !stackable.some(candidate => candidate.number === issue.number));
   for (const issue of startable) console.log(line(issue));
   console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
+  if (stackable.length) console.log('\nReady and stackable on an open PR (check ISSUE shows STACKABLE; see docs/CONTRIBUTING.md#stacked-pull-requests):');
+  for (const issue of stackable) console.log(`${line(issue)}\n  - base PR #${issue.base.number} (${issue.base.state === 'MERGED' ? `merged into ${issue.base.baseRefName}` : `branch ${issue.base.headRefName}`})`);
   if (held.length) console.log('\nReady but not startable:');
   for (const issue of held) console.log([line(issue), ...issue.reasons.map(reason => `  - ${reason}`)].join('\n'));
 }
@@ -264,7 +339,7 @@ function guardOption(issue, { fieldName, option }) {
     // A refusal is an error like the others: its verdict lines become the one ERROR line instead of a second output format.
     const log = console.log, verdict = [];
     console.log = (...parts) => verdict.push(parts.join(' '));
-    try { if (check(issue) !== 'STARTABLE') throw new Error(verdict.join('; ')); } finally { console.log = log; }
+    try { if (!mayStart(check(issue))) throw new Error(verdict.join('; ')); } finally { console.log = log; }
   }
   if (fieldName === 'Status' && option.name === 'Automated review') verifyBacklinks();
 }
@@ -308,14 +383,23 @@ function fieldPairs() {
   if (args[0].toLowerCase() === 'status' && args[1].toLowerCase() === 'automated review') return [args.slice(0, 2)];
   assert.ok(args.length % 2 === 0, 'field takes NAME VALUE pairs: field ISSUE NAME VALUE [NAME VALUE ...]');
   const pairs = Array.from({ length: args.length / 2 }, (_, index) => args.slice(index * 2, index * 2 + 2));
-  assert.equal(new Set(pairs.map(([fieldName]) => fieldName.toLowerCase())).size, pairs.length, 'Each field may appear once per call');
   return pairs;
+}
+
+/** Resolve NAME VALUE pairs against the Project's fields; nothing is written. */
+function planFields(pairs) {
+  assert.equal(new Set(pairs.map(([fieldName]) => fieldName.toLowerCase())).size, pairs.length, 'Each field may appear once per call');
+  return pairs.map(([fieldName, optionName]) => resolveOption(fieldName, optionName));
 }
 
 /** Any single-select fields: every pair is validated before the first write, then all are read back together so a silent API no-op cannot pass. */
 function setField() {
   const issue = readIssue();
-  const plans = fieldPairs().map(([fieldName, optionName]) => resolveOption(fieldName, optionName));
+  console.log(applyFields(issue, planFields(fieldPairs())).join('\n'));
+}
+
+/** Write resolved plans on the issue and read them all back; returns one confirmation line per plan. */
+function applyFields(issue, plans) {
   for (const plan of plans) guardOption(issue, plan);
   // Confirmation lines come after the read-back, so a failed call never shows a write as confirmed.
   const written = plans.map(plan => writeOption(issue, plan));
@@ -329,7 +413,103 @@ function setField() {
     const stored = values.find(entry => entry?.field?.name === fieldName)?.name;
     assert.equal(stored, option.name, `Read-back of ${fieldName} shows ${stored ?? 'no value'}`);
   }
-  console.log(written.join('\n'));
+  return written;
+}
+
+/** Flags of `new`; unknown or repeated single flags are errors, never ignored. */
+function newOptions(args) {
+  const given = {}, single = ['--title', '--body-file', '--milestone', '--priority', '--agent', '--session'];
+  for (let index = 0; index < args.length; index++) {
+    const flag = args[index];
+    if (flag === '--start') { given[flag] = [true]; continue; }
+    assert.ok([...single, '--label', '--field'].includes(flag), `new: unknown option ${flag}`);
+    const text = args[++index];
+    assert.ok(text !== undefined && !text.startsWith('--'), `new: ${flag} needs a value`);
+    (given[flag] ??= []).push(text);
+  }
+  for (const flag of single) assert.ok((given[flag]?.length ?? 0) <= 1, `new: ${flag} may appear once`);
+  const [title, bodyFile, milestone, priority, agent, session] = single.map(flag => given[flag]?.[0]);
+  const start = Boolean(given['--start']);
+  const fields = (given['--field'] ?? []).map(pair => {
+    const split = pair.indexOf('=');
+    assert.ok(split > 0 && split < pair.length - 1, `new: --field wants NAME=VALUE, got "${pair}"`);
+    return [pair.slice(0, split), pair.slice(split + 1)];
+  });
+  return { title, bodyFile, milestone, priority, agent, session, start, fields, labels: given['--label'] ?? [] };
+}
+
+/**
+ * Create an issue with everything the workflow requires and read every value back. All inputs are checked before the
+ * issue exists (Project fields, milestone, labels, start prerequisites); a failure after it names the issue so it is
+ * finished by hand, never created twice. `--start` then runs the start steps: Ready, assignee, claim, In progress.
+ */
+function create() {
+  const options = newOptions(process.argv.slice(3));
+  const { title, bodyFile, milestone, priority, agent, session, start } = options;
+  for (const [flag, text] of [['--title', title], ['--body-file', bodyFile], ['--milestone', milestone], ['--priority', priority]]) assert.ok(text, `new: ${flag} is required`);
+  assert.ok(options.labels.length, 'new: at least one --label is required');
+  if (start) {
+    assert.ok(['claude', 'codex'].includes(agent) && /^\w[\w.-]*$/.test(session ?? ''), 'new: --start needs --agent claude|codex and --session ID (the claim comment)');
+  } else assert.ok(!agent && !session, 'new: --agent and --session belong to --start');
+  const text = readFileSync(bodyFile, 'utf8').replaceAll('\r\n', '\n').trimEnd();
+  assert.ok(text, `new: ${bodyFile} is empty`);
+  // Status is set by the command: Backlog, or Ready then In progress with --start.
+  const pairs = [['Status', start ? 'Ready' : 'Backlog'], ['Priority', priority], ...options.fields];
+  assert.ok(!options.fields.some(([fieldName]) => ['status', 'priority'].includes(fieldName.toLowerCase())), 'new: Status and Priority are not --field values (use --priority; --start sets Status)');
+  for (const required of project.requiredFields ?? []) {
+    assert.ok(pairs.some(([fieldName]) => fieldName.toLowerCase() === required.toLowerCase()), `new: the project requires ${required}: add --field ${required}=VALUE`);
+  }
+  const plans = planFields(pairs), progress = start ? planFields([['Status', 'In progress']]) : [];
+  const exact = (list, wanted, key) => list.find(item => item[key].toLowerCase() === wanted.toLowerCase());
+  const found = exact(restAll(`repos/${project.repository}/milestones`), milestone, 'title');
+  assert.ok(found, `new: ${project.repository} has no open milestone "${milestone}"`);
+  const known = restAll(`repos/${project.repository}/labels`);
+  // The REST API would silently create an unknown label.
+  // A repeated label (any casing) is one label: GitHub stores it once, and the read-back compares exactly.
+  const labels = [...new Set(options.labels.map(label => exact(known, label, 'name')?.name ?? assert.fail(`new: ${project.repository} has no label "${label}"`)))];
+  let viewer;
+  if (start) {
+    viewer = graphql('query{viewer{login}}').viewer?.login;
+    assert.ok(viewer, 'Cannot verify the authenticated GitHub user');
+    const waits = waitReasons(text);
+    assert.ok(!waits.blocked.length && !waits.unknown.length, `new: the issue would not be startable: ${[...waits.blocked, ...waits.unknown].join('; ')}`);
+  }
+  let created;
+  try {
+    created = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues`, '-X', 'POST', '--input', '-'],
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: JSON.stringify({ title, body: text, milestone: found.number, labels, ...start && { assignees: [viewer] } }) }));
+    assert.ok(Number.isSafeInteger(created?.number) && created.html_url, 'GitHub did not report the new issue');
+  } catch (error) {
+    // A lost or unreadable answer does not prove that nothing was created.
+    throw new Error(`creating the issue failed (${String(error.stderr || error.message).trim()}); it may exist anyway: search ${project.repository} for "${title}" before trying again`, { cause: error });
+  }
+  number = created.number;
+  let step = 'reading it back';
+  try {
+    const stored = rest(`repos/${project.repository}/issues/${number}`);
+    assert.equal(stored.milestone?.title, found.title, `Read-back of the milestone shows ${stored.milestone?.title ?? 'none'}`);
+    assert.deepEqual(stored.labels.map(label => label.name).sort(), [...labels].sort(), 'Read-back of the labels differs');
+    if (start) assert.ok(stored.assignees.some(assignee => assignee.login.toLowerCase() === viewer.toLowerCase()), 'Read-back of the assignee differs');
+    step = 'setting the Project fields';
+    applyFields(readIssue(), plans);
+    let claim;
+    if (start) {
+      step = 'posting the claim comment';
+      execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}/comments`, '-X', 'POST', '-F', 'body=@-'],
+        { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `Agent: ${agent}, Session: ${session}\n` });
+      const read = claimReasons({ number }, session);
+      assert.ok(!read.blocked.length && read.claim?.session === session, 'Claim comment read-back differs');
+      claim = read.claim.comment.html_url;
+      step = 'setting In progress';
+      applyFields(readIssue(), progress);
+    }
+    // Later plans replace earlier ones of the same field (Status: Ready, then In progress).
+    const values = Object.entries(Object.fromEntries([...plans, ...progress].map(plan => [plan.fieldName, plan.option.name])));
+    console.log([`NEW ${created.html_url}`, `milestone: ${found.title}`, `labels: ${labels.join(', ')}`,
+      ...values.map(([fieldName, value]) => `${fieldName}: ${value}`), ...start ? [`assignee: ${viewer}`, `claim: ${claim}`] : []].join(' | '));
+  } catch (error) {
+    throw new Error(`${created.html_url} was created, but ${step} failed: ${String(error.stderr || error.message).trim()}; finish by hand with board.mjs field/status, do not create it again`, { cause: error });
+  }
 }
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
@@ -831,11 +1011,35 @@ function openAcceptance(bodyHtml) {
 }
 
 /** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
-function handoffIssue(issue, viewer) {
-  if (check(issue) !== 'STARTABLE') return false;
+/** `reviewedHead`: the PR head the proof was gathered for; a stacked layer must still be that head when this reads it. */
+function handoffIssue(issue, viewer, reviewedHead) {
+  if (!mayStart(check(issue))) return false;
   assert.ok(issue.id, 'Issue identity is unreadable');
   const status = projectItem(issue)?.status?.name;
   const reasons = [];
+  // An upper layer may be handed off before the base is merged, but only as a layer on that base.
+  // A merged base leaves a plain PR on the trunk; it still has to come from this repository and target that trunk.
+  if (stackedOn) {
+    const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+      pullRequest(number:$number){baseRefName headRefOid isCrossRepository headRepository{nameWithOwner}}}}`, { owner, name, number: Number(value) }).repository;
+    if (reviewedHead && pr?.headRefOid !== reviewedHead) reasons.push(`PR #${value} changed its head from ${reviewedHead.slice(0, 7)} during handoff; read it again`);
+    if (pr?.isCrossRepository !== false || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) reasons.push(`PR #${value} comes from a fork or another repository: stacks stay inside ${project.repository}`);
+    if (stackedOn.state === 'MERGED') {
+      if (pr?.baseRefName !== stackedOn.baseRefName) reasons.push(`PR #${stackedOn.number} is merged into ${stackedOn.baseRefName}: PR #${value} must target it, not ${pr?.baseRefName}`);
+    } else {
+      // An aligned branch chain is no stack: GitHub must list both PRs in one open stack (the read-back of the docs, step 2).
+      const stacks = rest(`repos/${project.repository}/stacks?pull_request=${Number(value)}`);
+      if (!Array.isArray(stacks) || !stacks.some(stack => stack.open !== false && [stackedOn.number, Number(value)].every(prNumber => stack.pull_requests?.some(member => member.number === prNumber)))) {
+        reasons.push(`PR #${value} and PR #${stackedOn.number} are not linked as a stack on GitHub (GET repos/${project.repository}/stacks?pull_request=${value} lists none): link them (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
+      }
+      // Proof of the upper head only counts when that head contains the base PR's current head (a later push below leaves the branch name unchanged).
+      if (!reasons.length && pr?.baseRefName === stackedOn.headRefName) {
+        const { status } = rest(`repos/${project.repository}/compare/${stackedOn.headRefOid}...${pr.headRefOid}`);
+        if (!['ahead', 'identical'].includes(status)) reasons.push(`PR #${value} does not contain the current head ${stackedOn.headRefOid.slice(0, 7)} of PR #${stackedOn.number} (compare says ${status}): rebase onto it and push with the lease`);
+      }
+      if (pr?.baseRefName !== stackedOn.headRefName) reasons.push(`the open predecessor PR #${stackedOn.number} is not merged: PR #${value} must target its branch ${stackedOn.headRefName}, not ${pr?.baseRefName}`);
+    }
+  }
   if (!['Automated review', 'Human review'].includes(status)) reasons.push('finish implementation and Automated review first');
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
     reasons.push('the issue is not assigned to the authenticated driver');
@@ -952,7 +1156,7 @@ function handoff() {
     if (!handoffPr(issue.id, viewer, pr.headRefOid)) return;
     const current = readIssue();
     assert.equal(current?.id, issue.id, 'Issue identity changed during handoff');
-    return handoffIssue(current, viewer) ? current : undefined;
+    return handoffIssue(current, viewer, pr.headRefOid) ? current : undefined;
   })) return;
   assert.equal(projectItem(readIssue())?.status?.name, 'Human review', 'Human review status read-back differs');
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
@@ -964,7 +1168,18 @@ function handoff() {
  * lands after the check, so no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR.
  */
 function merge() {
-  const result = finishedPr(number, 'merge');
+  // Merging an upper layer of a stack merges every open layer below it too (GitHub: "merge the top pull request, every pull
+  // request below it comes with it"), so the lower layer goes first, by itself. No Stacks API (404) means no stack.
+  const result = finishedPr(number, 'merge', undefined, () => {
+    let stacks;
+    try { stacks = rest(`repos/${project.repository}/stacks?pull_request=${number}`); } catch (error) {
+      if (!/\b404\b|Not Found/.test(String(error.stderr))) throw error;
+      stacks = [];
+    }
+    assert.ok(Array.isArray(stacks), 'The stack membership is unreadable');
+    return stacks.flatMap(({ pull_requests: members = [] }) => members.slice(0, Math.max(0, members.findIndex(member => member.number === number)))
+      .filter(member => member.state === 'open').map(member => `PR #${member.number} below it in its stack is still open: merge it first, merging this layer would merge it too`));
+  });
   if (!result) return;
   const { headRefOid } = result.pr;
   assert.match(headRefOid, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
@@ -1104,9 +1319,10 @@ function sub() {
   console.log(`${project.repository}#${number} has sub-issue ${childOwner}/${childName}#${childNumber}`);
 }
 
-const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField,
+const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
   reviews: reviewsOnce, wait, handoff, merge, ready, link, body };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
+  + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
@@ -1114,7 +1330,7 @@ const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
-if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
+if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && !(process.argv.length > 5 && process.argv.slice(4).every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text))))
@@ -1129,10 +1345,10 @@ if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   console.error(usage);
   process.exit(2);
 }
-// field, status and priority report a failure as one "ERROR - reason" line: their output (verdicts, backlinks, confirmations)
+// field, status, priority and new report a failure as one "ERROR - reason" line: their output (verdicts, backlinks, confirmations)
 // is held until the command succeeds, so no failed call shows a write or a check as confirmed. The other commands keep ERROR
 // with "- reason" below it.
-const oneLine = ['field', 'status', 'priority'].includes(command), print = console.log, held = [];
+const oneLine = ['field', 'status', 'priority', 'new'].includes(command), print = console.log, held = [];
 if (oneLine) console.log = (...parts) => held.push(parts.join(' '));
 try {
   await commands[command]();
@@ -1141,7 +1357,7 @@ try {
 } catch (error) {
   console.log = print;
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'merge', 'ready', 'link', 'body', 'field', 'status', 'priority'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'handoff', 'merge', 'ready', 'link', 'body', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
   console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;
