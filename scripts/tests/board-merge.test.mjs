@@ -88,6 +88,20 @@ function mergeFixture(t) {
   return { checkout, run, show, calls, flag, json, first, second, headOf };
 }
 
+test('merge refuses a PR body without the Selbstprüfung section the project asks for', t => {
+  const { checkout, run, show, calls } = mergeFixture(t);
+  const config = join(checkout, '.github/workflow-project.json'), plain = JSON.parse(readFileSync(config, 'utf8'));
+  writeFileSync(config, JSON.stringify({ ...plain, selfReview: ['ponytail-review'] }));
+  show({ bodyHTML: '<p>Beschreibung</p>' });
+  const refused = run('merge', '7');
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.match(refused.stdout, /blocker: the PR body needs a "## Selbstprüfung" section that names ponytail-review/);
+  assert.deepEqual(calls(), [], 'nothing is merged');
+  show({ bodyHTML: '<h2 dir="auto">Selbstprüfung</h2>\n<p>ponytail-review: nichts zu streichen.</p>' });
+  assert.equal(run('merge', '7').status, 0);
+  assert.deepEqual(calls(), ['merge', 'delete claude/7-topic']);
+});
+
 test('merge merges a base that moved under the same files into the PR branch, waits for CI on the new head, then merges', t => {
   const { checkout, run, show, calls, flag, json, first, second, headOf } = mergeFixture(t);
   const running = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS', conclusion: null }] } } };

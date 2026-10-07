@@ -122,6 +122,57 @@ test('handoff needs a retro section whose every line ends with its resolution', 
 });
 
 
+// The PR body as GitHub renders it: headings and paragraphs, with the checks the "selfReview" field of the project file lists.
+const selfReview = (level, ...lines) => `<h${level} dir="auto">Selbstprüfung</h${level}>\n` + lines.map(line => `<p dir="auto">${line}</p>`).join('\n');
+
+test('handoff needs the Selbstprüfung section of the PR body to name every check the project lists, and nothing without the field', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  const config = join(checkout, '.github/workflow-project.json'), plain = JSON.parse(readFileSync(config, 'utf8'));
+  const project = changes => writeFileSync(config, JSON.stringify({ ...plain, ...changes }));
+  const handoff = (bodyHTML, changes = { selfReview: ['ponytail-review', 'code-review'] }) => {
+    project(changes);
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ bodyHTML })));
+    return run('handoff', '1', '7');
+  };
+  const both = '<code>ponytail-review</code>: nichts mehr zu streichen. <code>code-review</code>: ein Fund, behoben.';
+  const rejected = (bodyHTML, named, label) => {
+    const result = handoff(bodyHTML);
+    assert.equal(result.status, 1, label + result.stdout + result.stderr);
+    assert.ok(result.stdout.includes(`blocker: ${named}`), label + result.stdout);
+    // One run names the section's gap together with the other missing point (the open box), so one fix round is enough.
+    assert.match(result.stdout, /blocker: open acceptance/, label + result.stdout);
+    assert.equal(existsSync(join(checkout, 'mutations')), false, label + 'Rejected handoff never mutates status');
+  };
+  const missingSection = 'the PR body needs a "## Selbstprüfung" section that names ponytail-review, code-review';
+
+  rejected('<p>Beschreibung</p>', missingSection, 'no section: ');
+  rejected(`<h2 dir="auto">Reviews</h2>\n<p>${both}</p>`, missingSection, 'the names under another heading: ');
+  rejected(`<blockquote>\n${selfReview(2, both)}\n</blockquote>`, missingSection, 'a quoted template is no section: ');
+  rejected(selfReview(2, '<code>code-review</code>: ein Fund.'), 'the "Selbstprüfung" section of the PR body does not name: ponytail-review', 'one check missing: ');
+  rejected(selfReview(2, 'Keine Prüfung gelaufen.') + `\n<h2 dir="auto">Randfälle</h2>\n<p>${both}</p>`, 'the "Selbstprüfung" section of the PR body does not name: ponytail-review, code-review', 'the next heading ends the section: ');
+  rejected(selfReview(2, 'Nur ponytail-reviewer und precode-review.'), 'the "Selbstprüfung" section of the PR body does not name: ponytail-review, code-review', 'a longer word is no name: ');
+
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  for (const [html, label] of [
+    [selfReview(2, both), 'both names'],
+    [`<p>Intro</p>\n${selfReview(3, 'ponytail-review, CODE-REVIEW')}\n<h2 dir="auto">Randfälle</h2>`, 'a level-3 heading, any case'],
+    [`${selfReview(2)}\n<h3 dir="auto">ponytail-review</h3>\n<p>ok</p>\n<h3 dir="auto">code-review</h3>\n<p>ok</p>`, 'sub-headings belong to the section'],
+  ]) {
+    const result = handoff(html);
+    assert.equal(result.status, 0, label + ': ' + result.stdout + result.stderr);
+  }
+  // Without the field, or with an empty list, a PR body without the section hands off as before; a malformed field is an ERROR.
+  for (const changes of [{}, { selfReview: [] }]) {
+    const result = handoff(undefined, changes);
+    assert.equal(result.status, 0, JSON.stringify(changes) + result.stdout + result.stderr);
+  }
+  for (const bad of [null, 'ponytail-review', [''], [1]]) assert.equal(handoff(selfReview(2, both), { selfReview: bad }).status, 2, JSON.stringify(bad));
+  assert.equal(handoff(undefined).status, 2, 'An unreadable rendered PR body is unknown, never a handoff');
+});
+
+
 test('handoff blocks on open Sonar issues behind a passed quality gate and never reads an unreadable count as clean', t => {
   const { checkout, run, writeIssue, env } = fixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });

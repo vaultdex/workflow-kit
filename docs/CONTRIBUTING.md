@@ -337,7 +337,10 @@ backlink never closes an issue.
    missing, stale, partial, deleted (retention) or unrelated data; interruption and
    cancellation; error paths and error classification. Settle open cases with the
    human; add cases that review uncovers. Pure text or configuration changes need
-   no section.
+   no section. Where the project lists `"selfReview"` ([setup](../SETUP.md#3-board-and-labels)),
+   run those checks on the diff before Ready for Review, once per PR, and name each in the PR body
+   section **Selbstprüfung** with what it found and what you did about it; `handoff` and `merge`
+   refuse a PR body without that section.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
    Then mark it Ready for Review with `board.mjs ready PR SHA` (the full 40-character id of the commit you just
    pushed, or `--local` for the checkout's own head: it waits until GitHub reports that head, so CI starts for the right

@@ -153,6 +153,11 @@ Modellwahl stehen hier nicht.
      Eltern-Session. Sie hält vor dem Start von Drivern ihr Kit auf dem Pin-Stand
      (`git submodule update --init .vendor/workflow-kit`), damit neue Regeln für die
      Driver gelten.
+5a. **Selbstprüfung vor Ready.** Nennt das Projekt `"selfReview"` in `.github/workflow-project.json`
+   (zum Beispiel `ponytail-review` und `code-review`), laufen diese Prüfungen einmal je PR im
+   Vordergrund vor „Ready for Review“, und der PR-Text hat den Abschnitt `## Selbstprüfung` mit jedem Namen
+   und dem Ergebnis; `board.mjs handoff` und `merge` lehnen sonst ab
+   ([Review loop](CONTRIBUTING.md#review-loop) Schritt 1).
 6. **Retro vor der Übergabe.** Den Skill `retro` mit dem Skill-Werkzeug aufrufen
    (die Kit-Kopie ist aufrufbar, [Abweichung](matt-pocock.md)); Quelle ist die eigene
    Session ([Review loop](CONTRIBUTING.md#review-loop) Schritt 5). Eine
