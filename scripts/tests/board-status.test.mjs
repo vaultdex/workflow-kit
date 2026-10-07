@@ -1,7 +1,33 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fixture, handoffPr, issue, predecessor, test } from './board-fixture.mjs';
+import { fixture, handoffPr, issue, list, predecessor, reference, task, test } from './board-fixture.mjs';
+
+test('Automated review names open acceptance boxes of the issue and still sets the status', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const wrote = () => existsSync(join(checkout, 'mutations')) && /updateProjectV2ItemFieldValue/.test(readFileSync(join(checkout, 'mutations'), 'utf8'));
+  const prepare = bodyHTML => {
+    rmSync(join(checkout, 'mutations'), { force: true });
+    writeIssue({ ...issue('In progress'), bodyHTML });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [['I1']],
+      url: 'https://github.com/test/example/pull/7', body: 'Refs #1' })));
+    writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 1 }));
+    writeFileSync(join(checkout, 'backlink-comments-1.json'), JSON.stringify([{ id: 1, body: 'https://github.com/test/example/pull/7', html_url: 'u' }]));
+  };
+
+  prepare(list([task('open box', false), task('done box', true), task(`moved box ${reference}`, false)]));
+  let result = run('status', '1', 'Automated review', '7');
+  assert.equal(result.status, 0, 'A hint never blocks: ' + result.stdout + result.stderr);
+  assert.ok(wrote(), 'and the status is written');
+  assert.match(result.stdout, /open box/);
+  assert.doesNotMatch(result.stdout, /done box/, 'a checked box is not named');
+  assert.doesNotMatch(result.stdout, /moved box/, 'nor one that names a follow-up issue');
+
+  prepare(list([task('done box', true)]));
+  result = run('status', '1', 'Automated review', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.doesNotMatch(result.stdout, /box/, 'Nothing open, nothing named');
+});
 
 test('Automated review sets the missing native link and backlink itself and refuses only when that fails', t => {
   const { checkout, run, writeIssue } = fixture(t);

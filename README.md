@@ -188,7 +188,9 @@ the project from that directory instead. Other relative paths (`--body-file`) st
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
   and comment backlink on every delivered issue before writing status. A missing
   backlink on an issue of this repository is set like `link` does and read back
-  (a failure refuses); `link` first is not needed. See [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
+  (a failure refuses); `link` first is not needed. It also prints one `warning:` line per open acceptance box
+  of the issue that names no issue (what `handoff` will refuse); the status is written regardless.
+  See [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
 - `body ISSUE FILE BASE_FILE`: replace an issue body with `FILE` only if the current body
   still equals `BASE_FILE` (the body your change is based on; line endings and trailing
   whitespace are ignored; the text written is `FILE` with LF line endings and no trailing
@@ -214,9 +216,12 @@ the project from that directory instead. Other relative paths (`--body-file`) st
   For an open issue of this repository it also posts the PR's backlink comment, the one `status ISSUE "Automated review" PR`
   requires, unless a comment with the PR's URL exists, and reads the comments back
   (a missing comment after the write exits 2; the write is not repeated).
-- `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
+- `ready PR SHA|--local [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
   repository ready for review, but only for the commit you pushed. `SHA` must be the full
-  40-character commit id (`git rev-parse HEAD`); a short id exits 2 with that reason. It rereads the PR
+  40-character commit id (`git rev-parse HEAD`); a short id exits 2 with that reason. `--local` reads that
+  id itself from the project's checkout (`--cwd`, else the working directory), so no `$(git rev-parse HEAD)` has to
+  be spliced into the call; the PR must still show exactly that head, so a commit that was not pushed is refused
+  like a wrong id. It rereads the PR
   (default 6 reads, 5 s apart; both waits, before the write and for the read-back, together
   stay within 30 minutes, else exit 2) until GitHub reports `SHA` as the head, because the
   metadata can still show the previous push right after it and Draft-payload events

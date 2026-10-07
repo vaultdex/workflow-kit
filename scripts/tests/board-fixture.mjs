@@ -24,8 +24,8 @@ export function fixture(t) {
   const checkout = join(root, 'checkout'), bin = join(root, 'bin');
   mkdirSync(join(checkout, '.github'), { recursive: true });
   mkdirSync(bin);
-  // board.mjs only looks for a `gh` on PATH outside the checkout; its calls go to fake-gh.mjs (see board-worker.mjs).
-  writeFileSync(join(bin, process.platform === 'win32' ? 'gh.exe' : 'gh'), '');
+  // board.mjs only looks for a `gh` (and `ready --local` for a `git`) on PATH outside the checkout; its gh calls go to fake-gh.mjs (see board-worker.mjs).
+  for (const tool of ['gh', 'git']) writeFileSync(join(bin, process.platform === 'win32' ? `${tool}.exe` : tool), '');
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1' }));
   // By default the driver has posted the handoff comment long after any push; tests about it replace this file.
   writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment()]));
