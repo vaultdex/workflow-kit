@@ -300,7 +300,8 @@ existing issue, PR and chat progress for coordination.
    without merge, your layer stops: run `check` again and report; don't retarget your PR on your own.
 6. **Handoff.** Your layer may go to Human review before the base PR is merged. `board.mjs handoff`
    then requires your PR to come from this repository, to be linked with the base PR as a stack on GitHub
-   (the Stacks API read-back from step 2, not just an aligned branch chain), to target the base PR's branch
+   (the Stacks API read-back from step 2, not just an aligned branch chain; other layers may sit between the
+   base PR and yours), to target the branch of the layer directly below it
    and to contain that branch's current head (after a push below, rebase first and let CI run again). The handoff
    comment names the merge order (base PR first, then yours). `board.mjs merge` refuses an upper layer while a layer below it is
    open, because GitHub would merge that one along.
