@@ -280,11 +280,14 @@ runs a month at up to 10 minutes on a free public runner.
 
 Renovate only moves a submodule pin, so the Ponytail adaptation patch and the committed
 skills are stale until regenerated. The workflow `Renovate regenerate` does that on
-Renovate pull requests from this repository that change `.vendor/*`: it runs
+Renovate pull requests from this repository that change `.vendor/*`. It starts on
+`pull_request_target`, so GitHub loads the workflow from `main`: a branch cannot rewrite the
+definition that holds the write token. That is safe only because the job never runs code of the
+branch (see below), and it must stay so. The job runs
 `scripts/update-ponytail.mjs` and `scripts/update-impeccable.mjs` as needed, then the CI
 generators, pushes the result to the Renovate branch and dispatches the repository CI on the
 new head (pushes with `GITHUB_TOKEN` start no workflows). The job holds `contents: write`
-and `actions: write` (the token reaches only the push and dispatch steps), runs only for
+and `actions: write` (the checkout action fetches with it and drops it; no step that runs a script sees it except the push and dispatch steps), runs only for
 `renovate[bot]` pull requests whose commits are all by bots, and checks out the commit of
 Renovate's authenticated event, not the branch name. Whatever the branch changed under
 `scripts/` never runs: main's scripts replace it, and only the branch's adaptation patch is
@@ -292,8 +295,9 @@ kept as input. Whoever wrote its commits, the branch may not change any workflow
 `.node-version` or `renovate.json` against main, apart from the three files the updaters
 generate (the Ponytail adaptation patch and the Impeccable `VERSION` and `SHA256SUMS`). The job
 fails instead of running, because it dispatches the branch's CI workflow with the write token;
-it dispatches only while the branch still is the commit it pushed and cancels a run that
-started for another commit. Commit author names prove nothing,
+it dispatches only while the branch still is the commit it pushed, then waits up to a minute for
+the dispatched run, requires it on exactly that commit and fails on any run started since the
+dispatch for another commit, finished or not (it cancels one that still runs). Commit author names prove nothing,
 so the bot-author rule only leaves branches with other people's commits alone. If the CI
 dispatch fails after the push, the job fails and `repository.yml` is started for the branch by
 hand. `renovate.json` lists the bot's commit address in
