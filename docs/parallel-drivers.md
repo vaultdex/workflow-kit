@@ -89,8 +89,25 @@ Modellwahl stehen hier nicht.
    Review verfolgt der Driver von Hand bis zum Ergebnis oder Stall und führt
    `handoff` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;
    `tasks/*.output` nicht pollen, die Datei bleibt leer.
-5. **Shell.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus, mit
-   literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
+5. **Shell und Werkzeuge.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus,
+   mit literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
+   - Tests: lokal nur die betroffenen (`--test-name-pattern` oder eine Testdatei), die
+     ganze Suite läuft in der CI. Führt die Projekt-CI sie für diesen Head nicht aus,
+     läuft sie einmal vor der Übergabe im Hintergrund mit Logdatei. Das Kit fährt sie in
+     seiner CI, Kit-Driver testen lokal nur gezielt.
+   - Dateien: mit Edit und Write oder mit einem Node-Skript aus einer Datei ändern;
+     Heredoc, Python und sed verlieren Backslashes.
+   - Suchen: auf Pfade eingrenzen oder erst mit `-l` die Dateien finden.
+   - Warten: auf die Benachrichtigung der eigenen Hintergrundaufgabe; Prozessnamen
+     (`node.exe`) gehören auch anderen Drivern.
+   - `gh issue view N --json comments` liefert die Kommentare; `--comments` passt nicht
+     zu `--json`.
+   - Worktree: der Driver arbeitet im eigenen Worktree, nie in dem der Eltern-Session;
+     hat er keinen, legt er ihn als Erstes an. Scratch-Dateien tragen die Issue-Nummer.
+   - Kit-Stand: Hooks und Skills eines Subagenten kommen aus dem Start-Worktree der
+     Eltern-Session. Sie hält vor dem Start von Drivern ihr Kit auf dem Pin-Stand
+     (`git submodule update --init .vendor/workflow-kit`), damit neue Regeln für die
+     Driver gelten.
 6. **Retro vor der Übergabe.** Den Skill `retro` mit dem Skill-Werkzeug aufrufen
    (die Kit-Kopie ist aufrufbar, [Abweichung](matt-pocock.md)); Quelle ist die eigene
    Session ([Review loop](CONTRIBUTING.md#review-loop) Schritt 5). Eine

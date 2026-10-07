@@ -43,9 +43,12 @@ test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local so
   const expected = new Map(tracked.filter(path => skillTrees.some(skill => path.startsWith(`${skill}/`)))
     .map(path => [path.split('/').slice(2).join('/'), readFileSync(join(source, path), 'utf8').replaceAll('\r\n', '\n')]));
   assert.ok(expected.size >= skillTrees.length, 'Every skill has its files in the package');
-  // The one deviation from upstream: agents may invoke retro; every other skill keeps its flags.
+  // The deviations from upstream: agents may invoke retro; implement leaves the full suite to CI;
+  // every other skill keeps its flags and text.
   const flag = /^disable-model-invocation: true\n/m;
   expected.set('retro/SKILL.md', expected.get('retro/SKILL.md').replace(flag, ''));
+  expected.set('implement/SKILL.md', expected.get('implement/SKILL.md')
+    .replace(', and the full test suite once at the end.', ', and leave the full test suite to CI (run it once at the end only if CI does not).'));
   write(join(consumer, '.agents/skills/ask-matt/LOCAL.md'), 'Keep my local work\n');
   write(join(consumer, '.agents/skills/project-custom/SKILL.md'), 'Keep unrelated skill\n');
   write(join(consumer, '.agents/skills/retired-skill/SKILL.md'), 'Retired upstream skill\n');
