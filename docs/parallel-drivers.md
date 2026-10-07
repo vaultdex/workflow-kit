@@ -84,7 +84,9 @@ Modellwahl stehen hier nicht.
    und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
    `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
    Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht auf einen Reviewer
-   ohne Spur pollen (ein Review, das nie startet). Freitext-Ankündigungen anderer Bots
+   ohne Spur pollen (ein Review, das nie startet) und keinen Review von Hand anfordern
+   (kein `@codex review`); fehlt die Spur, nennt der Übergabe-Kommentar das
+   ([Review loop](CONTRIBUTING.md#review-loop) Schritt 3). Freitext-Ankündigungen anderer Bots
    erkennt `wait` nicht ([README](../README.md#board-commands)); eine angekündigte
    Review verfolgt der Driver von Hand bis zum Ergebnis oder Stall und führt
    `handoff` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;
