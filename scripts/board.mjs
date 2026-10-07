@@ -329,6 +329,27 @@ function restAll(path, expected) {
   }
 }
 
+/** Every comment of an open issue, complete and unique, or an exception: a partial list must never read as "no backlink". */
+function issueComments(repository, issueNumber) {
+  const issue = rest(`repos/${repository}/issues/${issueNumber}`);
+  assert.ok(issue?.number === issueNumber && issue.state === 'open' && !issue.pull_request,
+    `#${issueNumber} is not an open issue`);
+  assert.ok(Number.isSafeInteger(issue.comments) && issue.comments >= 0, 'Issue comment count is unreadable');
+  const comments = restAll(`repos/${repository}/issues/${issueNumber}/comments`, issue.comments);
+  assert.equal(comments.length, issue.comments, `Not every comment on #${issueNumber} is readable; retry the read`);
+  assert.ok(comments.every(comment => Number.isSafeInteger(comment?.id) && typeof comment.body === 'string'), 'Unreadable issue comment');
+  assert.equal(new Set(comments.map(comment => comment.id)).size, comments.length, 'Duplicate comment page');
+  return comments;
+}
+
+/** The comment that `status ... "Automated review"` accepts: it names the PR's full URL, whatever surrounds it. Shared by that guard and `link`. */
+const findBacklink = (comments, prUrl) => comments.find(comment => (comment.body.match(/https?:\/\/[^\s<>()[\]`"']+/g) ?? []).some(link => {
+  try {
+    const target = new URL(link.replace(/[.,;:!?]+$/, ''));
+    return target.origin === prUrl.origin && target.pathname.replace(/\/$/, '') === prUrl.pathname;
+  } catch { return false; } // An unrelated malformed URL is not a backlink.
+}));
+
 /** Explicit scope works with Refs on release branches; native closing links remain a separate proof. */
 function verifyBacklinks() {
   const [prRef, ...extraIssues] = process.argv.slice(command === 'field' ? 6 : 5);
@@ -348,21 +369,9 @@ function verifyBacklinks() {
     const qualifier = `(?:${RegExp.escape(repository)})${repository === project.repository ? '?' : ''}`;
     const reference = new RegExp(`(?<![\\w/])${qualifier}#${issueNumber}(?!\\w)`, 'i');
     assert.ok(reference.test(pr.body), `PR #${prNumber} does not reference ${issueRef}`);
-    const issue = rest(`repos/${repository}/issues/${issueNumber}`);
-    assert.ok(issue?.number === issueNumber && issue.state === 'open' && !issue.pull_request,
-      `#${issueNumber} is not an open issue`);
-    assert.ok(Number.isSafeInteger(issue.comments) && issue.comments >= 0, 'Issue comment count is unreadable');
-    const comments = restAll(`repos/${repository}/issues/${issueNumber}/comments`, issue.comments);
-    assert.equal(comments.length, issue.comments, `Not every comment on #${issueNumber} is readable; retry the read`);
-    assert.ok(comments.every(comment => Number.isSafeInteger(comment?.id) && typeof comment.body === 'string'), 'Unreadable issue comment');
-    assert.equal(new Set(comments.map(comment => comment.id)).size, comments.length, 'Duplicate comment page');
-    const backlink = comments.find(comment => (comment.body.match(/https?:\/\/[^\s<>()[\]`"']+/g) ?? []).some(link => {
-      try {
-        const target = new URL(link.replace(/[.,;:!?]+$/, ''));
-        return target.origin === url.origin && target.pathname.replace(/\/$/, '') === url.pathname;
-      } catch { return false; } // An unrelated malformed URL is not a backlink.
-    }));
-    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; post the full URL and retry`);
+    const backlink = findBacklink(issueComments(repository, issueNumber), url);
+    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; ${repository === project.repository
+      ? `run board.mjs link ${issueNumber} ${prNumber}` : 'post the full URL as a comment'} and retry`);
     console.log(`backlink ${issueRef}: ${backlink.html_url}`);
   }
 }
@@ -702,13 +711,15 @@ function body() {
   console.log(`BODY #${number} written and read back`);
 }
 
-/** Connect the issue natively to the PR (what a closing keyword does only on the default branch) and read it back. */
+/** Connect the issue natively to the PR (what a closing keyword does only on the default branch), post the backlink comment `status` requires, and read both back. */
 function link() {
   const prNumber = Number(value);
   const issue = readIssue();
   assert.ok(issue?.id, 'Issue identity is unreadable');
+  // The backlink comment belongs on an open issue (the guard requires one); refuse before any write instead of half-way.
+  assert.equal(issue.state, 'OPEN', `#${number} is not an open issue`);
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-    pullRequest(number:$number){id number state headRefOid}}}`, { owner, name, number: prNumber }).repository;
+    pullRequest(number:$number){id number state url headRefOid}}}`, { owner, name, number: prNumber }).repository;
   assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${value} is not an open pull request of ${project.repository}`);
   // Already connected is a success without a write; a Draft PR can be connected too.
   if (!connectedIssues(pr, true).has(issue.id)) {
@@ -722,6 +733,16 @@ function link() {
     }
   }
   console.log(`#${number} is natively linked to PR #${value}`);
+  // An existing comment is a success without a write. The text goes over stdin, like in `body`; the guard's reader proves it.
+  const prUrl = new URL(pr.url);
+  let backlink = findBacklink(issueComments(project.repository, number), prUrl);
+  if (!backlink) {
+    execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}/comments`, '-X', 'POST', '-F', 'body=@-'],
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `PR: ${pr.url}\n` });
+    backlink = findBacklink(issueComments(project.repository, number), prUrl);
+    assert.ok(backlink, `Backlink read-back differs: the comment with ${pr.url} is not readable on #${number}; read the comments before writing again`);
+  }
+  console.log(`backlink #${number}: ${backlink.html_url}`);
 }
 
 /**

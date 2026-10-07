@@ -155,6 +155,9 @@ Git and the update may reset it. A hook copy with CRLF line endings differs from
   five times, one second apart (GitHub shows a new connection with a delay), and a write
   whose read-back still lacks the issue exits 2. The write itself is never repeated.
   It never closes the issue: that happens when the PR merges into the default branch.
+  For an open issue of this repository it also posts the PR's backlink comment, the one `status ISSUE "Automated review" PR`
+  requires, unless a comment with the PR's URL exists, and reads the comments back
+  (a missing comment after the write exits 2; the write is not repeated).
 - `ready PR SHA [--attempts N] [--interval SECONDS]`: mark a Draft PR from this
   repository ready for review, but only for the commit you pushed. It rereads the PR
   (default 6 reads, 5 s apart; both waits, before the write and for the read-back, together
