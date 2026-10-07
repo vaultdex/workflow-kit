@@ -19,9 +19,16 @@ const gh = externalTool('gh', process.cwd());
 // every other command stops with the reset time.
 const sleepers = { wait: 300, reviews: 50, handoff: 50 };
 let quota, spent = 0; // the latest { remaining, resetAt } a response reported, and the points this run has used
+// `wait` gives up at this time (--max-minutes), before the 10-minute limit of an agent's shell tool would push it into the background.
+let deadline = Infinity;
+/** A quota pause that would end after the deadline: `wait` ends "still waiting" instead of sleeping through it. */
+class StillWaiting extends Error {
+  constructor(resetAt) { super('still waiting'); this.resetAt = resetAt; }
+}
 
 /** Say so in one line (stderr keeps stdout for the verdict) and sleep until the reset. */
 function sleepUntilReset(resetAt) {
+  if (Date.parse(resetAt) > deadline) throw new StillWaiting(resetAt);
   console.error(`rate limited until ${untilText(resetAt)}`);
   sleep(Math.max(1, (Date.parse(resetAt) - Date.now()) / 1000 + 1));
 }
@@ -1584,21 +1591,34 @@ function reviewsForHead() {
 
 async function wait() {
   const look = process.argv.includes('--merged') ? mergeState : reviewsForHead;
+  const maxMinutes = numberOption('--max-minutes', 9);
+  if (maxMinutes > 0) deadline = Date.now() + maxMinutes * 60_000;
   let shown, quiet = 0;
-  for (;;) {
-    const result = look(), { done, lines } = result;
-    if (done) {
-      const [word, code] = outcome(result);
-      process.exitCode = code;
-      return console.log([word, ...lines, quotaLine()].filter(Boolean).join('\n'));
+  // Exit 4: not finished, call `wait` again (a driver's tool call must end before its 10-minute limit).
+  const stillWaiting = resetAt => {
+    process.exitCode = 4;
+    console.log(['WAITING', shown, `still waiting: call wait again${resetAt ? ` after ${resetAt} (GitHub quota pause)` : ''}`, quotaLine()].filter(Boolean).join('\n'));
+  };
+  try {
+    for (;;) {
+      const result = look(), { done, lines } = result;
+      if (done) {
+        const [word, code] = outcome(result);
+        process.exitCode = code;
+        return console.log([word, ...lines, quotaLine()].filter(Boolean).join('\n'));
+      }
+      // Interim output names what is still awaited, once per change, so a background run is never silent.
+      const waiting = lines.filter(line => line.startsWith('waiting:')).join('\n');
+      if (waiting !== shown) {
+        console.log(['WAITING', shown = waiting, quotaLine()].filter(Boolean).join('\n'));
+        quiet = 0;
+      }
+      if (Date.now() >= deadline) return stillWaiting();
+      await new Promise(resolve => setTimeout(resolve, Math.min(1000 * waitInterval(quiet++, quota?.remaining), deadline - Date.now())));
     }
-    // Interim output names what is still awaited, once per change, so a background run is never silent.
-    const waiting = lines.filter(line => line.startsWith('waiting:')).join('\n');
-    if (waiting !== shown) {
-      console.log(['WAITING', shown = waiting, quotaLine()].filter(Boolean).join('\n'));
-      quiet = 0;
-    }
-    await new Promise(resolve => setTimeout(resolve, 1000 * waitInterval(quiet++, quota?.remaining)));
+  } catch (error) {
+    if (!(error instanceof StillWaiting)) throw error;
+    stillWaiting(error.resetAt);
   }
 }
 
@@ -1638,7 +1658,7 @@ const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | new --from FILE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] | wait PR --merged'
+  + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] | wait PR --merged [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
@@ -1653,6 +1673,10 @@ if (command === 'ready' && Number.isSafeInteger(number) && !/^[0-9a-f]{40}$/i.te
   console.error(`ready needs the full 40-character commit id (git rev-parse HEAD), not ${value ? `"${value}"` : 'nothing'}`);
   process.exit(2);
 }
+if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' && headOption() !== undefined && !/^[0-9a-f]{40}$/i.test(headOption())) {
+  console.error(`wait --head needs the full 40-character commit id (git rev-parse HEAD), not ${headOption() ? `"${headOption()}"` : 'nothing'}`);
+  process.exit(2);
+}
 if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
@@ -1664,6 +1688,8 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   || (['handoff', 'merge'].includes(command) && !(numberOption('--interval', 3) >= 0 && numberOption('--interval', 3) <= 60))
   // --head is the full id of the pushed commit (git rev-parse HEAD), as for ready; a short or missing one would wait on a head that never matches.
   || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{40}$/i.test(headOption())))
+  // 0 = no limit; a missing or non-numeric value must not silently mean that.
+  || (process.argv.includes('--max-minutes') && (command !== 'wait' || !(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'merge' && value && !value.startsWith('--'))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
