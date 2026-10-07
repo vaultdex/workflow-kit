@@ -1052,7 +1052,51 @@ test('reviews waits only for traces on the current head and never reads failures
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['sonarqubecloud'] }));
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 3, 'A listed analyzer waits until it reports');
   writeFileSync(config, plain);
-  const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
+  // An optional reviewer (a bot on a free plan that is mostly rate limited) is shown but never awaited, stalled or red.
+  const rabbit = { login: 'coderabbitai[bot]', type: 'Bot' };
+  const rabbitStatus = (state, description = 'Review rate limited') => ({ __typename: 'StatusContext', context: 'CodeRabbit', state, description, creator: { login: 'coderabbitai' } });
+  const rabbitRunning = { ...codex('Running', 0.5), user: rabbit };
+  const rabbitRequest = { requestedReviewer: { __typename: 'Bot', login: 'coderabbitai' } };
+  const rabbitTraces = [
+    [pr({ contexts: [check('COMPLETED'), rabbitStatus('PENDING')] }), {}],
+    [pr({ contexts: [check('COMPLETED'), rabbitStatus('FAILURE')] }), {}],
+    [pr({ contexts: [check('COMPLETED'), { ...check('IN_PROGRESS'), name: 'CodeRabbit', checkSuite: { app: { slug: 'coderabbitai' } } }] }), {}],
+    [pr(), { comments: [rabbitRunning] }],
+    [pr(), { reactions: [{ ...reaction('eyes', 0), user: rabbit }] }],
+    [{ ...pr(), reviewRequests: { totalCount: 1, nodes: [rabbitRequest] }, requestEvents: { totalCount: 0, nodes: [] } }, {}]];
+  const waitingFor = [3, 1, 3, 3, 3, 3];
+  rabbitTraces.forEach(([data, traces], index) => assert.equal(reviews(data, traces), waitingFor[index], `Precondition: unlisted trace ${index} decides`));
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: [' CodeRabbitAI[bot] '] }));
+  rabbitTraces.forEach(([data, traces], index) => assert.equal(reviews(data, traces), 0, `Optional reviewer trace ${index} never waits or fails`));
+  assert.equal(reviews(pr({ pushed: 60, contexts: [check('IN_PROGRESS')] })), 3, 'Other checks still wait');
+  assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE'), rabbitStatus('SUCCESS')] })), 1, 'A listed reviewer does not hide red CI');
+  assert.equal(reviews(pr({ requests: ['maintainer'] })), 3, 'Other review requests still wait');
+  assert.match(look(rabbitTraces[0][0], rabbitTraces[0][1]).stdout, /^check CodeRabbit: pending/m, 'The optional trace is still shown');
+  assert.match(look(pr(), { comments: [rabbitRunning] }).stdout, /^comment coderabbitai /m, 'Optional comments are still listed');
+  const optionalFindings = look({ ...pr({ threadPages: [[false]] }), mergeStateStatus: 'BLOCKED', reviewDecision: 'CHANGES_REQUESTED',
+    latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'coderabbitai' } }] } });
+  assert.match(optionalFindings.stdout, /^unresolved threads: 1$/m, 'An open thread of an optional reviewer still counts');
+  assert.match(optionalFindings.stdout, /^blocker: changes requested by coderabbitai$/m, 'A change request of an optional reviewer still blocks');
+  // A workflow run of an optional app that was skipped while Draft is no missing Ready run either.
+  const rabbitDraftRun = draftRun(3, 'SKIPPED', { name: 'Review', workflow: 'Review' });
+  const rabbitReadyHead = readyHead([{ ...rabbitDraftRun, checkSuite: { ...rabbitDraftRun.checkSuite, app: { slug: 'coderabbitai' } } }, draftRun(2, 'SUCCESS', { minutes: 2 })]);
+  assert.equal(reviews(rabbitReadyHead, oldTraces), 0, 'A Draft-skipped run of an optional reviewer never waits');
+  // The list names bots and apps: a team of the same name is still a required reviewer.
+  const teamRequest = { ...pr(), reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { __typename: 'Team', name: 'coderabbitai' } }] }, requestEvents: { totalCount: 0, nodes: [] } };
+  assert.equal(reviews(teamRequest), 3, 'A team with an optional name is no optional reviewer');
+  assert.match(look(rabbitTraces[0][0]).stdout, /Review rate limited/, 'The optional trace keeps its description');
+  assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 3, 'An optional check alone is no CI: the first CI check is still awaited');
+  const rabbitSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'coderabbitai' } };
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['coderabbitai'] }));
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), rabbitSuite] })), 3, 'Precondition: an awaited app that is not optional waits');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['coderabbitai'], optionalReviewers: ['app/CodeRabbitAI'] }));
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), rabbitSuite] })), 0, 'An optional reviewer is never awaited, even when listed in awaitApps (gh spelling app/NAME)');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: 'coderabbitai' }));
+  assert.equal(reviews(pr()), 2, 'A malformed list is an error, never silently ignored');
+  writeFileSync(config, plain);
+  assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 0, 'Precondition: unlisted, the same lone status is CI');
+  assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
+  const oldHeadReview ={ user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
   assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'], requestedAgo: 1 })), 3, 'A late review request starts its own clock');
   assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'], requestEventTotal: 101 })), 2, 'A request whose time is cut off fails closed');
@@ -1528,6 +1572,41 @@ test('body writes an issue body only on top of the one it is based on and proves
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(run('body', '1', change, base).status, 2);
   assert.equal(patches(), 0);
+});
+
+test('body-replace replaces exactly one match of the text and writes nothing for none or several', t => {
+  const { checkout, run } = fixture(t);
+  const file = (name, text) => { writeFileSync(join(checkout, name), text); return name; };
+  const server = body => writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0, body }));
+  const stored = () => JSON.parse(readFileSync(join(checkout, 'backlink-1.json'), 'utf8')).body;
+  const patches = () => existsSync(join(checkout, 'patches')) ? readFileSync(join(checkout, 'patches'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const replace = (from, to) => run('body-replace', '1', '--from', file('from.md', from), '--to', file('to.md', to));
+
+  // One match (GitHub may return CRLF): only that place changes, "$&" in the new text stays literal.
+  server('Satz eins.\r\nein Wort\r\nSatz drei.');
+  let result = replace('ein Wort\n', 'ein $& Wort\n');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal([patches(), stored()].join('|'), '1|Satz eins.\nein $& Wort\nSatz drei.');
+
+  // No match: refused with the reason, nothing written.
+  server('Satz eins.');
+  result = replace('fehlt', 'x');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal([patches(), stored()].join('|'), '1|Satz eins.');
+
+  // Two matches, also overlapping ones: refused, nothing written.
+  for (const [text, from] of [['ein Wort\nanderes\nein Wort', 'ein Wort'], ['aaa', 'aa']]) {
+    server(text);
+    result = replace(from, 'x');
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.equal([patches(), stored()].join('|'), `1|${text}`);
+  }
+
+  // Unusable input is an error, never a write: empty text, missing file, unknown order.
+  assert.equal(replace('\n', 'x').status, 2);
+  assert.equal(run('body-replace', '1', '--from', 'missing.md', '--to', 'to.md').status, 2);
+  assert.equal(run('body-replace', '1', '--to', 'to.md', '--from', 'from.md').status, 2);
+  assert.equal(patches(), 1);
 });
 
 test('board check blocks a newer claim of another session of the same login unless handed over', t => {
