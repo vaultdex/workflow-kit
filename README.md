@@ -364,7 +364,7 @@ a check alone does not claim work.
 `node .vendor/workflow-kit/scripts/affected-tests.mjs` knows only the kit's tests. A project adds its own map in
 `.github/affected-tests.json` (`init-project.mjs` does not create it): a path pattern (`*` inside a folder, `**` across
 folders, relative to the project root) and a command or a list of commands. The script prints each matching
-command once after the kit's tests; `--run` runs them in the project root and stops at the first failure.
+command once after the kit's tests; `--run` runs them in the project root and stops at the first failure. A green `--run` prints only the test counts (`ok: <command>` per project command), a red one the failure's output; `--verbose` shows every line.
 Without the file nothing changes. The changed files are those against the merge base with `origin/main`, or with
 `--base origin/release/1.2` for projects that target release branches; files listed as arguments replace them.
 Run it from the project root: the working directory decides which project it reads.
