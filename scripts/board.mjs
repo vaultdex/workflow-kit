@@ -644,7 +644,7 @@ const isBot = user => user?.type === 'Bot';
 const reviewerKey = name => name?.trim().toLowerCase().replace(/^(@|app\/)/, '').replace(/\[bot\]$/, '');
 // Read on use, so a malformed list is an ERROR of the review commands, not a crash of every command.
 const optionalReviewers = () => {
-  const list = project.optionalReviewers ?? [];
+  const list = project.optionalReviewers === undefined ? [] : project.optionalReviewers; // only a missing field is allowed; null is malformed
   assert.ok(Array.isArray(list) && list.every(name => typeof name === 'string' && name.trim()),
     'optionalReviewers must be a list of non-empty bot logins or app slugs');
   return new Set(list.map(reviewerKey));
@@ -829,7 +829,13 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   } catch (error) {
     lines.push(`note: base movement unreadable (${error.message})`);
   }
-  // A known CI failure is the verdict; later review reads must not turn it into ERROR.
+  // Conflicts start no workflow, so the wait would never end; the fix is merging the base now. A draft is still
+  // being worked on, and UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
+  if (pr.mergeStateStatus === 'DIRTY' && !pr.isDraft) {
+    failed = true;
+    lines.push('blocker: merge conflicts');
+  }
+  // A known CI failure or conflict is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
   // A pull_request run skipped while the PR was still Draft (the usual `!draft` job guard) executed nothing, so it says
   // nothing about the Ready head. Ready normally starts a fresh run; until the workflow has an executed run created after
@@ -907,7 +913,12 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at]),
     // 👍 is Codex's "no findings"; a later 👀 is its own open trace below.
     ...reactions.map(reaction => [login(reaction.user), reaction.created_at])];
-  for (const reaction of reactions.filter(reaction => isBot(reaction.user) && !isOptional(reaction.user.login) && after(reaction.created_at))) {
+  for (const reaction of reactions.filter(reaction => isBot(reaction.user) && after(reaction.created_at))) {
+    // An optional reviewer's 👀 is shown and never awaited.
+    if (isOptional(reaction.user.login)) {
+      if (reaction.content === 'eyes') lines.push(`reaction ${login(reaction.user)} 👀 [optional reviewer, not awaited]`);
+      continue;
+    }
     // 👀 announces a review; a later comment, head review or final reaction by the same bot is its result.
     const answered = activity.some(([author, time]) => author === login(reaction.user) && Date.parse(time) > Date.parse(reaction.created_at));
     if (reaction.content === 'eyes' && !answered) waiting.push({ text: `${login(reaction.user)} reacted 👀`, since: Date.parse(reaction.created_at) });
@@ -944,7 +955,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) {
     lines.push(`blocker: changes requested by ${login(review.author)}`);
   }
-  if (pr.mergeStateStatus === 'DIRTY') lines.push('blocker: merge conflicts');
+  if (pr.mergeStateStatus === 'DIRTY') lines.push('blocker: merge conflicts'); // a non-draft PR returned above
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
@@ -1151,7 +1162,10 @@ const findHandoffComment = (comments, viewer, headRefOid) => comments.findLast(c
 function retroReasons(bodyHtml) {
   assert.equal(typeof bodyHtml, 'string', 'The rendered handoff comment is unreadable');
   const text = html => html.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
-  const section = bodyHtml.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && text(part.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/)?.[1] ?? '') === 'Retro');
+  // A quoted template is no section: drop quotes (innermost first, so nesting works) before searching.
+  let unquoted = bodyHtml;
+  for (let previous; previous !== unquoted;) { previous = unquoted; unquoted = unquoted.replace(/<blockquote[\s>](?:(?!<blockquote[\s>])[\s\S])*?<\/blockquote>/g, ''); }
+  const section = unquoted.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && text(part.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/)?.[1] ?? '') === 'Retro');
   const lines = [...(section ?? '').matchAll(/<li[^>]*>([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>])/g)].map(([, line]) => [line, text(line)]);
   if (!lines.length) return ['the handoff comment needs a "Retro" section with one list line per finding, each ending with its resolution, or the single line "Keine Funde" (README: Handoff comment)'];
   if (lines.length === 1 && /^keine funde\.?$/i.test(lines[0][1])) return [];

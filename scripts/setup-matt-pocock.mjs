@@ -15,10 +15,13 @@ const gitTool = externalTool('git', root, kit, process.cwd());
 const git = (...args) => execFileSync(gitTool.file, args, { cwd: root, env: gitTool.env, encoding: 'utf8' });
 const text = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
 
-// Documented deviation from upstream (docs/matt-pocock.md): agents run the retro before every
-// handoff, which upstream's `disable-model-invocation` makes the Skill tool refuse (#212).
-const adapt = (skill, path, content) => skill === 'retro' && path === 'SKILL.md'
-  ? content.replace(/^disable-model-invocation: true\n/m, '') : content;
+// Documented deviations from upstream (docs/matt-pocock.md): agents run the retro before every
+// handoff, which upstream's `disable-model-invocation` makes the Skill tool refuse (#212), and
+// `implement` leaves the full suite to CI (#230).
+const implementTests = [', and the full test suite once at the end.', ', and leave the full test suite to CI (run it once at the end only if CI does not).'];
+const adapt = (skill, path, content) => path !== 'SKILL.md' ? content
+  : skill === 'retro' ? content.replace(/^disable-model-invocation: true\n/m, '')
+    : skill === 'implement' ? content.replace(implementTests[0], implementTests[1]) : content;
 
 function cleanSource() {
   assert.equal(git('-C', source, 'status', '--porcelain', '--untracked-files=all').trim(), '',

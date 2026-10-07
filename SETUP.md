@@ -74,7 +74,10 @@ project does not depend on (CodeRabbit on a free plan that is mostly rate limite
 `"optionalReviewers"`, a list of bot logins or app slugs, for example
 `"optionalReviewers": ["coderabbitai"]`: `board.mjs wait`, `reviews` and `handoff` never
 wait for it or call it stalled, and agents neither re-request nor replace its review.
-Its findings, open threads and change requests still count. The script keeps these settings too.
+Its findings, open threads and change requests still count, and its 👀 reaction is
+shown as a note. An analyzer such as SonarCloud listed there still reports its open issues
+as a blocker, because they are findings, not waiting. A `null` or other non-list value is an
+ERROR; omit the field instead. The script keeps these settings too.
 Likewise `"requiredFields": ["Size"]` names Project fields that
 `board.mjs new` demands besides Priority.
 
