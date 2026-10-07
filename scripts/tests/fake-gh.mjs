@@ -224,6 +224,8 @@ function api(argv, input, stdout, stderr, exit) {
     // mutation-fails: GitHub refuses every write.
     if (fs.existsSync('mutation-fails')) exit(1);
     fs.appendFileSync('mutations', query + '\n');
+    // The item or issue each mutation wrote to, one line per mutation.
+    fs.appendFileSync('mutation-targets', argv.filter(arg => /^(item|issue)=/.test(arg)).join(' ') + '\n');
     if (/\bm\d+:\w+\(/.test(query)) {
       // Aliased mutations (m0:…, m1:…) with their values written into the query: items are PI-<issue id>, kept per item in
       // stored-items.json ({ item: { field: option } }); add-exists is GitHub refusing the add of every issue, but answering the rest.
