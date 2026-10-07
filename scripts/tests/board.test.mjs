@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { retryAt, waitInterval } from '../quota.mjs';
 
 // body_html is what GitHub renders for the body (the handoff check reads that, like the open acceptance of the issue).
 const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\nHead: abcdef1\n\n### Retro\n\n- Keine Funde',
@@ -29,6 +30,11 @@ function fixture(t) {
 const path = process.argv[2] ?? '';
 if (!path.startsWith('graphql')) {
   if (fs.existsSync('fail') || fs.existsSync('fail-rest')) process.exit(1);
+  // The quota endpoint: the GraphQL quota resets a second from now.
+  if (path === 'rate_limit') {
+    process.stdout.write(JSON.stringify({ resources: { graphql: { reset: Math.floor(Date.now() / 1000) + 1 } } }));
+    process.exit(0);
+  }
   // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
   const parts = path.split('?')[0].split('/');
   const backlink = 'backlink-' + parts[4] + '.json';
@@ -111,6 +117,13 @@ if (!path.startsWith('graphql')) {
 }
 const query = process.argv.find(arg => arg.startsWith('query=')).slice(6);
 if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('query{viewer'))) process.exit(1);
+// limited: GitHub refuses the next query, like its RATE_LIMITED error, and takes the file away: the quota is back after one wait.
+if (fs.existsSync('limited')) {
+  fs.unlinkSync('limited');
+  process.stdout.write(JSON.stringify({ errors: [{ type: 'RATE_LIMITED', message: 'API rate limit already exceeded for user ID 1.' }] }));
+  process.stderr.write('gh: API rate limit already exceeded for user ID 1.\\n');
+  process.exit(1);
+}
 let data;
 if (query.startsWith('mutation')) {
   // mutation-fails: GitHub refuses every write.
@@ -214,7 +227,9 @@ else {
   }
   data = { repository: { issue } };
 }
-process.stdout.write(JSON.stringify({ data }));`);
+// quota-left: the points GitHub reports as left, to be spent until three seconds from now.
+const rateLimit = fs.existsSync('quota-left') && { cost: 1, remaining: Number(fs.readFileSync('quota-left', 'utf8')), resetAt: new Date(Date.now() + 3000).toISOString() };
+process.stdout.write(JSON.stringify({ data: rateLimit && data ? { ...data, rateLimit } : data }));`);
   // `gh pr merge …` runs this script: it records the call; merge-fails is gh refusing, merge-noop a merge that never shows.
   writeFileSync(join(checkout, 'pr'), `const fs = require('node:fs');
 fs.appendFileSync('merges', process.argv.slice(2).join(' ') + '\\n');
@@ -1888,4 +1903,45 @@ test('merge merges the checked head by its full id only when no review is runnin
     assert.doesNotMatch(result.stdout, /^MERGED/m, 'Only a read-back showing the merge counts');
     rmSync(join(checkout, flag));
   }
+});
+
+test('a used-up GraphQL quota is waited out by reviews and reported by the other commands', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  writeIssue(issue());
+  writeFileSync(join(checkout, 'limited'), '');
+  const started = Date.now();
+  const waited = run('reviews', '7');
+  assert.equal(waited.status, 0, waited.stdout + waited.stderr);
+  assert.ok(Date.now() - started >= 1000, 'The command slept until the reset (a second away) before asking again');
+  assert.equal(existsSync(join(checkout, 'limited')), false, 'The refused query was asked again');
+  writeFileSync(join(checkout, 'limited'), '');
+  const stopped = run('check', '1');
+  assert.equal(stopped.status, 2, stopped.stdout + stopped.stderr);
+  assert.match(stopped.stdout, /\d{4}-\d\d-\d\dT/, 'Commands that cannot wait name the time to try again');
+});
+
+test('little quota left makes reviews wait for the reset before the next query', t => {
+  const { checkout, run } = fixture(t);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  writeFileSync(join(checkout, 'quota-left'), '10');
+  const started = Date.now();
+  const result = run('reviews', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  // The fixture reports the reset 3 seconds after its first answer, so a run that did not wait for it ends sooner.
+  assert.ok(Date.now() - started >= 3000, 'The second query waited for the reset');
+});
+
+test('wait pauses longer with every quiet read and, below 1000 points left, twice as long', () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 9].map(reads => waitInterval(reads, 5000)), [60, 90, 135, 202.5, 300, 300, 300]);
+  for (const reads of [0, 3, 9]) assert.ok(waitInterval(reads, 999) > waitInterval(reads, 1000), 'Little quota left lengthens the pause');
+  assert.equal(waitInterval(0, undefined), 60, 'An unknown quota changes nothing');
+});
+
+test('a secondary limit is retried within minutes, only the primary one waits for the hourly reset', () => {
+  const now = Date.parse('2026-10-07T00:00:00Z'), hourly = () => '2026-10-07T00:55:00.000Z';
+  const secondary = 'You have exceeded a secondary rate limit';
+  assert.deepEqual([0, 1, 2].map(refusals => retryAt(secondary, refusals, hourly, now)),
+    ['2026-10-07T00:01:00.000Z', '2026-10-07T00:02:00.000Z', '2026-10-07T00:04:00.000Z']);
+  assert.equal(retryAt('API rate limit already exceeded for user ID 1', 0, hourly, now), hourly());
 });
