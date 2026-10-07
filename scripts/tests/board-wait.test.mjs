@@ -99,6 +99,25 @@ test('wait confirms every end with a full read', t => {
   assert.deepEqual(graphqlReads(), { pr: 2, threads: 2, all: 4 }, 'The first read, and the full read that confirms the end');
 });
 
+test('wait keeps reading REST while the GraphQL quota is used up, and finishes after the reset', t => {
+  const { checkout, run, check, pr, show, restReads, graphqlReads } = restFixture(t);
+  show(pr({ contexts: [check('COMPLETED')] }));
+  // GitHub refuses the first query and names a reset within a second: wait does not sleep through it or give up, it looks over REST meanwhile.
+  writeFileSync(join(checkout, 'limited'), '');
+  const result = run('wait', '7', '--interval', '0.2', '--max-minutes', '0.2');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(restReads() >= 2, 'REST was read in the round of the pause');
+  assert.ok(graphqlReads().pr >= 1, 'and the full read followed');
+
+  // The reset is 3 seconds away and --max-minutes ends the wait sooner: still waiting, after rounds over REST, not at once.
+  writeFileSync(join(checkout, 'quota-left'), '0');
+  writeFileSync(join(checkout, 'rest-reads'), '');
+  const outlasted = run('wait', '7', '--interval', '0.1', '--max-minutes', '0.01');
+  assert.equal(outlasted.status, 4, outlasted.stdout + outlasted.stderr);
+  assert.ok(restReads() >= 3, 'wait kept looking until its own limit');
+  assert.match(outlasted.stdout, /\(GitHub quota pause\)$/m, 'and names the reset');
+});
+
 test('wait --merged reads REST only, and --interval is bounded', t => {
   const { run, pr, show, graphqlReads } = restFixture(t);
   show(pr());

@@ -308,8 +308,10 @@ and then work in that directory, their relative paths (changed files given to `a
   commit statuses), at least every 5 minutes, and confirms every end with a full read; the other rounds cost no GraphQL points.
   `wait PR --merged` reads REST only. It ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both end
   with a `quota: …` line (points left, points this run used, reset time). When GitHub's shared GraphQL
-  quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), these three sleep until the reset and
-  say so on stderr (`rate limited until 2026-10-07T04:20:34.000Z (in 7 min)`); every other command stops with the reset time, also as
+  quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), `reviews` and `handoff` sleep until the reset and
+  say so on stderr (`rate limited until 2026-10-07T04:20:34.000Z (in 7 min)`). `wait` does not sleep: it keeps reading the PR and its checks
+  over REST (the `waiting:` line counts pending, failed or cancelled and passed checks, older runs included, and gives no verdict),
+  and reads the threads and the verdict after the reset; at `--max-minutes` it ends `still waiting` with the reset time. Every other command stops with the reset time, also as
   minutes from now. Points left and the reset come from the `x-ratelimit-remaining` and `x-ratelimit-reset` headers of the
   command's own GraphQL answers, a refusal included, never from `gh api rate_limit`
   ([parallel drivers](docs/parallel-drivers.md)). Both take

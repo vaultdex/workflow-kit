@@ -48,9 +48,11 @@ Verbrauch der Agents; höchstens 20 parallele `wait` (rund 800 Punkte pro Stunde
 des Kontingents). `wait` fragt GraphQL nur noch, wenn sich laut REST etwas geändert hat (Head, Checks,
 Status, Aktualisierungszeit), spätestens alle 5 Minuten und zur Bestätigung jedes Endes; `wait PR --merged` liest nur REST
 ([#324](https://github.com/vaultdex/workflow-kit/issues/324)). `wait` und `reviews` melden den Rest in einer Zeile (`quota: …`).
-`wait`, `reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 300 (`wait`)
-beziehungsweise 50 Punkten bis zum Reset (`rate limited until …`) und fragen danach weiter; bei
-einer kurzen Drosselung („secondary rate limit“) warten sie 1, 2, dann 4 Minuten statt bis zum
+`reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 50 Punkten bis zum Reset
+(`rate limited until …`) und fragen danach weiter. `wait` schläft nicht: bei einer Sperre oder unter 300 Punkten liest es
+PR und Checks weiter über REST (Zähler in der Zeile `waiting:`, ohne Urteil) und holt Threads und Urteil nach dem Reset;
+bei `--max-minutes` endet es mit Exit 4 und der Reset-Zeit. Bei
+einer kurzen Drosselung („secondary rate limit“) warten `reviews` und `handoff` 1, 2, dann 4 Minuten statt bis zum
 Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab (Uhrzeit und Minuten bis dahin). Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
 Rest und Reset stammen aus den Headern `x-ratelimit-remaining` und `x-ratelimit-reset` der eigenen Antworten
 (auch der abgewiesenen); zeigt eine Abweisung selbst freies Kontingent, fragt der Befehl sofort erneut,
