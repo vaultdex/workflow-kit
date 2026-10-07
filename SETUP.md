@@ -59,7 +59,7 @@ Run `node .vendor/workflow-kit/scripts/setup-github.mjs OWNER/REPO [PROJECT_NUMB
 It copies or reuses the Project and records it in `.github/workflow-project.json`,
 keeping `"start"`. It also checks the six statuses and Priority, links the
 repository, and adds the missing default labels: ci, documentation, testing,
-security, dependencies, needs-human-input.
+security, dependencies, needs-human-input, spec.
 
 If field validation fails, correct that board and repeat the same command; a
 copied board is already recorded, so do not create a replacement. Write and verify
@@ -69,7 +69,8 @@ The script preserves an existing policy rather than choosing one.
 If an analyzer reports through a GitHub App that creates its check only when it
 finishes (SonarCloud), list the app slug in `"awaitApps"`, for example
 `"awaitApps": ["sonarqubecloud"]`, so `board.mjs wait` waits for it. The script
-keeps this setting too.
+keeps this setting too. Likewise `"requiredFields": ["Size"]` names Project fields that
+`board.mjs new` demands besides Priority.
 
 For first installation, add the setup issue to this Project, complete its
 [metadata](docs/CONTRIBUTING.md#issues), and set Ready under the explicit setup

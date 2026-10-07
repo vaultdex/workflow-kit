@@ -23,7 +23,10 @@ node .vendor/workflow-kit/scripts/setup-skills.mjs             # skills for ever
 
 Without `--existing`, `init-project` also creates the starter files (AGENTS.md,
 CONTRIBUTING.md, issue and PR templates) that are missing; afterwards they belong to
-the project and are never overwritten.
+the project and are never overwritten. A template that a kit update adds later does not
+reach an existing project: copy it by hand. For the spec form that is
+`.vendor/workflow-kit/templates/.github/ISSUE_TEMPLATE/spec.yml` to `.github/ISSUE_TEMPLATE/`,
+plus the label `spec` (`gh label create spec`), which the form sets.
 
 To update, move the gitlink first. `git submodule update` checks out the commit the
 index records, so run after a bump it silently puts the old kit back, and the
@@ -140,9 +143,23 @@ the installer, so the kit's current one is copied.
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`:
 
-- `next`, `check ISSUE [--session ID]` (shows the age and open PR of a claim and one line per native sub-issue; information only), `status ISSUE "STATUS"`, `priority ISSUE High`,
+- `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open
+  predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);
+  `next` lists such issues apart, with the base PR; shows the age and open PR of a claim and one line per
+  native sub-issue; information only), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
+- `new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]`:
+  create an issue with its required metadata in one call and print one line, `NEW URL | milestone | labels |
+  Status | Priority | …`, of the values read back. Title, body file, an open milestone, one label that exists
+  (the REST API would create an unknown one), a Priority and every field named in the optional
+  `"requiredFields"` of `.github/workflow-project.json` (for example `["Size"]`) are required; `Status`
+  and `Priority` are not `--field` values. Everything is validated against the Project and repository before
+  the issue exists, so a missing or invalid value creates nothing (`ERROR - reason`, exit 2). The Status is Backlog;
+  `--start` (only under a human start request, [Starting work](docs/CONTRIBUTING.md#starting-work)) assigns the
+  authenticated user, sets Ready, posts `Agent: …, Session: …`, reads the claim back and ends on In progress; it
+  refuses a body whose `Wartet bis:` line holds the issue. A failure after the issue exists names its URL and
+  the failed step: finish by hand, never create it again. Branch and `check` stay separate.
 - `field ISSUE NAME VALUE [NAME VALUE ...]`: any single-select fields, all read back together after writing.
   Every pair is checked against the field definitions before the first write: one invalid pair writes
   nothing and names the valid options. `field`, `status` and `priority` report failures as one
@@ -221,7 +238,8 @@ the installer, so the kit's current one is copied.
   `FAILED` (exit 1), and nothing is merged. Otherwise it runs `gh pr merge --merge
   --match-head-commit <full head id>` once (a push after the check makes gh refuse) and counts
   only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; gh
-  refusal or a read-back that differs: `ERROR`, exit 2). It does not read the issue, claims or the
+  refusal or a read-back that differs: `ERROR`, exit 2). A layer of a [stack](docs/CONTRIBUTING.md#stacked-pull-requests)
+  with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. It does not read the issue, claims or the
   [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
@@ -299,11 +317,14 @@ runs a month at up to 10 minutes on a free public runner.
 
 Renovate only moves a submodule pin, so the Ponytail adaptation patch and the committed
 skills are stale until regenerated. The workflow `Renovate regenerate` does that on
-Renovate pull requests from this repository that change `.vendor/*`: it runs
+Renovate pull requests from this repository that change `.vendor/*`. It starts on
+`pull_request_target`, so GitHub loads the workflow from `main`: a branch cannot rewrite the
+definition that holds the write token. That is safe only because the job never runs code of the
+branch (see below), and it must stay so. The job runs
 `scripts/update-ponytail.mjs` and `scripts/update-impeccable.mjs` as needed, then the CI
 generators, pushes the result to the Renovate branch and dispatches the repository CI on the
 new head (pushes with `GITHUB_TOKEN` start no workflows). The job holds `contents: write`
-and `actions: write` (the token reaches only the push and dispatch steps), runs only for
+and `actions: write` (the checkout action fetches with it and drops it; no step that runs a script sees it except the push and dispatch steps), runs only for
 `renovate[bot]` pull requests whose commits are all by bots, and checks out the commit of
 Renovate's authenticated event, not the branch name. Whatever the branch changed under
 `scripts/` never runs: main's scripts replace it, and only the branch's adaptation patch is
@@ -311,8 +332,9 @@ kept as input. Whoever wrote its commits, the branch may not change any workflow
 `.node-version` or `renovate.json` against main, apart from the three files the updaters
 generate (the Ponytail adaptation patch and the Impeccable `VERSION` and `SHA256SUMS`). The job
 fails instead of running, because it dispatches the branch's CI workflow with the write token;
-it dispatches only while the branch still is the commit it pushed and cancels a run that
-started for another commit. Commit author names prove nothing,
+it dispatches only while the branch still is the commit it pushed, then waits up to a minute for
+the dispatched run, requires it on exactly that commit and fails on any run started since the
+dispatch for another commit, finished or not (it cancels one that still runs). Commit author names prove nothing,
 so the bot-author rule only leaves branches with other people's commits alone. If the CI
 dispatch fails after the push, the job fails and `repository.yml` is started for the branch by
 hand. `renovate.json` lists the bot's commit address in
