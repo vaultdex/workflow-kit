@@ -151,6 +151,12 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), rabbitSuite] })), 0, 'An optional reviewer is never awaited, even when listed in awaitApps (gh spelling app/NAME)');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: 'coderabbitai' }));
   assert.equal(reviews(pr()), 2, 'A malformed list is an error, never silently ignored');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: null }));
+  assert.equal(reviews(pr()), 2, 'null is malformed too; only a missing field is allowed');
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: ['coderabbitai'] }));
+  const optionalEyes = look(rabbitTraces[4][0], rabbitTraces[4][1]);
+  assert.equal(optionalEyes.status, 0, 'An optional 👀 is no reason to wait');
+  assert.match(optionalEyes.stdout, /^reaction coderabbitai /m, 'The optional 👀 is shown');
   writeFileSync(config, plain);
   assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 0, 'Precondition: unlisted, the same lone status is CI');
   assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
