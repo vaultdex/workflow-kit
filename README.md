@@ -182,6 +182,10 @@ Git and the update may reset it. A hook copy with CRLF line endings differs from
   a force-push is one push, a PR that never was ready prints no line). From `N >= 2` it adds
   `cap reached: collect non-blocking findings in one follow-up issue` ([review loop](docs/CONTRIBUTING.md#review-loop)).
   It is information only: no exit code changes (an unreadable push log prints a note instead), and blocking findings are still corrected. `wait` prints it with the final result.
+  It also reports a moved base: `base moved: N commits since merge-base (BASE)` when the PR's base branch has commits the head lacks
+  (GitHub compare `behind_by`), then `changed on both sides:` with the files the PR and those commits both change (first 10),
+  or `no file is changed on both sides`. Information only, like the correction count: no exit code changes, an unreadable
+  comparison prints a note, and nothing is merged or rebased for you. `wait` prints it with the final result.
 - `handoff ISSUE PR`: verifies a fully delivered issue's native PR connection,
   assigned/startable task, open non-draft PR, finished checks/reviews and resolved
   threads/conflicts before writing and reading back Human review (exit 0 verified,
