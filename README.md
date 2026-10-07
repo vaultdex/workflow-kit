@@ -290,11 +290,11 @@ and then work in that directory, their relative paths (changed files given to `a
   authority to merge ([review loop](docs/CONTRIBUTING.md#review-loop) step 7). It applies the review gates of
   `handoff` (open non-draft PR, CI green, every reviewer with a trace on the head finished or
   stalled, no `blocker:` line, no open thread, determined merge state, the PR body's `Selbstprüfung` section when the project lists `"selfReview"`) and prints the same
-  lines; a running reviewer ends `WAITING` (exit 3) and names it, a red check or blocker
-  `FAILED` (exit 1), and nothing is merged. If the base moved and `changed on both sides` lists files, it first
+  lines. Like `wait` it looks again until CI and every reviewer have finished (`--max-minutes`, default 9: then
+  `still waiting: call merge again`, exit 4; `--interval SECONDS`, 0 to 60, sets a fixed pause between looks); a red check or
+  blocker ends `FAILED` (exit 1), an undetermined merge state `WAITING` (exit 3), and nothing is merged. If the base moved and `changed on both sides` lists files, it first
   merges the base into the PR branch (`PUT pulls/N/update-branch` with the checked head as `expected_head_sha`),
-  waits for the new head and its CI like `wait` (`--max-minutes`, default 9: then `still waiting: call merge again`,
-  exit 4; run `merge` again), checks the gates again and merges that head; a base that moved without
+  waits for the new head and its CI the same way, checks the gates again and merges that head; a base that moved without
   an overlap does not hold the merge. If GitHub refuses that update with 403 (a PR with stacked children), `merge` ends
   `FAILED` (exit 1) and tells you to run `git merge origin/<base>` in the PR's worktree, push once and call `merge` again;
   it never pushes for you. Then it runs `gh pr merge --merge
