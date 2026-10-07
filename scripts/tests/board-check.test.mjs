@@ -238,3 +238,68 @@ test('board check shows the age of a claim and whether a linked PR is open', t =
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');
   assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');
 });
+
+
+// GitHub charges a query by the lists it asks for: the shared quota is spent by what a command asks, not by what it finds.
+test('board check reads the issue, the viewer and the claim comments in one query, without the PRs of closed predecessors', t => {
+  const { checkout, run, writeIssue, queries } = fixture(t);
+  writeIssue(issue('Ready', [predecessor('CLOSED', 'COMPLETED')]));
+  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' },
+    body: 'Claim\n\nAgent: claude, Session: S1', html_url: 'https://example.test/c1', created_at: new Date().toISOString() }]));
+  const result = run('check', '1', '--session', 'S1');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^claim: /m, 'The claim was judged against the viewer');
+  const [only, ...more] = queries();
+  assert.deepEqual(more, [], 'No second query for the viewer or the predecessors');
+  assert.ok(only.includes('viewer{login}'));
+  assert.ok(!only.includes('includeClosedPrs'), 'The PRs of predecessors are not part of the issue query');
+});
+
+
+test('board check asks for the PRs of predecessors only when open predecessors alone hold the issue', t => {
+  const { checkout, run, writeIssue, queries } = fixture(t);
+  const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base' };
+  // As GitHub answers the issue query: the predecessor has an id and no PRs; they come from a lookup by id (deliveries.json).
+  const bare = id => ({ id, number: 2, state: 'OPEN', stateReason: null, repository: { nameWithOwner: 'test/example' } });
+  const deliveries = value => writeFileSync(join(checkout, 'deliveries.json'), JSON.stringify(value));
+
+  writeIssue(issue('Ready', [bare('P2')]));
+  deliveries({ P2: { totalCount: 1, nodes: [pr] } });
+  const stackable = run('check', '1');
+  assert.equal(stackable.status, 4, stackable.stdout + stackable.stderr);
+  assert.match(stackable.stdout, /^stack base: PR #5 /m);
+  const [issueQuery, lookup, ...more] = queries();
+  assert.deepEqual(more, []);
+  assert.ok(lookup.includes('nodes(ids:["P2"])'), 'One lookup of the open predecessor by id');
+  assert.ok(!issueQuery.includes('nodes(ids'));
+
+  deliveries({});
+  assert.equal(run('check', '1').status, 2, 'A predecessor whose PRs cannot be read is unknown, never "no PR"');
+  queries();
+  writeIssue(issue('Backlog', [bare('P2')]));
+  assert.equal(run('check', '1').status, 1);
+  assert.equal(queries().length, 1, 'Another blocker decides without a lookup');
+  writeIssue(issue('Ready', [predecessor('CLOSED', 'COMPLETED')]));
+  assert.equal(run('check', '1').status, 0);
+  assert.equal(queries().length, 1, 'A closed predecessor needs no lookup');
+});
+
+
+test('board check asks for a short list of sub-issues and reads a longer one again in full', t => {
+  const { run, writeIssue, queries } = fixture(t);
+  const children = count => Array.from({ length: count }, (_, index) => ({ ...issue('Ready'), number: 100 + index, repository: { nameWithOwner: 'test/example' } }));
+  const spec = (count, totalCount = count) => ({ ...issue(), subIssues: { totalCount, nodes: children(count) } });
+
+  writeIssue(spec(30));
+  assert.equal(run('check', '1', '--session', 'S1').stdout.match(/^#\d+ {2}/gm).length, 30);
+  const [short, ...more] = queries();
+  assert.deepEqual(more, [], 'A list that fits the first page is read once');
+  assert.ok(short.includes('subIssues(first:30)'));
+
+  writeIssue(spec(30, 31));
+  const cut = run('check', '1', '--session', 'S1');
+  assert.match(cut.stdout, /^note: 30 of 31 sub-issues listed$/m, 'A list that is still cut says so');
+  const [first, second, ...rest] = queries();
+  assert.deepEqual(rest, []);
+  assert.ok(first.includes('subIssues(first:30)') && second.includes('subIssues(first:100)'), 'The second read asks for 100');
+});
