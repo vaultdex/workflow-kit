@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fixture, handoffPr, issue, predecessor, task, test } from './board-fixture.mjs';
+import { fixture, handoffPr, issue, list, predecessor, task, test } from './board-fixture.mjs';
 
 test('handoff diagnoses draft and unreadable draft state before waiting for CI', t => {
   const { checkout, run, writeIssue } = fixture(t);
@@ -88,7 +88,7 @@ test('handoff blocks unlinked, unsafe and unreadable delivery before writing Hum
   for (const [pr, task, status] of cases) {
     writeIssue(task);
     writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr));
-    const result = run('handoff', '1', '7');
+    const result = run('handoff', '1', '7', '--interval', '0');
     assert.equal(result.status, status, result.stdout + result.stderr);
     assert.equal(existsSync(mutations), false, 'Rejected handoff never mutates status');
   }
@@ -162,7 +162,7 @@ test('handoff rechecks PR gates before mutation and rejects changed review proof
   for (const prAfterLinks of changes) {
     writeIssue(ready);
     writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ prAfterLinks })));
-    const result = run('handoff', '1', '7');
+    const result = run('handoff', '1', '7', '--interval', '0');
     assert.ok([1, 2, 3].includes(result.status), result.stdout + result.stderr);
     assert.equal(existsSync(join(checkout, 'mutations')), false, 'Changed PR proof must never write Human review');
     assert.doesNotMatch(result.stdout, /HANDOFF #1/);
@@ -179,4 +179,30 @@ test('handoff reports a failed status read-back instead of claiming delivery', t
   const result = run('handoff', '1', '7');
   assert.equal(result.status, 2, result.stdout + result.stderr);
   assert.doesNotMatch(result.stdout, /HANDOFF #1/);
+});
+
+
+test('handoff names every missing point at once, issue side and PR side together', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [] }, bodyHTML: list([task('open box')]) });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ linkPages: [[]] })));
+  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([]));
+  const result = run('handoff', '1', '7', '--interval', '0');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  for (const part of [/not assigned/, /open acceptance .*open box/, /post the handoff comment/, /not natively linked/]) assert.match(result.stdout, part);
+  assert.equal(existsSync(join(checkout, 'mutations')), false);
+});
+
+
+test('handoff reads an undetermined merge state again before it gives up', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  // The first read says UNKNOWN, the next one (the retry) says CLEAN.
+  writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([{ mergeStateStatus: 'UNKNOWN' }, { mergeStateStatus: 'CLEAN' }]));
+  const result = run('handoff', '1', '7', '--interval', '0');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /HANDOFF #1 PR #7/);
+  assert.equal(run('handoff', '1', '7', '--interval', 'x').status, 2, 'A bad interval is a usage error');
 });

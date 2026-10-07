@@ -241,6 +241,10 @@ the installer, so the kit's current one is copied.
   span or glued to letters is no reference). The handoff comment must also carry a
   `Retro` section whose every list line ends with its resolution (exit 1 otherwise, status
   untouched, every line without one is printed); it is read as GitHub renders it too.
+  One run lists every missing point together (open acceptance, assignment, handoff comment, retro, native link, blockers
+  and threads; a refused issue state, an unreadable read or running reviews are reported alone or first), so one fix round
+  suffices. An undetermined merge state (`UNKNOWN`) is read again up to 3 times, `--interval SECONDS` apart (default 3,
+  1 point per read; `merge` too) before `handoff` reports it as waiting.
   Session ownership, final
   proof and whether a finding is justified remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
