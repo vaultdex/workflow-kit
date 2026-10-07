@@ -2,10 +2,15 @@
 // Without file arguments the changed files are everything that differs from the merge base with origin/main
 // (commits, working tree, new files); with arguments those files are used instead.
 // The mapping is the plain table below: explicit, no import analysis. CI keeps running the whole suite.
+// A project adds its own map in .github/affected-tests.json (see README); its commands are printed after the kit's tests
+// (`--base REF` replaces origin/main as the merge base, for projects that target release branches).
+import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+import { projectRoot } from './checkout-root.mjs';
 
 const kit = fileURLToPath(new URL('..', import.meta.url));
 const tests = 'scripts/tests/';
@@ -60,19 +65,45 @@ export function affectedTests(files, directory = kit) {
   return { tests: [...found].sort().filter(name => existsSync(resolve(directory, tests, name))).map(name => tests + name), unmapped };
 }
 
-const git = (...args) => execFileSync('git', args, { cwd: kit, encoding: 'utf8' }).split('\n').filter(Boolean);
+const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).split('\n').filter(Boolean);
 
-/** Files that differ from the merge base with origin/main, plus untracked ones. */
-export function changedFiles(base = 'origin/main') {
-  const [from] = git('merge-base', base, 'HEAD');
-  return [...new Set([...git('diff', '--name-only', from), ...git('ls-files', '--others', '--exclude-standard')])];
+/** Files that differ from the merge base with `base`, plus untracked ones, in the Git checkout `cwd`. */
+export function changedFiles(base = 'origin/main', cwd = kit) {
+  const [from] = git(cwd, 'merge-base', base, 'HEAD');
+  return [...new Set([...git(cwd, 'diff', '--name-only', from), ...git(cwd, 'ls-files', '--others', '--exclude-standard')])];
+}
+
+export const PROJECT_FILE = '.github/affected-tests.json';
+
+/** The project's map from path pattern (`*` within a folder, `**` across folders) to a command or a list of commands. */
+export function readProjectMap(root) {
+  const file = resolve(root, PROJECT_FILE);
+  if (!existsSync(file)) return {};
+  const map = JSON.parse(readFileSync(file, 'utf8'));
+  for (const [pattern, value] of Object.entries(map))
+    assert.ok([value].flat().every(command => typeof command === 'string' && command), `${PROJECT_FILE}: "${pattern}" needs a command or a list of commands`);
+  return map;
+}
+
+const glob = pattern => new RegExp('^' + pattern.split('**').map(part => part.split('*').map(text => text.replace(/[.+^${}()|[\]\\?]/g, '\\$&')).join('[^/]*')).join('.*') + '$');
+
+/** The project commands for a list of changed files (paths relative to the project root), each once, in table order. */
+export function projectCommands(files, map) {
+  return [...new Set(Object.entries(map).filter(([pattern]) => files.some(file => glob(pattern).test(file))).flatMap(([, value]) => [value].flat()))];
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  const args = process.argv.slice(2), run = args.includes('--run'), given = args.filter(arg => arg !== '--run');
-  const { tests: selected, unmapped } = affectedTests(given.length ? given : changedFiles());
+  const { values, positionals: given } = parseArgs({ allowPositionals: true, options: { run: { type: 'boolean' }, base: { type: 'string', default: 'origin/main' } } });
+  // A project that uses the kit as a submodule: kit tests follow the kit's own changes, the project map the project's.
+  const root = projectRoot(), inKit = realpathSync.native(root) === realpathSync.native(kit);
+  const kitFiles = given.length ? (inKit ? given : []) : changedFiles(inKit ? values.base : undefined, kit);
+  const commands = projectCommands(inKit ? kitFiles : given.length ? given : changedFiles(values.base, root), readProjectMap(root));
+  const { tests: selected, unmapped } = affectedTests(kitFiles);
   for (const file of unmapped) console.error(`no test mapped for ${file}; add a row to scripts/affected-tests.mjs or run the suite`);
-  if (!run) { if (selected.length) console.log(selected.join('\n')); }
-  else if (selected.length) process.exitCode = spawnSync(process.execPath, ['--test', ...selected], { cwd: kit, stdio: 'inherit' }).status ?? 1;
-  else console.log('no affected tests');
+  if (!values.run) { if (selected.length || commands.length) console.log([...selected, ...commands].join('\n')); }
+  else if (!selected.length && !commands.length) console.log('no affected tests');
+  else {
+    if (selected.length) process.exitCode = spawnSync(process.execPath, ['--test', ...selected], { cwd: kit, stdio: 'inherit' }).status ?? 1;
+    for (const command of commands) if (!process.exitCode) process.exitCode = spawnSync(command, { cwd: root, shell: true, stdio: 'inherit' }).status ?? 1;
+  }
 }
