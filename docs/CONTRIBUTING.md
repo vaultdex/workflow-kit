@@ -403,7 +403,9 @@ backlink never closes an issue.
    review). Its sources are your own session: the commands you ran, failed attempts
    and retries, tool refusals and errors, waiting times and the files you had to
    search for. "Present these candidates to the user" means the finding list in the
-   handoff comment. Fix findings within the
+   handoff comment. A driver spawned by a chief session skips the skill and lists at
+   most three friction lines from its own session instead
+   ([parallel drivers](parallel-drivers.md#driver-regeln) rule 6). Fix findings within the
    issue's scope through step 4; record the rest as follow-up issues in the
    repository that owns the fix, with evidence from the session. Report findings
    about personal configuration (memory, shell profile, scheduled tasks) to the

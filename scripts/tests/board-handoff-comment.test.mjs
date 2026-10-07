@@ -151,7 +151,9 @@ test('handoff needs the Selbstprüfung section of the PR body to name every chec
   rejected('<p>Beschreibung</p>', checks, 'no section: ');
   rejected(`<h2 dir="auto">Reviews</h2>\n<p>${both}</p>`, checks, 'the names under another heading: ');
   rejected(`<blockquote>\n${selfReview(2, both)}\n</blockquote>`, checks, 'a quoted template is no section: ');
+  rejected(selfReview(2, '<code>pony</code>', '<code>tail-review</code>', 'code-review: ok'), ['ponytail-review'], 'names split across paragraphs do not join: ');
   rejected(selfReview(2, '<code>code-review</code>: ein Fund.'), ['ponytail-review'], 'one check missing: ');
+  rejected(selfReview(2, 'ponytail-review: ok', 'code-reviewÄnderung'), ['code-review'], 'a Unicode suffix is part of the word: ');
 
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   for (const [html, label] of [
@@ -169,6 +171,14 @@ test('handoff needs the Selbstprüfung section of the PR body to name every chec
   }
   for (const bad of [null, 'ponytail-review', [''], [1]]) assert.equal(handoff(selfReview(2, both), { selfReview: bad }).status, 2, JSON.stringify(bad));
   assert.equal(handoff(undefined).status, 2, 'An unreadable rendered PR body is unknown, never a handoff');
+
+  const pending = { reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { login: 'reviewer' } }] },
+    requestEvents: { totalCount: 1, nodes: [{ createdAt: new Date().toISOString(), requestedReviewer: { login: 'reviewer' } }] } };
+  project({ selfReview: ['ponytail-review'] });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ ...pending, bodyHTML: undefined })));
+  assert.equal(run('handoff', '1', '7').status, 2, 'An unreadable PR body is an error even while a reviewer is pending');
+  project({ selfReview: null });
+  assert.equal(run('handoff', '1', '7').status, 2, 'A malformed config is an error even while a reviewer is pending');
 });
 
 

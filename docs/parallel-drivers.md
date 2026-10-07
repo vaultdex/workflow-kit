@@ -156,11 +156,14 @@ Modellwahl stehen hier nicht.
 5a. **Selbstprüfung vor Ready.** Nennt das Projekt `"selfReview"` in `.github/workflow-project.json`
    (zum Beispiel `ponytail-review` und `code-review`), laufen diese Prüfungen einmal je PR im
    Vordergrund vor „Ready for Review“, und der PR-Text hat den Abschnitt `## Selbstprüfung` mit jedem Namen
-   und dem Ergebnis; `board.mjs handoff` und `merge` lehnen sonst ab
+   und dem Ergebnis; Ergebnisse nennen Belege und unterscheiden geprüftes Verhalten von Mocks und Konfiguration.
+   `board.mjs handoff` und `merge` prüfen Abschnitt und Namen, nicht Ergebnis oder Qualität
    ([Review loop](CONTRIBUTING.md#review-loop) Schritt 1).
-6. **Retro vor der Übergabe.** Den Skill `retro` mit dem Skill-Werkzeug aufrufen
-   (die Kit-Kopie ist aufrufbar, [Abweichung](matt-pocock.md)); Quelle ist die eigene
-   Session ([Review loop](CONTRIBUTING.md#review-loop) Schritt 5). Eine
-   Kurzdurchsicht aus dem Kopf ersetzt ihn nicht.
+6. **Reibung statt Retro-Skill.** Driver rufen den Skill `retro` nicht auf; er kostet
+   zu viele Tokens pro Issue. Sie schreiben höchstens 3 Reibungszeilen aus der eigenen
+   Session (Fehlversuche, Wartezeiten, Ablehnungen) in den `Retro`-Abschnitt der
+   Übergabe, jede mit Auflösung wie in [Review loop](CONTRIBUTING.md#review-loop)
+   Schritt 5, und wiederholen sie im Abschlussbericht. Die Retro mit dem Skill macht
+   die Eltern-Session gesammelt über ihre Driver.
 7. **Abschlussbericht** mit höchstens 12 Zeilen: PR, zurückgelesener Status,
    Folge-Issues, Überschneidungen, Reibung.

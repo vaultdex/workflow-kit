@@ -1560,7 +1560,8 @@ const findHandoffComment = (comments, viewer, headRefOid) => comments.findLast(c
   && /^## Übergabe\s*$/m.test(comment.body ?? '') && new RegExp(`^Head:\\s*${headRefOid.slice(0, 7)}`, 'im').test(comment.body ?? ''));
 
 // ponytail: relies on GitHub's markup (h1-h6, li, issue-link); replace when GitHub changes it.
-const text = html => html.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+const text = html => html.replace(/<\/?(?:br|p|div|li|h[1-6]|ul|ol|blockquote)\b[^>]*>/gi, ' ')
+  .replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
 const headingText = part => text(part.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/)?.[1] ?? '');
 /** A quoted template is no section: drop quotes (innermost first, so nesting works) before searching. */
 function withoutQuotes(html) {
@@ -1575,9 +1576,12 @@ function withoutQuotes(html) {
  * any level; its sub-headings belong to it) must name. Whether a check was good is not judged. Without the field nothing is asked.
  */
 // ponytail: a name counts when the section mentions it, the section is not proof the check ran; replace when a check leaves a trace.
-function selfReviewReasons(bodyHtml) {
+function selfReviewChecks() {
   const checks = project.selfReview === undefined ? [] : project.selfReview; // only a missing field is allowed; null is malformed
   assert.ok(Array.isArray(checks) && checks.every(check => typeof check === 'string' && check.trim()), 'selfReview must be a list of non-empty check names');
+  return checks;
+}
+function selfReviewReasons(bodyHtml, checks) {
   if (!checks.length) return [];
   assert.equal(typeof bodyHtml, 'string', 'The rendered PR body is unreadable');
   const parts = withoutQuotes(bodyHtml).split(/(?=<h[1-6][\s>])/), level = part => Number(/^<h([1-6])[\s>]/.exec(part)?.[1]);
@@ -1586,7 +1590,7 @@ function selfReviewReasons(bodyHtml) {
   let end = start + 1;
   while (end < parts.length && level(parts[end]) > level(parts[start])) end++;
   const section = text(parts.slice(start, end).join(''));
-  const missing = checks.filter(check => !new RegExp(`(?<![\\w-])${RegExp.escape(check.trim())}(?![\\w-])`, 'i').test(section));
+  const missing = checks.filter(check => !new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_-])${RegExp.escape(check.trim())}(?![\\p{L}\\p{M}\\p{N}_-])`, 'iu').test(section));
   return missing.length ? [`the "Selbstprüfung" section of the PR body does not name: ${missing.join(', ')}`] : [];
 }
 
@@ -1622,7 +1626,9 @@ function retroReasons(bodyHtml) {
  */
 const mergeStates = ['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'], mergeReads = 4;
 function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []) {
+  const checks = selfReviewChecks();
   const pr = readPr(prNumber);
+  if (checks.length) assert.equal(typeof pr.bodyHTML, 'string', 'The rendered PR body is unreadable');
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
   const blockers = reasons => reasons.map(reason => `blocker: ${reason}`);
   if (pr.state !== 'OPEN' || pr.isDraft) {
@@ -1642,7 +1648,7 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push(`resolve review blockers and threads before ${action}`);
   }
-  reasons.push(...selfReviewReasons(result.pr.bodyHTML), ...extra(result));
+  reasons.push(...selfReviewReasons(result.pr.bodyHTML, checks), ...extra(result));
   const undetermined = state => !state || state === 'UNKNOWN';
   let state = result.pr.mergeStateStatus;
   for (let read = 1; undetermined(state) && read < mergeReads; read++) {
@@ -2004,17 +2010,30 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | check ISSUE [--sessio
   + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
-// --help is the one flag that never writes: usage on stdout, success.
-if (process.argv.slice(2).includes('--help')) {
+// --help (-h) is the one flag that never writes: usage on stdout, success.
+if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
   console.log(usage);
   process.exit(0);
 }
-// A writing command takes only its own flags; any other `--word` is a mistake that must not reach a write.
-const writeFlags = { status: [], priority: [], field: [], block: [], sub: [], link: [], body: [], 'body-replace': ['--from', '--to'],
-  new: ['--title', '--body-file', '--milestone', '--label', '--priority', '--field', '--start', '--agent', '--session', '--from'],
-  ready: ['--local', '--attempts', '--interval'], handoff: ['--stall', '--grace', '--interval'],
-  merge: ['--stall', '--grace', '--interval', '--max-minutes'] };
-if (Object.hasOwn(writeFlags, command) && process.argv.slice(3).some(arg => arg.startsWith('--') && !writeFlags[command].includes(arg))) {
+// A writing command takes only its own flags (value 1: followed by a value) and as many plain words as it names (the issue or PR
+// included); any other argument is a mistake that must not reach a write. `field` and `status ISSUE "Automated review"` check their own trailing words.
+const writeArgs = { status: { words: 2 }, priority: { words: 2 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2 },
+  body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
+  new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1 } },
+  ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1 } },
+  merge: { words: 1, flags: { '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } } };
+function refusesArguments() {
+  const { words, flags = {} } = writeArgs[command], args = process.argv.slice(3);
+  let given = 0;
+  for (let index = 0; index < args.length; index++) {
+    if (Object.hasOwn(flags, args[index])) index += flags[args[index]];
+    else if (/^-./.test(args[index])) return true; // a lone "-" is a file name (`body ISSUE - BASE`), not a flag
+    else given++;
+  }
+  const allowed = command === 'status' && /^automated review$/i.test(value ?? '') ? Infinity : words - (args.includes('--local') ? 1 : 0);
+  return given > allowed;
+}
+if (Object.hasOwn(writeArgs, command) && refusesArguments()) {
   console.error(usage);
   process.exit(2);
 }
@@ -2046,7 +2065,6 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   // 0 = no limit; a missing or non-numeric value must not silently mean that.
   || (process.argv.includes('--max-minutes') && (!['wait', 'merge'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
-  || (command === 'merge' && value && !value.startsWith('--'))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
   || (command === 'body-replace' && !(process.argv.length === 8 && value === '--from' && process.argv[6] === '--to' && process.argv[5] && process.argv[7]))
