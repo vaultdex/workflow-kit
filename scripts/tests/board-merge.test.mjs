@@ -151,7 +151,9 @@ test('merge falls back to merge-async with the checked head when gh refuses a PR
   // The REST merge answers a stack with HTTP 403.
   show();
   writeFileSync(join(checkout, 'merge-403'), 'gh: Forbidden (HTTP 403)');
-  assert.equal(run('merge', '7', '--interval', '0').status, 0);
+  const rest = run('merge', '7', '--interval', '0');
+  assert.equal(rest.status, 0, rest.stdout + rest.stderr);
+  assert.match(rest.stdout, new RegExp(`^MERGED #7 head ${first} `, 'm'));
   assert.deepEqual(calls(), ['merge', 'merge-async', 'delete claude/7-topic']);
   // A "forbidden" without stack reference is a plain refusal: an error, no merge-async.
   show();

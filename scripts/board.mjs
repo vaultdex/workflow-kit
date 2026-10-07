@@ -1653,9 +1653,11 @@ async function merge() {
       { encoding: 'utf8', env: gh.env });
   } catch (error) {
     // A PR with stacked children (#321) is refused, but accepted by merge-async: same merge, same head, the answer is 202 and the merge follows in the background.
-    // GitHub's GraphQL text is "part of a stack and must be merged using the asynchronous merge REST API"; the REST merge answers 403.
-    if (!/part of a stack|asynchronous merge REST API|HTTP 403/i.test(`${error.stderr}${error.stdout}`)) throw error;
-    console.log('note: gh pr merge was refused as a PR with stacked children; merging the same head with merge-async');
+    // GitHub's GraphQL text is "part of a stack and must be merged using the asynchronous merge REST API"; a REST merge answers HTTP 403.
+    // ponytail: a bare HTTP 403 (e.g. a token without permission) also tries merge-async once, which then ends as ERROR; add a stack qualifier when a real 403 text is captured.
+    const text = `${error.stderr}${error.stdout}`;
+    if (!/part of a stack|asynchronous merge REST API|HTTP 403/i.test(text)) throw error;
+    console.log(`note: gh pr merge was refused (${/HTTP 403/i.test(text) ? 'HTTP 403' : 'part of a stack'}); merging the same head with merge-async`);
     execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/merge-async`, '-X', 'PUT', '-f', 'merge_action=direct_merge', '-f', 'merge_method=merge', '-f', `sha=${headRefOid}`],
       { encoding: 'utf8', env: gh.env });
     asynchronous = true;
