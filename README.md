@@ -234,8 +234,8 @@ and then work in that directory, their relative paths (changed files given to `a
   writes once and counts only a read-back showing that head ready; API errors exit 2.
   An already ready PR with that head succeeds without a write.
 - `quota-wait [--max-minutes N]`: returns (`DONE` with the `quota: …` line, exit 0) once GitHub's shared GraphQL quota has
-  300 points again, sleeping until the reset taken from the response headers; after `--max-minutes` (default 9) it ends
-  `still waiting: call quota-wait again after <time>` (exit 4). Use it, or `wait`, instead of a loop of your own around `gh`:
+  300 points again, sleeping until the reset taken from the response headers; a pause that would end after `--max-minutes`
+  (default 9) is not slept through: it ends `still waiting: call quota-wait again after <time>` (exit 4). Use it, or `wait`, instead of a loop of your own around `gh`:
   a refused `gh api graphql` prints the error and may still exit 0.
 - `reviews PR`: one look at the head (exit 0 done, 1 red CI, 3 waiting, 2 error).
   It also prints the merge state and `blocker:` lines (standing change requests,

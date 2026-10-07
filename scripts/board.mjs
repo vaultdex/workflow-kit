@@ -1737,7 +1737,7 @@ const quotaLine = () => quota && `quota: ${quota.remaining} left, ${spent} point
  * (the full id just pushed) an open PR keeps waiting until it shows exactly that head.
  * ponytail: a head that never matches (wrong id, someone else pushed on top) waits on; stop it by hand.
  */
-function reviewsOfHead(pr, threads) {
+function lookAtHead(pr, threads) {
   const expected = headOption()?.toLowerCase();
   if (!expected || pr.state !== 'OPEN' || pr.headRefOid === expected) return reviews(stallOption(), Date.now(), number, pr, undefined, threads);
   return { done: false, lines: [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`,
@@ -1774,10 +1774,10 @@ const fullReadEvery = 5 * 60_000;
 function reviewsForHead() {
   const marker = changeMarker(), started = Date.now();
   if (marker && lastRead?.marker.text === marker.text && started - lastRead.at < fullReadEvery) {
-    const result = reviewsOfHead(lastRead.pr, () => lastRead.threads);
+    const result = lookAtHead(lastRead.pr, () => lastRead.threads);
     if (!result.done) return result;
   }
-  const pr = readPr(number), result = reviewsOfHead(pr);
+  const pr = readPr(number), result = lookAtHead(pr);
   // A PR that shows another head than REST is still catching up, and a result that ended early has no threads: read both again next round.
   lastRead = marker && pr.headRefOid === marker.head && result.threads && { marker, pr, threads: result.threads, at: started };
   return result;

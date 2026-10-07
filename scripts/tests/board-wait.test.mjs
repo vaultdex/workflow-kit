@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { reviewsFixture, test } from './board-fixture.mjs';
 
@@ -55,4 +55,57 @@ test('wait gives up before the tool limit with exit 4 and names the quota reset 
   assert.match(paused.stdout, /^still waiting: call wait again after \d{4}-\d\d-\d\dT[\d:.]+Z \(GitHub quota pause\)$/m);
   assert.equal(run('wait', '7', '--max-minutes', 'abc').status, 2, 'A bad limit is refused, not read as no limit');
   assert.equal(run('reviews', '7', '--max-minutes', '1').status, 2, '--max-minutes belongs to wait');
+});
+
+// `wait` asks REST whether anything changed and reads GraphQL (the PR, then its review threads) only when it did (#324).
+// --interval 0 makes many rounds out of the short --max-minutes; the fake gh counts the REST reads of the PR in rest-reads.
+function restFixture(t) {
+  const fixture = reviewsFixture(t);
+  const { checkout, queries } = fixture;
+  return {
+    ...fixture,
+    show: data => {
+      writeFileSync(join(checkout, 'pr.json'), JSON.stringify(data));
+      for (const file of ['issues-comments', 'issues-reactions', 'pulls-comments', 'comments-reactions', 'pulls-reviews']) writeFileSync(join(checkout, `${file}.json`), '[]');
+    },
+    restReads: () => readFileSync(join(checkout, 'rest-reads'), 'utf8').trim().split('\n').length,
+    // The GraphQL reads of the PR and of its review threads since the last call.
+    graphqlReads: () => {
+      const sent = queries();
+      return { pr: sent.filter(query => query.includes('readyEvents')).length, threads: sent.filter(query => query.includes('reviewThreads')).length, all: sent.length };
+    },
+  };
+}
+
+test('wait reads GraphQL once while REST shows no change, and once more per change', t => {
+  const { checkout, run, check, pr, show, restReads, graphqlReads } = restFixture(t);
+  show(pr({ contexts: [check('IN_PROGRESS')] })); // CI never finishes
+  assert.equal(run('wait', '7', '--interval', '0', '--max-minutes', '0.02').status, 4, 'Precondition: the wait is still waiting');
+  assert.ok(restReads() >= 3, 'Precondition: several rounds ran');
+  assert.deepEqual(graphqlReads(), { pr: 1, threads: 1, all: 2 }, 'Many rounds without a change: one read of the PR (and of its threads)');
+
+  // The third look at REST shows a new update time, the later ones keep it.
+  writeFileSync(join(checkout, 'pr-rest-reads.json'), JSON.stringify([{}, {}, { updatedAt: 'later' }]));
+  assert.equal(run('wait', '7', '--interval', '0', '--max-minutes', '0.02').status, 4);
+  assert.deepEqual(graphqlReads(), { pr: 2, threads: 2, all: 4 }, 'The change costs exactly one more read of the PR (and of its threads)');
+});
+
+test('wait confirms every end with a full read', t => {
+  const { run, check, readyHead, show, graphqlReads } = restFixture(t);
+  // Ready since 5 minutes with a 5 minute and 2 second grace: the cached look says "waiting" first, then "done" once the clock passed the grace.
+  show(readyHead([check('COMPLETED')]));
+  const result = run('wait', '7', '--interval', '0', '--max-minutes', '0.2', '--grace', String(5 + 2 / 60));
+  assert.equal(result.status, 0, 'The grace ends the wait');
+  assert.deepEqual(graphqlReads(), { pr: 2, threads: 2, all: 4 }, 'The first read, and the full read that confirms the end');
+});
+
+test('wait --merged reads REST only, and --interval is bounded', t => {
+  const { run, pr, show, graphqlReads } = restFixture(t);
+  show(pr());
+  assert.equal(run('wait', '7', '--merged', '--interval', '0', '--max-minutes', '0.02').status, 4, 'An open PR keeps waiting');
+  show({ ...pr(), state: 'MERGED' });
+  assert.equal(run('wait', '7', '--merged').status, 0);
+  assert.equal(graphqlReads().all, 0, 'No GraphQL point is spent while waiting for the merge');
+  assert.equal(run('wait', '7', '--interval', '301').status, 2, 'A pause above 5 minutes is refused');
+  assert.equal(run('wait', '7', '--interval', 'x').status, 2, 'and so is a bad one');
 });
