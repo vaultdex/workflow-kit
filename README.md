@@ -32,7 +32,8 @@ plus the label `spec` (`gh label create spec`), which the form sets.
 the project's `.ignore`, so ripgrep-based search skips the generated provider skill copies
 (only `.agents/skills` stays searchable) and `.vendor/`; to search an excluded copy, name its
 path (`rg pattern .claude/skills`), then `.ignore` doesn't apply. A project-owned skill in a
-provider directory stays visible with `!/.claude/skills/my-skill/` in `.ignore`. Git ignores the file.
+provider directory stays visible with `!/.claude/skills/my-skill/` in `.ignore`. Git doesn't read the file; commit it with the other `init-project` outputs: a clean-diff check after
+the generators (`git diff --exit-code`) fails on an uncommitted `.ignore`.
 
 To update, move the gitlink first. `git submodule update` checks out the commit the
 index records, so run after a bump it silently puts the old kit back, and the
@@ -66,8 +67,8 @@ hook snapshots also need the [installers](#hooks).
 
 ### Commit generated files
 
-Commit `.gitmodules`, the kit gitlink, hook definitions, `.agents/hooks` sources
-and all generated discovery files. Personal state, download caches and replaced
+Commit `.gitmodules`, the kit gitlink, hook definitions, `.agents/hooks` sources,
+`.ignore` and all generated discovery files. Personal state, download caches and replaced
 files stay ignored. After staging the intended files, preserve Unix launcher modes
 in Git explicitly, including on Windows and with `core.filemode=false`:
 
@@ -266,7 +267,10 @@ the installer, so the kit's current one is copied.
   the PR became ready (Ready event, or creation as non-draft) and after each push of the
   head (read from the branch's push log, so a reused commit counts too), whichever is later, they keep
   waiting for reviewers that start on Ready or on new commits, such as Codex, even when CI is already
-  green; `handoff` honors both. `wait PR --merged` waits for the human merge
+  green; `handoff` honors both. `wait PR --head SHA` (the full id you just pushed, `git rev-parse HEAD`)
+  keeps waiting (`waiting: PR still shows head …`) while an open PR still reports another head:
+  right after a push GitHub serves the previous head for a moment, and a plain `wait` would end `DONE` for it.
+  A head that never matches waits on until stopped by hand. `wait PR --merged` waits for the human merge
   and ends `FAILED` if the PR is closed unmerged. Analyzers that create their
   check only when finished are awaited when listed in `"awaitApps"`
   ([setup](SETUP.md#3-board-and-labels)).
