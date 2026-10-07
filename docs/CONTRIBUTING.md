@@ -165,13 +165,15 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
   Mitwirkung nötig`, falls vorhanden): 2 bis 4 Sätze, was heute stört, was anders wird und
   wer es merkt.
 - PRs und Kommentare beginnen mit dem Ergebnis in einem Satz, Details danach. Das gilt
-  auch für den [Übergabekommentar](../README.md#handoff-comment).
+  auch für den [Übergabekommentar](../README.md#handoff-comment). Maschinell erzeugte
+  Kommentare wie der Backlink von `board.mjs link` sind ausgenommen.
 - Kein Status im Text: Project-Status, Priorität und Größe stehen nur auf dem Board. Ein
   Issue-Text schreibt keine Zeilen wie „Status: Backlog, keine Ready-Freigabe“; sie
   veralten beim nächsten Statuswechsel. Das gilt auch, wenn die Vorlage eines Skills
-  (zum Beispiel `to-tickets`) eine Statuszeile zeigt: Sie entfällt. Freigaben und
-  Entscheidungen stehen weiter mit Quelle im Text, aber ohne den Board-Status zu
-  wiederholen.
+  (zum Beispiel `to-tickets`) eine Statuszeile zeigt. Eine Ausnahme ist die Statuszeile
+  einer lokalen Ticketdatei (Tracker „lokales Markdown“): Sie ist dort der Triage-Stand
+  und bleibt. Freigaben und Entscheidungen stehen weiter mit Quelle im Text, aber ohne
+  den Board-Status zu wiederholen.
 
 ## Delivery
 

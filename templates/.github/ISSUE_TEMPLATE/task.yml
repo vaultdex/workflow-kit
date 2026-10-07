@@ -8,6 +8,11 @@ body:
         `## Menschliche Mitwirkung nötig` als ersten Abschnitt ergänzen und das Label
         `needs-human-input` setzen (Wer, Was fehlt, Wirkung, Antwortweg). Sonst weglassen.
   - type: textarea
+    id: summary
+    attributes:
+      label: Kurz gesagt
+      description: Nur bei Specs und längeren Aufgaben. 2 bis 4 Sätze in einfacher Sprache, was heute stört, was anders wird und wer es merkt. Sonst leer lassen.
+  - type: textarea
     id: purpose
     attributes:
       label: Wofür brauchen wir das?
