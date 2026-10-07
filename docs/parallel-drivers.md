@@ -125,8 +125,10 @@ Modellwahl stehen hier nicht.
    - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
      und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
    - Kommentare eines Issues: `gh api repos/OWNER/REPO/issues/N/comments`.
-   - Board-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD check N` (die Option steht vor
+   - Kit-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD check N` (die Option steht vor
      dem Befehl) liest `.github/workflow-project.json` aus dem Klon statt aus dem Arbeitsverzeichnis.
+     `init-project.mjs`, `setup-skills.mjs` und `affected-tests.mjs` nehmen dieselbe Option als erstes
+     Argument (`affected-tests.mjs --cwd KLON-PFAD --run`) und arbeiten dann im Klon.
      Ohne sie bestimmt das Arbeitsverzeichnis das Projekt, und ein Status oder Kommentar kann im
      falschen Issue landen; ein `cd … &&` ist dafür nicht nötig.
    - Worktree: der Driver arbeitet im eigenen Worktree, nie in dem der Eltern-Session;

@@ -12,8 +12,29 @@ export function checkoutRoot(path) {
   }
 }
 
-/** The Git checkout containing the working directory: kit commands act on the project they run in,
- * never on a path taken from their arguments. */
+/** Takes `--cwd PROJECT_DIR`, which must be the first argument, off `argv` and returns the directory ('.' without the option),
+ * so a driver can run a kit command for another clone without `cd`. The one path a command takes from its arguments. */
+export function takeCwd(argv = process.argv) {
+  if (argv[2] !== '--cwd') return '.';
+  const directory = argv.splice(2, 2)[1];
+  if (!directory || directory.startsWith('--')) {
+    console.error('--cwd needs the directory of the project');
+    process.exit(2);
+  }
+  return directory;
+}
+
+/** Makes the `--cwd` directory (if given) the working directory, which every command below treats as its project. */
+export function enterCwd() {
+  const directory = takeCwd();
+  try { process.chdir(directory); } catch {
+    console.error(`--cwd ${directory} is not a directory`);
+    process.exit(2);
+  }
+}
+
+/** The Git checkout containing the working directory: kit commands act on the project they run in
+ * (the working directory, which `--cwd` sets), never on any other path taken from their arguments. */
 export function projectRoot() {
   for (let directory = realpathSync.native(process.cwd());; directory = dirname(directory)) {
     if (existsSync(join(directory, '.git'))) return directory;

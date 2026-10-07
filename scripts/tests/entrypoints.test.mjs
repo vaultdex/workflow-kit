@@ -101,6 +101,17 @@ test('search ignore is created or extended without losing project lines', t => {
   assert.deepEqual(readFileSync(path), once);
 });
 
+test('--cwd names the project to initialize, not the working directory', t => {
+  const f = fixture(t), other = join(f.base, 'other');
+  mkdirSync(join(other, '.git'), { recursive: true });
+  f.template('AGENTS.md', 'kit rules\n');
+  const result = spawnSync(process.execPath, [join(f.kit, 'scripts/init-project.mjs'), '--cwd', f.root], { cwd: other, encoding: 'utf8' });
+  succeeds(result);
+  assert.equal(readFileSync(join(f.root, 'AGENTS.md'), 'utf8'), 'kit rules\n');
+  assert.equal(existsSync(join(other, 'AGENTS.md')), false);
+  assert.equal(spawnSync(process.execPath, [join(f.kit, 'scripts/init-project.mjs'), '--cwd', join(f.base, 'missing')], { cwd: other }).status, 2);
+});
+
 test('writes stay inside the owning checkout', t => {
   const f = fixture(t), outside = join(f.base, 'outside');
   mkdirSync(outside);

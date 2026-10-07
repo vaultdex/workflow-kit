@@ -43,6 +43,13 @@ test('with a project file the command lists its entries; without one nothing cha
   mkdirSync(join(project, '.github'));
   writeFileSync(join(project, '.github/affected-tests.json'), JSON.stringify({ 'backend/domain/**': './gradlew :domain:test' }));
   assert.equal((await ask()).stdout, './gradlew :domain:test\n');
+  // --cwd names the project from another directory; the map and the file arguments are the project's
+  const elsewhere = temporary(t, 'affected-tests-');
+  mkdirSync(join(elsewhere, '.git'));
+  const script = fileURLToPath(new URL('../affected-tests.mjs', import.meta.url));
+  const named = await run(process.execPath, [script, '--cwd', project, 'backend/domain/A.java'], { cwd: elsewhere });
+  assert.deepEqual([named.status, named.stdout], [0, './gradlew :domain:test\n'], named.stderr);
+  assert.equal((await run(process.execPath, [script, '--cwd'], { cwd: elsewhere })).status, 2);
 });
 
 test('--run prints no line per test or command when green, and the output of the failure when red', async t => {
