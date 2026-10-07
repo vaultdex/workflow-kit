@@ -3,7 +3,8 @@ on:
   pull_request:
     branches: [main]
     # Draft pushes run nothing; ready_for_review starts the run for the head that counts.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # converted_to_draft starts a skipped run that cancels a running one through the concurrency group.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
 permissions:
   contents: read
