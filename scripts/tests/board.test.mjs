@@ -1043,7 +1043,7 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.match(conflicted.stdout, /^blocker: merge conflicts$/m);
   for (const state of ['UNKNOWN', 'BEHIND']) assert.equal(noCi(state).status, 3, `${state} keeps waiting`);
   assert.equal(look({ ...pr({ contexts: [] }), mergeStateStatus: 'DIRTY' }).status, 3, 'A draft with conflicts keeps waiting');
-  assert.equal(reviews({ ...readied(5), mergeStateStatus: 'BEHIND' }), 0, 'BEHIND is no conflict');
+  assert.equal(reviews(readied(5, { mergeStateStatus: 'BEHIND' }, 5)), 0, 'BEHIND is no conflict');
   assert.equal(reviews({ ...pr(), latestOpinionatedReviews: { totalCount: 101, nodes: [] } }), 2, 'Cut-off review decisions are never read as no blocker');
   const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['sonarqubecloud'] }));
