@@ -64,6 +64,9 @@ schreiben und per `--body-file` übergeben, nicht per Heredoc.
 Allgemeine Regeln für jeden Driver-Subagenten. Projektspezifische Regeln und die
 Modellwahl stehen hier nicht.
 
+0. **Neuer Worktree: Kit zuerst.** Ein Worktree mit `isolation: worktree` startet mit leerem
+   Kit-Submodul, weil die Start-Hooks für das Projektverzeichnis der Eltern laufen: als Erstes
+   `git submodule update --init .vendor/workflow-kit`, dann AGENT_RULES.md lesen.
 1. **Ein Issue bis „Human review“ treiben.** Früher enden nur bei einem menschlichen
    Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung) oder bei einem Blocker
    (`board.mjs check` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
@@ -101,8 +104,14 @@ Modellwahl stehen hier nicht.
    - Dateien: mit Edit und Write oder mit einem Node-Skript aus einer Datei ändern;
      Heredoc, Python und sed verlieren Backslashes.
    - Suchen: auf Pfade eingrenzen oder erst mit `-l` die Dateien finden.
+   - Ziel-Stand: Suchen und Lesen laufen gegen den Stand des Ziel-Branches, bei abweichendem
+     Checkout mit `git grep … origin/<Ziel-Branch>`.
+   - Such- und Explore-Subagenten im Vordergrund (`run_in_background: false`), damit genau ein
+     Bericht zurückkommt; Hintergrund nur für lange Prüfläufe mit eigener Benachrichtigung.
    - Warten: auf die Benachrichtigung der eigenen Hintergrundaufgabe; Prozessnamen
      (`node.exe`) gehören auch anderen Drivern.
+   - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
+     und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
    - `gh issue view N --json comments` liefert die Kommentare; `--comments` passt nicht
      zu `--json`.
    - Worktree: der Driver arbeitet im eigenen Worktree, nie in dem der Eltern-Session;
