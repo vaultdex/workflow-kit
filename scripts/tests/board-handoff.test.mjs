@@ -243,5 +243,5 @@ test('handoff lists merge conflicts that GitHub reports only after an undetermin
 });
 
 test('handoff refuses an unknown flag before any write', t => {
-  fixture(t).refusesUnknownFlag('handoff', '1', '7');
+  handoffFixture(t).refusesUnknownFlag('handoff', '1', '7');
 });
