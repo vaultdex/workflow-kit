@@ -242,7 +242,7 @@ the installer, so the kit's current one is copied.
   with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. It does not read the issue, claims or the
   [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
-  ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
+  ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both take
   `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3): for that long after
   the PR became ready (Ready event, or creation as non-draft) and after each push of the
   head (read from the branch's push log, so a reused commit counts too), whichever is later, they keep

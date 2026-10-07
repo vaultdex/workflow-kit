@@ -889,7 +889,12 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) {
     lines.push(`blocker: changes requested by ${login(review.author)}`);
   }
-  if (pr.mergeStateStatus === 'DIRTY') lines.push('blocker: merge conflicts');
+  // Conflicts start no workflow, so waiting on CI would never end; the fix is merging the base now. A draft is
+  // still being worked on, and UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
+  if (pr.mergeStateStatus === 'DIRTY') {
+    lines.push('blocker: merge conflicts');
+    failed ||= !pr.isDraft;
+  }
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
