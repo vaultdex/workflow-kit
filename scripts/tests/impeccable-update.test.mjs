@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { releasePins, updateImpeccable } from '../update-impeccable.mjs';
+import { requireSubmodules } from './fixtures.mjs';
 
+requireSubmodules();
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const version = readFileSync(join(kit, 'scripts/impeccable/VERSION'), 'utf8').trim();
 const pins = readFileSync(join(kit, 'scripts/impeccable/SHA256SUMS'), 'utf8').trim().split(/\r?\n/)
