@@ -19,7 +19,11 @@ test('ready --local takes the head of the checkout and still needs the PR to sho
       headRefOid: PUSHED, headRepository: { nameWithOwner: 'test/example' }, ...changes }));
   };
 
+  // --local replaces the commit id, so a word after it has no meaning: refused, nothing marked ready.
   prepare();
+  assert.equal(run('ready', '7', '--local', 'extra', ...quick).status, 2);
+  assert.equal(mutations(), 0);
+
   let result = run('ready', '7', '--local', ...quick);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, new RegExp(`^READY #7 head ${PUSHED}`, 'm'), 'The head came from the checkout');
@@ -118,6 +122,6 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
   assert.match(missing.stderr, /full 40-character commit id.*or --local/, 'A missing SHA names the way out, not just the usage line');
 });
 
-test('ready refuses an unknown flag before any write', t => {
+test('ready refuses an unknown flag or extra word before any write', t => {
   fixture(t).refusesUnknownFlag('ready', '7', 'a'.repeat(40));
 });

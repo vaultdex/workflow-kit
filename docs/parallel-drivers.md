@@ -160,9 +160,11 @@ Modellwahl stehen hier nicht.
      Eltern-Session. Sie hält vor dem Start von Drivern ihr Kit auf dem Pin-Stand
      (`git submodule update --init .vendor/workflow-kit`), damit neue Regeln für die
      Driver gelten.
-6. **Retro vor der Übergabe.** Den Skill `retro` mit dem Skill-Werkzeug aufrufen
-   (die Kit-Kopie ist aufrufbar, [Abweichung](matt-pocock.md)); Quelle ist die eigene
-   Session ([Review loop](CONTRIBUTING.md#review-loop) Schritt 5). Eine
-   Kurzdurchsicht aus dem Kopf ersetzt ihn nicht.
+6. **Reibung statt Retro-Skill.** Driver rufen den Skill `retro` nicht auf; er kostet
+   zu viele Tokens pro Issue. Sie schreiben höchstens 3 Reibungszeilen aus der eigenen
+   Session (Fehlversuche, Wartezeiten, Ablehnungen) in den `Retro`-Abschnitt der
+   Übergabe, jede mit Auflösung wie in [Review loop](CONTRIBUTING.md#review-loop)
+   Schritt 5, und wiederholen sie im Abschlussbericht. Die Retro mit dem Skill macht
+   die Eltern-Session gesammelt über ihre Driver.
 7. **Abschlussbericht** mit höchstens 12 Zeilen: PR, zurückgelesener Status,
    Folge-Issues, Überschneidungen, Reibung.
