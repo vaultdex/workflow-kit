@@ -189,8 +189,9 @@ the project from that directory instead. Other relative paths (`--body-file`) st
   `ERROR - reason` line (exit 2, nothing else printed), not a stack trace. `check` and issue read errors name `OWNER/REPO#N`.
 - `status ISSUE "Automated review" PR [OTHER_ISSUE...]` (or `field ISSUE Status
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
-  and comment backlink on every delivered issue before writing status. Post and
-  read back backlinks immediately after PR creation; see [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
+  and comment backlink on every delivered issue before writing status. A missing
+  backlink on an issue of this repository is set like `link` does and read back
+  (a failure refuses); `link` first is not needed. See [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
 - `body ISSUE FILE BASE_FILE`: replace an issue body with `FILE` only if the current body
   still equals `BASE_FILE` (the body your change is based on; line endings and trailing
   whitespace are ignored; the text written is `FILE` with LF line endings and no trailing

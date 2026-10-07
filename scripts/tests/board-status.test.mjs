@@ -1,7 +1,38 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fixture, issue, predecessor, test } from './board-fixture.mjs';
+import { fixture, handoffPr, issue, predecessor, test } from './board-fixture.mjs';
+
+test('Automated review sets the missing native link and backlink itself and refuses only when that fails', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue('In progress'));
+  const count = file => existsSync(join(checkout, file)) ? readFileSync(join(checkout, file), 'utf8').split('\n').filter(Boolean).length : 0;
+  const writes = pattern => (readFileSync(join(checkout, 'mutations'), 'utf8').match(pattern) ?? []).length;
+  const prepare = () => {
+    for (const file of ['mutations', 'link-noop', 'comment-writes']) rmSync(join(checkout, file), { force: true });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [[]],
+      url: 'https://github.com/test/example/pull/7', body: 'Refs #1' })));
+    writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0 }));
+    writeFileSync(join(checkout, 'backlink-comments-1.json'), '[]');
+  };
+
+  prepare();
+  writeFileSync(join(checkout, 'link-noop'), '');
+  let result = run('status', '1', 'Automated review', '7');
+  assert.equal(result.status, 2, 'A link whose read-back lacks the issue still refuses: ' + result.stdout);
+  assert.equal(writes(/updateProjectV2ItemFieldValue/g), 0, 'and the status stays unwritten');
+
+  prepare();
+  result = run('status', '1', 'Automated review', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(writes(/addCloseIssueReferences/g), 1, 'The missing native link is written once');
+  assert.equal(count('comment-writes'), 1, 'and so is the missing backlink comment');
+  assert.equal(writes(/updateProjectV2ItemFieldValue/g), 1, 'then the status');
+
+  assert.equal(run('status', '1', 'Automated review', '7').status, 0);
+  assert.equal(writes(/addCloseIssueReferences/g), 1, 'A second run writes no second link');
+  assert.equal(count('comment-writes'), 1, 'and no second comment');
+});
 
 
 test('In progress requires a startable issue assigned to the authenticated user before any mutation', t => {
@@ -67,7 +98,7 @@ test('Automated review requires the declared open PR and every issue backlink be
   };
   writePR();
   writeBacklink(1, []);
-  reject('status', '1', 'Automated review');
+  assert.match(reject('status', '1', 'Automated review').stdout, /needs the PR number: status ISSUE "Automated review" PR/);
   reject('field', '1', 'Status', 'Automated review');
   reject('status', '1', 'Automated review', '--help');
   reject('status', '1', 'Automated review', '0');

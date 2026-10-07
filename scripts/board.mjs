@@ -103,9 +103,9 @@ const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!
 const named = (label, read) => {
   try { return read(); } catch (error) { throw new Error(`${label}: ${String(error.stderr || error.message).trim()}`, { cause: error }); }
 };
-const readIssue = (withSubIssues = false) => named(`${project.repository}#${number}`, () => {
+const readIssue = (withSubIssues = false, at = number) => named(`${project.repository}#${at}`, () => {
   for (let first = withSubIssues && 30; ; first = 100) {
-    const { viewer, repository } = graphql(issueQuery(first), { owner, name, number });
+    const { viewer, repository } = graphql(issueQuery(first), { owner, name, number: at });
     const issue = repository.issue ?? assert.fail('issue not found');
     if (!(issue.subIssues?.totalCount > issue.subIssues?.nodes.length) || first >= 100) return { ...issue, viewer };
   }
@@ -830,7 +830,8 @@ const findBacklink = (comments, prUrl) => comments.find(comment => (comment.body
 /** Explicit scope works with Refs on release branches; native closing links remain a separate proof. */
 function verifyBacklinks() {
   const [prRef, ...extraIssues] = process.argv.slice(command === 'field' ? 6 : 5);
-  const positive = ref => /^\d+$/.test(ref ?? '') && Number.isSafeInteger(Number(ref)) && Number(ref) > 0;
+  assert.ok(prRef !== undefined, 'Automated review needs the PR number: status ISSUE "Automated review" PR [OTHER_ISSUE...]');
+  const positive = ref =>/^\d+$/.test(ref ?? '') && Number.isSafeInteger(Number(ref)) && Number(ref) > 0;
   assert.ok(positive(prRef) && extraIssues.every(ref => validBlocker(ref) && positive(ref.slice(ref.lastIndexOf('#') + 1))),
     'Automated review requires PR [OTHER_ISSUE...]; post and read back every issue backlink first.');
   const prNumber = Number(prRef);
@@ -846,9 +847,13 @@ function verifyBacklinks() {
     const qualifier = `(?:${RegExp.escape(repository)})${repository === project.repository ? '?' : ''}`;
     const reference = new RegExp(`(?<![\\w/])${qualifier}#${issueNumber}(?!\\w)`, 'i');
     assert.ok(reference.test(pr.body), `PR #${prNumber} does not reference ${issueRef}`);
-    const backlink = findBacklink(issueComments(repository, issueNumber), url);
-    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; ${repository === project.repository
-      ? `run board.mjs link ${issueNumber} ${prNumber}` : 'post the full URL as a comment'} and retry`);
+    let backlink = findBacklink(issueComments(repository, issueNumber), url);
+    // An issue of this repository gets what `link` does (native connection and comment, read back); only a failure refuses.
+    if (!backlink && repository === project.repository) {
+      linkIssue(issueNumber, prNumber);
+      backlink = findBacklink(issueComments(repository, issueNumber), url);
+    }
+    assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; post the full URL as a comment and retry`);
     console.log(`backlink ${issueRef}: ${backlink.html_url}`);
   }
 }
@@ -1279,15 +1284,15 @@ function bodyReplace() {
 }
 
 /** Connect the issue natively to the PR (what a closing keyword does only on the default branch), post the backlink comment `status` requires, and read both back. */
-function link() {
-  const prNumber = Number(value);
-  const issue = readIssue();
+const link = () => linkIssue(number, Number(value));
+function linkIssue(issueNumber, prNumber) {
+  const issue = readIssue(false, issueNumber);
   assert.ok(issue?.id, 'Issue identity is unreadable');
   // The backlink comment belongs on an open issue (the guard requires one); refuse before any write instead of half-way.
-  assert.equal(issue.state, 'OPEN', `#${number} is not an open issue`);
+  assert.equal(issue.state, 'OPEN', `#${issueNumber} is not an open issue`);
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     pullRequest(number:$number){id number state url headRefOid}}}`, { owner, name, number: prNumber }).repository;
-  assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${value} is not an open pull request of ${project.repository}`);
+  assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${prNumber} is not an open pull request of ${project.repository}`);
   // Already connected is a success without a write; a Draft PR can be connected too.
   if (!connectedIssues(pr, true).has(issue.id)) {
     graphql('mutation($issue:ID!,$pr:ID!){addCloseIssueReferences(input:{issueId:$issue,pullRequestIds:[$pr]}){clientMutationId}}',
@@ -1295,21 +1300,21 @@ function link() {
     // GitHub shows the new connection with a delay (seen live: the first read-back right after the write was empty).
     // Read back a few times; the write is never repeated.
     for (let attempt = 1; !connectedIssues(pr, true).has(issue.id); attempt++) {
-      assert.ok(attempt < 5, `Native link read-back differs: PR #${value} does not close issue #${number}`);
+      assert.ok(attempt < 5, `Native link read-back differs: PR #${prNumber} does not close issue #${issueNumber}`);
       sleep(1);
     }
   }
-  console.log(`#${number} is natively linked to PR #${value}`);
+  console.log(`#${issueNumber} is natively linked to PR #${prNumber}`);
   // An existing comment is a success without a write. The text goes over stdin, like in `body`; the guard's reader proves it.
   const prUrl = new URL(pr.url);
-  let backlink = findBacklink(issueComments(project.repository, number), prUrl);
+  let backlink = findBacklink(issueComments(project.repository, issueNumber), prUrl);
   if (!backlink) {
-    execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}/comments`, '-X', 'POST', '-F', 'body=@-'],
+    execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${issueNumber}/comments`, '-X', 'POST', '-F', 'body=@-'],
       { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `PR: ${pr.url}\n` });
-    backlink = findBacklink(issueComments(project.repository, number), prUrl);
-    assert.ok(backlink, `Backlink read-back differs: the comment with ${pr.url} is not readable on #${number}; read the comments before writing again`);
+    backlink = findBacklink(issueComments(project.repository, issueNumber), prUrl);
+    assert.ok(backlink, `Backlink read-back differs: the comment with ${pr.url} is not readable on #${issueNumber}; read the comments before writing again`);
   }
-  console.log(`backlink #${number}: ${backlink.html_url}`);
+  console.log(`backlink #${issueNumber}: ${backlink.html_url}`);
 }
 
 /**
