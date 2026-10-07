@@ -372,11 +372,14 @@ Run it from the project root: the working directory decides which project it rea
 
 ```json
 {
-  "backend/domain/**": "backend/gradlew -p backend :domain:test",
-  "backend/api/**": ["backend/gradlew -p backend :api:test", "backend/gradlew -p backend :tests:test"],
+  "backend/domain/**": "sh backend/gradlew -p backend :domain:test",
+  "backend/api/**": ["sh backend/gradlew -p backend :api:test", "sh backend/gradlew -p backend :tests:test"],
   "frontend/web/**": "npm --prefix frontend/web run test -- --changed"
 }
 ```
+
+On Windows the commands run through `cmd.exe`, so a bare path or a `./` prefix does not work as the program
+(`backend/gradlew` fails there with "'backend' is not recognized"); `sh backend/gradlew` runs on both systems.
 
 The commands run with the permissions of whoever runs the script, like a `package.json` script; change the
 file only through a reviewed pull request.
