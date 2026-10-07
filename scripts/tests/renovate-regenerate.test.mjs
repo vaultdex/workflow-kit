@@ -2,7 +2,7 @@
 // sees the token, and that the dispatched CI must run on the pushed commit.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -20,7 +20,7 @@ test('the write-capable definition comes from main, not from the branch, and onl
   assert.match(yaml, /sender\.login == 'renovate\[bot\]'/);
   assert.match(yaml, /^          persist-credentials: false$/m);
   // The job runs the scripts of main (copied over the branch's), never a script of the checked-out branch.
-  for (const [, script] of yaml.matchAll(/^\s+node (\S+)/gm)) assert.match(script, /^scripts\//);
+  for (const [, script] of yaml.matchAll(/\bnode (\S+\.mjs)/g)) assert.match(script, /^scripts\//);
   assert.ok(yaml.includes("':(exclude).github/workflows'"), 'a generated or changed workflow is never staged');
   const withToken = steps.filter(step => step.includes('github.token')).map(name);
   assert.deepEqual(withToken, ['Commit and push', 'Start the repository CI']);
@@ -75,6 +75,11 @@ test('the dispatched run must exist on exactly the pushed commit; any other run 
   const wrong = start({ dispatched: [`7 ${other}`] });
   assert.notEqual(wrong.status, 0);
   assert.match(wrong.stdout, /another commit/);
+  assert.equal(dispatches(wrong), 1);
+  // The poll lists runs by creation time, not by status: the status filter is what let an ended run through.
+  const poll = ok.ghCalls.split('\n').find(call => call.includes('--event workflow_dispatch'));
+  assert.match(poll, /createdAt >= env\.STARTED/);
+  assert.doesNotMatch(poll, /\.status/);
   // One right and one wrong run: the wrong one fails the job.
   assert.notEqual(start({ dispatched: [`7 ${head}`, `8 ${other}`] }).status, 0);
   // No run ever appears: the job fails instead of trusting the dispatch.
@@ -86,4 +91,46 @@ test('the dispatched run must exist on exactly the pushed commit; any other run 
   assert.notEqual(moved.status, 0);
   assert.equal(dispatches(moved), 0);
   assert.notEqual(start({ dispatchFails: true }).status, 0);
+});
+
+const check = steps.find(step => name(step) === 'Check who changed the branch').split('        run: |\n')[1].replace(/^          /gm, '');
+
+/** The guard step in a real repository: main with some files, then one branch commit by `author`. */
+function guard(change, author = 'renovate[bot]') {
+  const dir = mkdtempSync(join(tmpdir(), 'renovate guard '));
+  const git = (...args) => spawnSync('git', ['-c', 'user.name=x', '-c', 'user.email=x@x', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' });
+  const put = (path, text = 'x\n') => { mkdirSync(join(dir, path, '..'), { recursive: true }); writeFileSync(join(dir, path), text); };
+  git('init', '-q', '-b', 'main');
+  for (const path of ['.github/workflows/repository.yml', 'scripts/a.mjs', 'scripts/ponytail/adaptations.patch', 'renovate.json', '.vendor/pin']) put(path);
+  git('add', '.');
+  git('commit', '-q', '-m', 'main');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  change({ put, git, rename: (from, to) => { mkdirSync(join(dir, to, '..'), { recursive: true }); renameSync(join(dir, from), join(dir, to)); } });
+  git('add', '-A');
+  git('commit', '-q', '--author', `${author} <a@a>`, '-m', 'branch');
+  const env = join(dir, 'env');
+  writeFileSync(env, '');
+  const result = spawnSync(bash, ['-c', check], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_ENV: env.replaceAll('\\', '/') } });
+  const skipped = readFileSync(env, 'utf8').includes('SKIP=true');
+  rmSync(dir, { recursive: true, force: true });
+  return { ...result, skipped };
+}
+
+test('a branch may change the pin and the generated data, nothing that decides what runs with which rights', () => {
+  const ok = guard(({ put }) => { put('.vendor/pin', 'new\n'); put('scripts/ponytail/adaptations.patch', 'new\n'); });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.skipped, false);
+  for (const path of ['.github/workflows/repository.yml', 'scripts/a.mjs', 'renovate.json']) {
+    const changed = guard(({ put }) => put(path, 'changed\n'));
+    assert.notEqual(changed.status, 0, path);
+    assert.match(changed.stdout, /not running with write access/);
+  }
+  // A rename lists only its new path unless renames are switched off: the moved-away workflow must still count.
+  const renamed = guard(({ rename }) => rename('.github/workflows/repository.yml', 'docs/repository.yml'));
+  assert.notEqual(renamed.status, 0);
+  assert.match(renamed.stdout, /\.github\/workflows\/repository\.yml/);
+  // Commits by someone else: the branch is theirs, the job skips instead of running.
+  const foreign = guard(({ put }) => put('scripts/a.mjs', 'changed\n'), 'Mallory');
+  assert.equal(foreign.status, 0, foreign.stderr);
+  assert.equal(foreign.skipped, true);
 });

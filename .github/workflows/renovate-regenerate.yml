@@ -58,7 +58,7 @@ jobs:
           fi
           # Whoever wrote the commits: nothing the job runs or dispatches may differ from main. That is every
           # workflow, script and the Renovate config; the three files the updaters generate are data.
-          forbidden=$(git diff --name-only origin/main...HEAD | grep -E '^(\.github/workflows/|renovate\.json|\.node-version|scripts/)' \
+          forbidden=$(git diff --name-only --no-renames origin/main...HEAD | grep -E '^(\.github/workflows/|renovate\.json|\.node-version|scripts/)' \
             | grep -v -x -e 'scripts/ponytail/adaptations.patch' -e 'scripts/impeccable/VERSION' -e 'scripts/impeccable/SHA256SUMS' || true)
           if [ -n "$forbidden" ]; then
             echo "::error::The branch changes workflows, scripts or Renovate config; not running with write access: $forbidden"
@@ -148,7 +148,8 @@ jobs:
             for _ in 1 2 3 4 5 6; do
               sleep 10
               dispatched=$(STARTED="$started" gh run list --repo "$GITHUB_REPOSITORY" --workflow repository.yml --branch "$BRANCH" --event workflow_dispatch --limit 10 \
-                --json databaseId,headSha,createdAt --jq '.[] | select(.createdAt >= env.STARTED) | "\(.databaseId) \(.headSha)"')
+                --json databaseId,headSha,createdAt --jq '.[] | select(.createdAt >= env.STARTED) | "\(.databaseId) \(.headSha)"') \
+                || dispatched=''   # a transient API error costs one poll, not the step
               [ -n "$dispatched" ] && break
             done
             [ -n "$dispatched" ] || { echo "::error::The dispatched run did not appear; start repository.yml for $BRANCH by hand."; exit 1; }
