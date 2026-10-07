@@ -328,7 +328,7 @@ backlink never closes an issue.
    human; add cases that review uncovers. Pure text or configuration changes need
    no section.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
-   Then mark it Ready for Review with `board.mjs ready PR SHA` (the commit you just
+   Then mark it Ready for Review with `board.mjs ready PR SHA` (the full 40-character id of the commit you just
    pushed: it waits until GitHub reports that head, so CI starts for the right
    revision) and set Automated review with the PR number and
    all delivered issues ([PR backlinks](#pr-backlinks)). Don't wait for optional

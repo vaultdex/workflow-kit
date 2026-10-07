@@ -1375,6 +1375,11 @@ const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
+if (command === 'ready' && Number.isSafeInteger(number) && !/^[0-9a-f]{40}$/i.test(value ?? '')) {
+  // A short id is what git log shows; naming the reason saves the trip through the usage line.
+  console.error(`ready needs the full 40-character commit id (git rev-parse HEAD), not ${value ? `"${value}"` : 'nothing'}`);
+  process.exit(2);
+}
 if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
