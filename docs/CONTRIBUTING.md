@@ -91,7 +91,10 @@ technical names exact. Before creating one, search open and closed issues and PR
 instead of duplicating it. Separate deliverables need separate issues before
 branching; a kit change and its consumer update are two issues.
 
-Use the issue form's sections:
+Use the issue form's sections. A spec or longer task uses the form „Spec oder längere
+Aufgabe“: the same sections, with the required **Kurz gesagt** first
+([Einfache Sprache](#einfache-sprache)). The form sets the title prefix `(Spec) ` and
+the label `spec`; a spec created another way gets both by hand.
 
 - **Wofür brauchen wir das?** The evidenced problem; for bugs, reproduction and
   expected behavior.
@@ -182,7 +185,8 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
   Abnahmekriterien bleiben.
 - Specs und längere Issues beginnen mit `## Kurz gesagt` (nach `## Menschliche
   Mitwirkung nötig`, falls vorhanden): 2 bis 4 Sätze, was heute stört, was anders wird und
-  wer es merkt.
+  wer es merkt. Eine Spec trägt außerdem den Titelpräfix `(Spec) ` und das Label `spec`;
+  das Formular „Spec oder längere Aufgabe“ setzt beides.
 - PRs und Kommentare beginnen mit dem Ergebnis in einem Satz, Details danach. Das gilt
   auch für den [Übergabekommentar](../README.md#handoff-comment). Maschinell erzeugte
   Kommentare wie der Backlink von `board.mjs link` sind ausgenommen. Ein Hinweis, den
@@ -304,8 +308,13 @@ backlink never closes an issue.
    findings that block or regress (as defined above) and a red required CI are still corrected.
 5. After the last automatic correction, run the project's expensive final proof if
    it defines one, and record the tested commit. Reuse proof only while its inputs
-   are unchanged. Then run a retro once per PR: apply the retro skill
-   (`.agents/skills/retro/SKILL.md`) to your own session. Fix findings within the
+   are unchanged. Then run a retro once per PR: call the `retro` skill with the Skill
+   tool (the kit's copy is invocable; if the tool still refuses, your checkout is
+   older than the kit pin that fixed it, so update it, and don't substitute a short
+   review). Its sources are your own session: the commands you ran, failed attempts
+   and retries, tool refusals and errors, waiting times and the files you had to
+   search for. "Present these candidates to the user" means the finding list in the
+   handoff comment. Fix findings within the
    issue's scope through step 4; record the rest as follow-up issues in the
    repository that owns the fix, with evidence from the session. Report findings
    about personal configuration (memory, shell profile, scheduled tasks) to the

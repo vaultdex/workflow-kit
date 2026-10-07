@@ -43,6 +43,9 @@ test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local so
   const expected = new Map(tracked.filter(path => skillTrees.some(skill => path.startsWith(`${skill}/`)))
     .map(path => [path.split('/').slice(2).join('/'), readFileSync(join(source, path), 'utf8').replaceAll('\r\n', '\n')]));
   assert.ok(expected.size >= skillTrees.length, 'Every skill has its files in the package');
+  // The one deviation from upstream: agents may invoke retro; every other skill keeps its flags.
+  const flag = /^disable-model-invocation: true\n/m;
+  expected.set('retro/SKILL.md', expected.get('retro/SKILL.md').replace(flag, ''));
   write(join(consumer, '.agents/skills/ask-matt/LOCAL.md'), 'Keep my local work\n');
   write(join(consumer, '.agents/skills/project-custom/SKILL.md'), 'Keep unrelated skill\n');
   write(join(consumer, '.agents/skills/retired-skill/SKILL.md'), 'Retired upstream skill\n');
@@ -81,6 +84,10 @@ test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local so
     }
   };
   verify(consumer);
+  for (const provider of providers) {
+    assert.doesNotMatch(readFileSync(join(consumer, provider, 'skills/retro/SKILL.md'), 'utf8'), flag, `${provider} retro is invocable`);
+    assert.match(readFileSync(join(consumer, provider, 'skills/ask-matt/SKILL.md'), 'utf8'), flag, `${provider} ask-matt stays user-only`);
+  }
   const backups = join(consumer, '.workflow-kit/replaced');
   assert.equal(files(backups).filter(path => path.endsWith('/LOCAL.md')).length, 1);
   assert.equal(readFileSync(join(backups, files(backups).find(path => path.endsWith('/LOCAL.md'))), 'utf8'), 'Keep my local work\n');

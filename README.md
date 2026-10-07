@@ -23,7 +23,10 @@ node .vendor/workflow-kit/scripts/setup-skills.mjs             # skills for ever
 
 Without `--existing`, `init-project` also creates the starter files (AGENTS.md,
 CONTRIBUTING.md, issue and PR templates) that are missing; afterwards they belong to
-the project and are never overwritten.
+the project and are never overwritten. A template that a kit update adds later does not
+reach an existing project: copy it by hand. For the spec form that is
+`.vendor/workflow-kit/templates/.github/ISSUE_TEMPLATE/spec.yml` to `.github/ISSUE_TEMPLATE/`,
+plus the label `spec` (`gh label create spec`), which the form sets.
 
 To update, move the gitlink first. `git submodule update` checks out the commit the
 index records, so run after a bump it silently puts the old kit back, and the
