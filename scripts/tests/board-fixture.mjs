@@ -47,12 +47,15 @@ export function fixture(t) {
       rmSync(file, { force: true });
       return sent;
     },
-    // An unknown flag ends in the usage line before gh is called: every gh call leaves a file in the checkout, so none may appear.
+    // An unknown flag, long or short, or a word the command does not take ends in the usage line before gh is called:
+    // every gh call leaves a file in the checkout, so none may appear. `field` takes any number of pairs, so it only uses the flags.
     refusesUnknownFlag: (...args) => {
-      const before = readdirSync(checkout).sort();
-      const result = board.run(...args, '--oops');
-      assert.equal(result.status, 2, `${args[0]} --oops: ${result.stdout}${result.stderr}`);
-      assert.deepEqual(readdirSync(checkout).sort(), before, `${args[0]} --oops reached gh`);
+      for (const extra of args[0] === 'field' ? ['--oops', '-x'] : ['--oops', '-x', 'extra']) {
+        const before = readdirSync(checkout).sort();
+        const result = board.run(...args, extra);
+        assert.equal(result.status, 2, `${args[0]} ${extra}: ${result.stdout}${result.stderr}`);
+        assert.deepEqual(readdirSync(checkout).sort(), before, `${args[0]} ${extra} reached gh`);
+      }
     },
   };
   return board;
