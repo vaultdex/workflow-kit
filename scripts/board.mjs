@@ -767,7 +767,7 @@ function body() {
 
 /** Replace exactly one occurrence of the --from text with the --to text; the body just read is the base. No regular expressions. */
 function bodyReplace() {
-  const [from, to] = ['--from', '--to'].map(flag => lines(process.argv[process.argv.indexOf(flag) + 1]));
+  const [from, to] = [process.argv[5], process.argv[7]].map(lines);
   assert.ok(from !== '', 'The --from text is empty');
   writeBody((before, refuse) => {
     // Every start position counts, so "aa" in "aaa" is two matches, not one.

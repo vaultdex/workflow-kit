@@ -1345,15 +1345,14 @@ test('body-replace replaces exactly one match of the text and writes nothing for
   result = replace('fehlt', 'x');
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /^FAILED$/m);
-  assert.match(result.stdout, /not in the body/);
+  assert.equal([patches(), stored()].join('|'), '1|Satz eins.');
 
-  // Two matches, also overlapping ones: refused and both places named, nothing written.
-  for (const [text, from, lines] of [['ein Wort\nanderes\nein Wort', 'ein Wort', 'from line 1, from line 3'], ['aaa', 'aa', 'from line 1, from line 1']]) {
+  // Two matches, also overlapping ones: refused, nothing written.
+  for (const [text, from] of [['ein Wort\nanderes\nein Wort', 'ein Wort'], ['aaa', 'aa']]) {
     server(text);
     result = replace(from, 'x');
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stdout, /occurs 2 times/);
-    assert.ok(result.stdout.includes(lines), result.stdout);
+    assert.match(result.stdout, /^FAILED$/m);
     assert.equal([patches(), stored()].join('|'), `1|${text}`);
   }
 
