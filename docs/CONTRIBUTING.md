@@ -44,6 +44,12 @@ another session than `--session`, `check` reports BLOCKED with agent, session, t
 Without `--session`, or when the newest claim is an old one that lacks the field (no known session), `check` only shows a note. Unreadable
 comments are UNKNOWN. Assignment stays no lock; this check only reports, and `status` and `handoff` do not read claims.
 
+**Claim-Alter und Sub-Issues.** Nur Information, kein neues Verdict und keine Erlaubnis zur Übernahme (die braucht
+weiter eine ausdrückliche Übergabe). Bei einem bekannten Claim nennt `check` danach Alter und PR-Lage, etwa
+`claim: 2d 4h ago (Session S1), open PR: none` oder `open PR: #123` (offene PRs mit Closing-Link auf das Issue).
+Hat das Issue native Sub-Issues, folgt pro Sub-Issue eine Zeile `#N  Status  Assignee  Verdict` mit der Logik des
+Verdicts oben, ohne Claims; sie ändern das Verdict des Issues nicht.
+
 STARTABLE covers native prerequisites, not permission or ownership. Also inspect
 **Abhängigkeiten und Wiederaufnahme** for external access, releases and decisions.
 `status ISSUE "In progress"` repeats this check and requires assignment to the

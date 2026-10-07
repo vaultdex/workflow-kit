@@ -18,10 +18,15 @@ function graphql(query, variables = {}) {
   return JSON.parse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 })).data;
 }
 
-const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
-  id number title state body bodyHTML assignees(first:10){nodes{login}}
+// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query.
+const issueFields = `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
-  blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}}}}`;
+  blockedBy(first:100){totalCount nodes{number state stateReason repository{nameWithOwner}}}`;
+// ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
+const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
+  ${issueFields} bodyHTML
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
+  subIssues(first:100){totalCount nodes{${issueFields}}}}}}`;
 const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
@@ -104,10 +109,11 @@ function claimReasons(issue, session) {
   if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
   else if (holder && !session) notes.push(`newest claim: ${about(holder)}; pass --session ID to compare it with yours`);
   if (legacy) notes.push(`claim without Agent/Session field, session unknown: ${legacy.html_url}`);
-  return { blocked, notes };
+  return { blocked, notes, claim: holder ?? (legacy && { session: undefined, comment: legacy }) };
 }
 
-function check(issue = readIssue(), claims) {
+/** Verdict inputs of one issue, shared by the issue itself and its sub-issues. */
+function issueReasons(issue) {
   const status = projectItem(issue)?.status?.name;
   const blocked = [], unknown = [];
   if (issue.state !== 'OPEN') blocked.push('issue is closed');
@@ -121,19 +127,45 @@ function check(issue = readIssue(), claims) {
   const waits = waitReasons(issue.body);
   blocked.push(...waits.blocked);
   unknown.push(...waits.unknown);
+  return { status, blocked, unknown };
+}
+const verdictOf = ({ blocked, unknown }) => blocked.length ? 'BLOCKED' : unknown.length ? 'UNKNOWN' : 'STARTABLE';
+// #N in the project's repository, OWNER/REPO#N elsewhere: a bare number must never name a same-number issue or PR of another repository.
+const refOf = (repository, number) => `${repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() ? '' : repository.nameWithOwner}#${number}`;
+const logins = issue => issue.assignees.nodes.map(assignee => assignee.login).join(', ');
+const ago = ms => {
+  const minutes = Math.max(0, Math.floor(ms / 60_000)), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60);
+  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+};
+
+/** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
+function check(issue = readIssue(), claims) {
+  const { status, blocked, unknown } = issueReasons(issue);
   const notes = [];
+  let claim;
   if (claims) try {
     const found = claimReasons(issue, claims.session);
     blocked.push(...found.blocked);
     notes.push(...found.notes);
+    claim = found.claim;
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
-  let verdict = 'STARTABLE';
-  if (unknown.length) verdict = 'UNKNOWN';
-  if (blocked.length) verdict = 'BLOCKED';
-  const assignees = issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none';
-  console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${assignees}\n${verdict}`);
+  const verdict = verdictOf({ blocked, unknown });
+  console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
   for (const note of notes) console.log(`note: ${note}`);
+  if (claim) {
+    const linked = issue.closedByPullRequestsReferences;
+    const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => refOf(pr.repository, pr.number));
+    // A list cut at 100 is never presented as complete.
+    const cut = linked?.totalCount > linked?.nodes?.length ? ` (first ${linked.nodes.length} of ${linked.totalCount})` : '';
+    console.log(`claim: ${ago(Date.now() - Date.parse(claim.comment.created_at))} ago (Session ${claim.session ?? 'unknown'}), open PR: ${prs ? prs.join(', ') || 'none' : 'unknown'}${cut}`);
+  }
+  if (claims && issue.subIssues?.nodes?.length) {
+    if (issue.subIssues.totalCount > issue.subIssues.nodes.length) console.log(`note: ${issue.subIssues.nodes.length} of ${issue.subIssues.totalCount} sub-issues listed`);
+    for (const child of issue.subIssues.nodes) {
+      console.log(`${refOf(child.repository, child.number)}  ${projectItem(child)?.status?.name ?? '-'}  ${logins(child) || '-'}  ${verdictOf(issueReasons(child))}`);
+    }
+  }
   process.exitCode = { STARTABLE: 0, BLOCKED: 1, UNKNOWN: 2 }[verdict];
   return verdict;
 }

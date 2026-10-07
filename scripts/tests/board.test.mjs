@@ -1263,3 +1263,41 @@ test('sub links a child once, reads the parent back and refuses bad or unconfirm
   assert.notEqual(lost.status, 0, 'A link GitHub does not show back is never reported as done');
   assert.doesNotMatch(lost.stdout, /has sub-issue/);
 });
+
+test('board check lists the sub-issues of a spec with status, assignee and verdict, and leaves the verdict of the parent alone', t => {
+  const { run, writeIssue } = fixture(t);
+  const child = (number, status, nodes, assignee, changes) => ({ ...issue(status, nodes), number, repository: { nameWithOwner: 'test/example' },
+    assignees: { nodes: assignee ? [{ login: assignee }] : [] }, ...changes });
+  const spec = (...children) => ({ ...issue(), subIssues: { totalCount: children.length, nodes: children } });
+
+  writeIssue(spec(child(11, 'In progress', [], 'worker'), child(12, 'Ready', [predecessor('OPEN', null)])));
+  const result = run('check', '1', '--session', 'S1');
+  assert.equal(result.status, 0, 'Sub-issues never change the verdict of the parent');
+  const lines = result.stdout.split('\n');
+  assert.equal(lines.at(-3), '#11  In progress  worker  STARTABLE', result.stdout);
+  assert.equal(lines.at(-2), '#12  Ready  -  BLOCKED', result.stdout);
+
+  writeIssue(spec(child(13, 'Backlog', []), child(14, 'Ready', [], 'worker', { repository: { nameWithOwner: 'test/other' } })));
+  assert.match(run('check', '1', '--session', 'S1').stdout, /^#13 {2}Backlog {2}- {2}BLOCKED\ntest\/other#14 {2}Ready {2}worker {2}STARTABLE$/m);
+  writeIssue(issue());
+  assert.doesNotMatch(run('check', '1', '--session', 'S1').stdout, /#\d+ {2}/, 'No sub-issues, no rows');
+});
+
+test('board check shows the age of a claim and whether a linked PR is open', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const claimedAgo = ms => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' },
+    body: 'Claim\n\nAgent: claude, Session: S1', html_url: 'https://example.test/c1', created_at: new Date(Date.now() - ms).toISOString() }]));
+  const withPrs = prs => writeIssue({ ...issue(), closedByPullRequestsReferences: { nodes: prs } });
+
+  claimedAgo((2 * 24 + 4) * 3_600_000 + 30 * 60_000);
+  withPrs([]);
+  assert.match(run('check', '1', '--session', 'S1').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: none$/m);
+  withPrs([{ number: 123, state: 'OPEN', repository: { nameWithOwner: 'Test/Example' } }, { number: 99, state: 'MERGED', repository: { nameWithOwner: 'test/example' } }, { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/other' } }]);
+  assert.match(run('check', '1', '--session', 'S2').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: #123, test\/other#7$/m, 'Shown to other sessions too; foreign PRs are qualified');
+  claimedAgo(5 * 60_000 + 10_000);
+  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #123, test\/other#7$/m);
+  writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: 150, nodes: [{ number: 5, state: 'OPEN', repository: { nameWithOwner: 'test/example' } }] } });
+  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #5 \(first 1 of 150\)$/m, 'A cut list says so');
+  writeFileSync(join(checkout, 'issues-comments.json'), '[]');
+  assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');
+});
