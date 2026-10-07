@@ -82,6 +82,9 @@ ERROR; omit the field instead. The script keeps these settings too.
 review bot may start late (`"reviewerGraceMinutes"`, default 3). The wait ends sooner when a required bot has answered on
 the head, a limit notice included. A project whose bots do not start on their own sets
 `"reviewerGraceMinutes": 0`; a non-number or negative value is an ERROR.
+`"selfReview"` lists the self-checks the PR body must name in its `## Selbstprüfung` section before
+`board.mjs handoff` or `merge` passes, for example `"selfReview": ["ponytail-review", "code-review"]`; omit it to ask
+nothing. A `null` or other non-list value is an ERROR.
 Likewise `"requiredFields": ["Size"]` names Project fields that
 `board.mjs new` demands besides Priority.
 

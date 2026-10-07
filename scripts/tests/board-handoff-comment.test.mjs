@@ -122,6 +122,66 @@ test('handoff needs a retro section whose every line ends with its resolution', 
 });
 
 
+// The PR body as GitHub renders it: headings and paragraphs, with the checks the "selfReview" field of the project file lists.
+const selfReview = (level, ...lines) => `<h${level} dir="auto">Selbstprüfung</h${level}>\n` + lines.map(line => `<p dir="auto">${line}</p>`).join('\n');
+
+test('handoff needs the Selbstprüfung section of the PR body to name every check the project lists, and nothing without the field', t => {
+  const { checkout, run, writeIssue } = handoffFixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  const config = join(checkout, '.github/workflow-project.json'), plain = JSON.parse(readFileSync(config, 'utf8'));
+  const project = changes => writeFileSync(config, JSON.stringify({ ...plain, ...changes }));
+  const handoff = (bodyHTML, changes = { selfReview: ['ponytail-review', 'code-review'] }) => {
+    project(changes);
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ bodyHTML })));
+    return run('handoff', '1', '7');
+  };
+  const both = '<code>ponytail-review</code>: nichts mehr zu streichen. <code>code-review</code>: ein Fund, behoben.';
+  // The reason names what is missing; one run also lists the other missing point (the open box), so one fix round is enough.
+  const rejected = (bodyHTML, named, label) => {
+    const result = handoff(bodyHTML);
+    assert.equal(result.status, 1, label + result.stdout + result.stderr);
+    const blockers = result.stdout.split('\n').filter(line => line.startsWith('blocker:'));
+    assert.equal(blockers.length, 2, label + result.stdout);
+    for (const name of named) assert.ok(blockers.some(line => line.includes('Selbstprüfung') && line.includes(name)), label + result.stdout);
+    assert.equal(existsSync(join(checkout, 'mutations')), false, label + 'Rejected handoff never mutates status');
+  };
+  const checks = ['ponytail-review', 'code-review'];
+
+  rejected('<p>Beschreibung</p>', checks, 'no section: ');
+  rejected(`<h2 dir="auto">Reviews</h2>\n<p>${both}</p>`, checks, 'the names under another heading: ');
+  rejected(`<blockquote>\n${selfReview(2, both)}\n</blockquote>`, checks, 'a quoted template is no section: ');
+  rejected(selfReview(2, '<code>pony</code>', '<code>tail-review</code>', 'code-review: ok'), ['ponytail-review'], 'names split across paragraphs do not join: ');
+  rejected(selfReview(2, '<code>code-review</code>: ein Fund.'), ['ponytail-review'], 'one check missing: ');
+  rejected(selfReview(2, 'ponytail-review: ok', 'code-reviewÄnderung'), ['code-review'], 'a Unicode suffix is part of the word: ');
+
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  for (const [html, label] of [
+    [selfReview(2, both), 'both names'],
+    [`<p>Intro</p>\n${selfReview(3, 'ponytail-review, CODE-REVIEW')}\n<h2 dir="auto">Randfälle</h2>`, 'a level-3 heading, any case'],
+    [`${selfReview(2)}\n<h3 dir="auto">ponytail-review</h3>\n<p>ok</p>\n<h3 dir="auto">code-review</h3>\n<p>ok</p>`, 'sub-headings belong to the section'],
+  ]) {
+    const result = handoff(html);
+    assert.equal(result.status, 0, label + ': ' + result.stdout + result.stderr);
+  }
+  // Without the field, or with an empty list, a PR body without the section hands off as before; a malformed field is an ERROR.
+  for (const changes of [{}, { selfReview: [] }]) {
+    const result = handoff(undefined, changes);
+    assert.equal(result.status, 0, JSON.stringify(changes) + result.stdout + result.stderr);
+  }
+  for (const bad of [null, 'ponytail-review', [''], [1]]) assert.equal(handoff(selfReview(2, both), { selfReview: bad }).status, 2, JSON.stringify(bad));
+  assert.equal(handoff(undefined).status, 2, 'An unreadable rendered PR body is unknown, never a handoff');
+
+  const pending = { reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { login: 'reviewer' } }] },
+    requestEvents: { totalCount: 1, nodes: [{ createdAt: new Date().toISOString(), requestedReviewer: { login: 'reviewer' } }] } };
+  project({ selfReview: ['ponytail-review'] });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ ...pending, bodyHTML: undefined })));
+  assert.equal(run('handoff', '1', '7').status, 2, 'An unreadable PR body is an error even while a reviewer is pending');
+  project({ selfReview: null });
+  assert.equal(run('handoff', '1', '7').status, 2, 'A malformed config is an error even while a reviewer is pending');
+});
+
+
 test('handoff blocks on open Sonar issues behind a passed quality gate and never reads an unreadable count as clean', t => {
   const { checkout, run, writeIssue, env } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
