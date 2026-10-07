@@ -45,6 +45,25 @@ test('with a project file the command lists its entries; without one nothing cha
   assert.equal((await ask()).stdout, './gradlew :domain:test\n');
 });
 
+test('--run prints no line per test or command when green, and the output of the failure when red', async t => {
+  const script = fileURLToPath(new URL('../affected-tests.mjs', import.meta.url));
+  const { NODE_TEST_CONTEXT, ...outside } = process.env; // inside `node --test`, a nested one would report to its parent
+  const green = await run(process.execPath, [script, '--run', 'README.md'], { cwd: fileURLToPath(new URL('../..', import.meta.url)), env: outside });
+  assert.equal(green.status, 0);
+  assert.match(green.stdout, /^ℹ tests \d+\nℹ pass \d+\nℹ fail 0\n$/);
+  const project = temporary(t, 'affected-tests-');
+  mkdirSync(join(project, '.git'));
+  mkdirSync(join(project, '.github'));
+  const map = JSON.stringify({ 'a/**': 'node -e "console.log(process.env.OUT); process.exit(Number(process.env.FAIL || 0))"' });
+  writeFileSync(join(project, '.github/affected-tests.json'), map);
+  const ask = env => run(process.execPath, [script, '--run', 'a/B.java'], { cwd: project, env: { ...outside, ...env } });
+  const ok = await ask({ OUT: 'chatter' });
+  assert.deepEqual([ok.status, ok.stdout.trim().startsWith('ok: ')], [0, true], ok.stdout);
+  assert.ok(!ok.stdout.includes('chatter'));
+  const red = await ask({ OUT: 'broken output', FAIL: '1' });
+  assert.deepEqual([red.status, red.stdout.trim()], [1, 'broken output']);
+});
+
 test('a project entry without a command is refused', t => {
   const project = temporary(t, 'affected-tests-');
   mkdirSync(join(project, '.github'));

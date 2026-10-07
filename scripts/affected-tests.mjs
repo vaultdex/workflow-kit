@@ -4,6 +4,7 @@
 // The mapping is the plain table below: explicit, no import analysis. CI keeps running the whole suite.
 // A project adds its own map in .github/affected-tests.json (see README); its commands are printed after the kit's tests
 // (`--base REF` replaces origin/main as the merge base, for projects that target release branches).
+// `--run` stays quiet when green (test counts, `ok: <command>`) and shows the failing output otherwise; `--verbose` shows it all.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
@@ -92,8 +93,20 @@ export function projectCommands(files, map) {
   return [...new Set(Object.entries(map).filter(([pattern]) => files.some(file => glob(pattern).test(file))).flatMap(([, value]) => [value].flat()))];
 }
 
+/**
+ * Runs a command and returns its exit status. Unless `verbose`, its output stays hidden: a green run prints `ok` (or the
+ * output lines matching `summary`), a red one prints everything except the lines matching `noise`.
+ */
+export function quiet(verbose, command, args, options, { summary, noise, ok } = {}) {
+  if (verbose) return spawnSync(command, args, { ...options, stdio: 'inherit' }).status ?? 1;
+  const result = spawnSync(command, args, { ...options, encoding: 'utf8', maxBuffer: 1 << 28 });
+  const lines = `${result.stdout ?? ''}${result.stderr ?? ''}`.split('\n');
+  console.log(result.status === 0 ? ok ?? lines.filter(line => summary.test(line)).join('\n') : lines.filter(line => !noise?.test(line)).join('\n').trim());
+  return result.status ?? 1;
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  const { values, positionals: given } = parseArgs({ allowPositionals: true, options: { run: { type: 'boolean' }, base: { type: 'string', default: 'origin/main' } } });
+  const { values, positionals: given } = parseArgs({ allowPositionals: true, options: { run: { type: 'boolean' }, verbose: { type: 'boolean' }, base: { type: 'string', default: 'origin/main' } } });
   // A project that uses the kit as a submodule: kit tests follow the kit's own changes, the project map the project's.
   const root = projectRoot(), inKit = realpathSync.native(root) === realpathSync.native(kit);
   const kitFiles = given.length ? (inKit ? given : []) : changedFiles(inKit ? values.base : undefined, kit);
@@ -103,7 +116,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   if (!values.run) { if (selected.length || commands.length) console.log([...selected, ...commands].join('\n')); }
   else if (!selected.length && !commands.length) console.log('no affected tests');
   else {
-    if (selected.length) process.exitCode = spawnSync(process.execPath, ['--test', ...selected], { cwd: kit, stdio: 'inherit' }).status ?? 1;
-    for (const command of commands) if (!process.exitCode) process.exitCode = spawnSync(command, { cwd: root, shell: true, stdio: 'inherit' }).status ?? 1;
+    if (selected.length) process.exitCode = quiet(values.verbose, process.execPath, ['--test', ...selected], { cwd: kit }, { summary: /^ℹ (tests|pass|fail) /, noise: /^(start: |✔ )/ });
+    for (const command of commands) if (!process.exitCode) process.exitCode = quiet(values.verbose, command, [], { cwd: root, shell: true }, { ok: `ok: ${command}` });
   }
 }
