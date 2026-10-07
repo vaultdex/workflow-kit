@@ -1532,7 +1532,7 @@ function handoffIssueReasons(issue, viewer, reviewedHead, currentPrNumber) {
       if (pr?.baseRefName !== stackedOn.headRefName) reasons.push(`the open predecessor PR #${stackedOn.number} is not merged: PR #${value} must target its branch ${stackedOn.headRefName}, not ${pr?.baseRefName}`);
     }
   }
-  if (!['Automated review', 'Human review'].includes(status)) reasons.push('finish implementation and Automated review first');
+  if (!['Automated review', 'Human review'].includes(status)) reasons.push(`status is ${status ?? 'unset'}: when the work is done, run board.mjs status ISSUE "Automated review" PR, then post a new handoff comment for the current head`);
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
     reasons.push('the issue is not assigned to the authenticated driver');
   }
