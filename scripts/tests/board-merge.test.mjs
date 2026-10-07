@@ -125,13 +125,18 @@ test('merge merges a base that moved under the same files into the PR branch, wa
   assert.deepEqual(calls(), [`update-branch ${first}`]);
 
   // A PR with stacked children: GitHub answers 403 to the update. Nothing is merged or pushed; the manual way is named.
-  show();
-  json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
-  writeFileSync(join(checkout, 'update-fails'), '403');
-  const stacked = run('merge', '7');
-  assert.equal(stacked.status, 1, stacked.stdout + stacked.stderr);
-  assert.match(stacked.stdout, /^blocker: .*`git merge origin\/\S+`.*`board\.mjs merge 7`/m);
-  assert.deepEqual(calls(), [`update-branch ${first}`]);
+  // The exact text of GitHub (#332), with and without its status code.
+  for (const kind of ['403', 'no-code']) {
+    show();
+    json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
+    writeFileSync(join(checkout, 'update-fails'), kind);
+    const stacked = run('merge', '7');
+    assert.equal(stacked.status, 1, kind + stacked.stdout + stacked.stderr);
+    assert.match(stacked.stdout, /^blocker: .*`git merge origin\/\S+`.*`board\.mjs merge 7`/m);
+    // The raw refusal of gh is not copied to stderr: a caller that reads the last line of the output sees the instruction.
+    assert.equal(stacked.stderr, '');
+    assert.deepEqual(calls(), [`update-branch ${first}`]);
+  }
 });
 
 test('merge falls back to merge-async with the checked head when gh refuses a PR with stacked children, and reads the merge back', t => {
@@ -144,10 +149,24 @@ test('merge falls back to merge-async with the checked head when gh refuses a PR
     if (late) flag('merge-async-late');
     const result = run('merge', '7', '--interval', '0');
     assert.equal(result.status, 0, `late ${late}: ${result.stdout}${result.stderr}`);
+    assert.equal(result.stderr, '', 'the refusal handled by merge-async is not copied to stderr');
     assert.deepEqual(calls(), ['merge', 'merge-async', 'delete claude/7-topic']);
     assert.equal(asyncMerges(), `merge_action=direct_merge merge_method=merge sha=${first}\n`);
     assert.match(result.stdout, new RegExp(`^MERGED #7 head ${first} `, 'm'));
   }
+  // The REST merge answers a stack with HTTP 403.
+  show();
+  writeFileSync(join(checkout, 'merge-403'), 'gh: Forbidden (HTTP 403)');
+  const rest = run('merge', '7', '--interval', '0');
+  assert.equal(rest.status, 0, rest.stdout + rest.stderr);
+  assert.match(rest.stdout, new RegExp(`^MERGED #7 head ${first} `, 'm'));
+  assert.deepEqual(calls(), ['merge', 'merge-async', 'delete claude/7-topic']);
+  // A "forbidden" without stack reference is a plain refusal: an error, no merge-async.
+  show();
+  writeFileSync(join(checkout, 'merge-403'), 'GraphQL: Resource not accessible by integration (forbidden)');
+  const plain = run('merge', '7');
+  assert.equal(plain.status, 2, plain.stdout + plain.stderr);
+  assert.deepEqual(calls(), ['merge']);
   // merge-async refused too: an error, no third try.
   show();
   flag('merge-403');
@@ -182,4 +201,8 @@ test('merge deletes the head branch only when nothing else needs it, and the mer
   show({ mergeStateStatus: 'DIRTY' });
   assert.equal(run('merge', '7').status, 1);
   assert.deepEqual(calls(), []);
+});
+
+test('merge refuses an unknown flag before any write', t => {
+  fixture(t).refusesUnknownFlag('merge', '7');
 });

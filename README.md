@@ -156,6 +156,9 @@ the project from that directory instead. Other relative paths (`--body-file`) st
 `init-project.mjs`, `setup-skills.mjs` and `affected-tests.mjs` take the same first argument (`takeCwd` in `checkout-root.mjs`),
 and then work in that directory, their relative paths (changed files given to `affected-tests.mjs`) included:
 
+- `--help` (any command) prints the usage and exits 0 without calling GitHub. A writing command (`status`, `priority`, `field`, `new`,
+  `block`, `sub`, `link`, `body`, `body-replace`, `ready`, `handoff`, `merge`) refuses any `--flag` it does not take with the usage line
+  (exit 2) before it reads or writes anything.
 - `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open
   predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);
   `next` lists such issues apart, with the base PR; shows the age and open PR of a claim and one line per
@@ -292,7 +295,7 @@ and then work in that directory, their relative paths (changed files given to `a
   an overlap does not hold the merge. If GitHub refuses that update with 403 (a PR with stacked children), `merge` ends
   `FAILED` (exit 1) and tells you to run `git merge origin/<base>` in the PR's worktree, push once and call `merge` again;
   it never pushes for you. Then it runs `gh pr merge --merge
-  --match-head-commit <full head id>` once (a push after the check makes gh refuse; a 403 of a PR with stacked children
+  --match-head-commit <full head id>` once (a push after the check makes gh refuse; a refusal of a PR with stacked children ("part of a stack", "asynchronous merge REST API" or HTTP 403)
   goes once to `PUT pulls/N/merge-async` with `merge_action=direct_merge`, `merge_method=merge` and `sha` = the same head,
   and the merge is read back until it shows) and counts
   only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; any other gh
@@ -469,4 +472,6 @@ including skills and hooks ([#244](https://github.com/vaultdex/workflow-kit/issu
 risk is accepted: vendored skills and hooks steer agents or load executable code, and nobody
 reads them before the merge. `platformAutomerge` is off; `main` is protected by the "Reviewed
 main" ruleset requiring the "Workflow Kit checks" verification. Renovate treats a head without
-any check as pending, so it waits for the regenerated commit's CI run.
+any check as pending, so it waits for the regenerated commit's CI run. `rebaseWhen` is
+`conflicted`: the ruleset does not require up-to-date branches, and constant rebases after every
+`main` merge kept CI pending whenever Renovate checked, so the automerge never fired.

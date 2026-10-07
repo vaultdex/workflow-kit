@@ -27,3 +27,9 @@ test('sub links a child once, reads the parent back and refuses bad or unconfirm
   assert.notEqual(lost.status, 0, 'A link GitHub does not show back is never reported as done');
   assert.doesNotMatch(lost.stdout, /has sub-issue/);
 });
+
+test('sub and block refuse an unknown flag before any write', t => {
+  const { refusesUnknownFlag } = fixture(t);
+  refusesUnknownFlag('sub', '1', 'test/other#6');
+  refusesUnknownFlag('block', '1', 'test/other#6');
+});

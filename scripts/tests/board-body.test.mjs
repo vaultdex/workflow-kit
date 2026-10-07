@@ -105,3 +105,9 @@ test('body-replace replaces exactly one match of the text and writes nothing for
   assert.equal(run('body-replace', '1', '--to', 'to.md', '--from', 'from.md').status, 2);
   assert.equal(patches(), 1);
 });
+
+test('body and body-replace refuse an unknown flag before any write', t => {
+  const { refusesUnknownFlag } = fixture(t);
+  refusesUnknownFlag('body', '1', 'change.md', 'base.md');
+  refusesUnknownFlag('body-replace', '1', '--from', 'from.md', '--to', 'to.md');
+});

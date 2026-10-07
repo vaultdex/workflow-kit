@@ -8,6 +8,7 @@
   "automerge": true,
   "automergeType": "pr",
   "platformAutomerge": false,
+  "rebaseWhen": "conflicted",
   "git-submodules": {
     "enabled": true
   },

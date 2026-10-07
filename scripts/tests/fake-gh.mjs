@@ -74,8 +74,12 @@ function api(argv, input, stdout, stderr, exit) {
       // update-fails: GitHub refuses (conflict, or the head is not the expected one). Otherwise the base is part of the branch now;
       // the new head shows through pr-reads.json, which GitHub also shows late.
       fs.appendFileSync('calls', `update-branch ${argv.find(arg => arg.startsWith('expected_head_sha=')).slice(18)}\n`);
-      // update-fails: GitHub refuses; "403" in the file: the refusal of a PR with stacked children.
-      if (fs.existsSync('update-fails')) { stderr(fs.readFileSync('update-fails', 'utf8') === '403' ? 'gh: Forbidden (HTTP 403)\n' : 'gh: merge conflict (HTTP 422)\n'); exit(1); }
+      // update-fails: GitHub refuses; "403" in the file: the refusal of a PR with stacked children, "no-code": the same text without the status.
+      if (fs.existsSync('update-fails')) {
+        const kind = fs.readFileSync('update-fails', 'utf8'), text = 'Updating a stacked PR\'s branch via this endpoint is not supported.';
+        stderr(kind === '403' ? `gh: ${text} (HTTP 403)\n` : kind === 'no-code' ? `gh: ${text}\n` : 'gh: merge conflict (HTTP 422)\n');
+        exit(1);
+      }
       fs.rmSync('compare.json', { force: true });
       stdout('{"message":"Updating pull request branch."}');
       exit(0);
@@ -111,6 +115,7 @@ function api(argv, input, stdout, stderr, exit) {
     }
     if (parts[3] === 'stacks') {
       // The stack read-back: by default PR 5 and PR 7 are linked in one open stack.
+      if (fs.existsSync('fail-stacks')) exit(1);
       stdout(fs.existsSync('stacks.json') ? fs.readFileSync('stacks.json') : '[]');
       exit(0);
     }
@@ -330,14 +335,16 @@ function api(argv, input, stdout, stderr, exit) {
         nodes: pages[index].map(id => id === null ? null : { id }) } } } };
   }
   else if (query.includes('pullRequest(number')) {
-    if (fs.existsSync('pr-reads.json')) {
+    const number = Number(argv.find(arg => arg.startsWith('number='))?.slice(7));
+    if (number === 7 && fs.existsSync('pr-reads.json')) {
       // Each read takes the next prepared overlay and the last one stays: metadata that catches up after a push.
       const reads = JSON.parse(fs.readFileSync('pr-reads.json'));
       const overlay = reads.length > 1 ? reads.shift() : reads[0];
       fs.writeFileSync('pr-reads.json', JSON.stringify(reads));
       fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...overlay }));
     }
-    data = { repository: { pullRequest: JSON.parse(fs.readFileSync('pr.json')) } };
+    const stackPrs = fs.existsSync('stack-prs.json') ? JSON.parse(fs.readFileSync('stack-prs.json')) : {};
+    data = { repository: { pullRequest: stackPrs[number] ?? JSON.parse(fs.readFileSync('pr.json')) } };
   }
   else if (query.includes('issue(number:$number){id parent{')) data = { repository: { issue: JSON.parse(fs.readFileSync('child.json')) } };
   else if (query.includes('fields(first:100)')) data = { node: { fields: { nodes: [{
@@ -369,8 +376,11 @@ function pr(argv, input, stdout, stderr, exit) {
   fs.appendFileSync('merges', argv.slice(2).join(' ') + '\n');
   fs.appendFileSync('calls', 'merge\n');
   if (fs.existsSync('merge-fails')) { stderr('gh: Head branch was modified\n'); exit(1); }
-  // merge-403: the refusal of a PR with stacked children.
-  if (fs.existsSync('merge-403')) { stderr('gh: Forbidden (HTTP 403)\n'); exit(1); }
+  // merge-403: the refusal of a PR with stacked children; the file holds gh's text, empty means the GraphQL text seen on GitHub (#321).
+  if (fs.existsSync('merge-403')) {
+    stderr((fs.readFileSync('merge-403', 'utf8') || 'GraphQL: This pull request is part of a stack and must be merged using the asynchronous merge REST API. For more information, see https://docs.github.com/rest/pulls/pulls#merge-a-pull-request-asynchronously (mergePullRequest)') + '\n');
+    exit(1);
+  }
   if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));
 }
 

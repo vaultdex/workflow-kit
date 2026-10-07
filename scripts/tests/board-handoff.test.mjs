@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fixture, handoffPr, issue, list, predecessor, task, test } from './board-fixture.mjs';
+import { handoffFixture, handoffPr, issue, list, predecessor, task, test } from './board-fixture.mjs';
 
 test('handoff diagnoses draft and unreadable draft state before waiting for CI', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   const commit = handoffPr().commits.nodes[0].commit;
   for (const checks of [[], [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS' }]]) {
@@ -32,7 +32,7 @@ test('handoff diagnoses draft and unreadable draft state before waiting for CI',
 
 
 test('handoff rejects drafts before unavailable review details', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'fail-rest'), '');
   const commit = handoffPr().commits.nodes[0].commit;
@@ -53,9 +53,10 @@ test('handoff rejects drafts before unavailable review details', t => {
 
 
 test('handoff blocks unlinked, unsafe and unreadable delivery before writing Human review', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   const mutations = join(checkout, 'mutations');
   const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
+  const ownLink = number => ({ number, state: 'OPEN', repository: { nameWithOwner: 'test/example' } });
   const pending = { ...handoffPr().commits.nodes[0].commit,
     statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS' }] } } };
   const failed = { ...pending, statusCheckRollup: { contexts: { totalCount: 1, nodes: [
@@ -100,7 +101,25 @@ test('handoff blocks unlinked, unsafe and unreadable delivery before writing Hum
     assert.equal(existsSync(mutations), false);
     rmSync(join(checkout, failure));
   }
+  const invalidCurrentLinks = [
+    { totalCount: 2, nodes: [ownLink(7), ownLink(8)] },
+    { totalCount: 2, nodes: [ownLink(7)] },
+    undefined,
+  ];
+  for (const links of invalidCurrentLinks) {
+    const task = { ...ready };
+    if (links) task.closedByPullRequestsReferences = links;
+    else delete task.closedByPullRequestsReferences;
+    writeIssue(task);
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+    const result = run('handoff', '1', '7');
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.equal(existsSync(mutations), false, 'Ambiguous or incomplete own PR links never write Human review');
+  }
   assert.equal(run('handoff', '1', '--oops').status, 2, 'Option-like PR arguments are rejected');
+  writeIssue({ ...ready, closedByPullRequestsReferences: { totalCount: 3, nodes: [ownLink(7),
+    { number: 6, state: 'CLOSED', repository: { nameWithOwner: 'test/example' } },
+    { number: 5, state: 'MERGED', repository: { nameWithOwner: 'test/example' } }] } });
   for (const baseRefName of ['main', 'release/0.1.1']) {
     writeFileSync(join(checkout, 'handoff-fixture'), '');
     writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName,
@@ -114,7 +133,7 @@ test('handoff blocks unlinked, unsafe and unreadable delivery before writing Hum
 
 
 test('handoff rechecks issue prerequisites after review and link reads, before mutation', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
   const changes = [
@@ -125,6 +144,9 @@ test('handoff rechecks issue prerequisites after review and link reads, before m
     { ...ready, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } },
     { ...ready, blockedBy: { totalCount: 1, nodes: [] } },
     { ...ready, bodyHTML: task('added while waiting') },
+    { ...ready, closedByPullRequestsReferences: { totalCount: 2, nodes: [
+      { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/example' } },
+    ] } },
   ];
   for (const changed of changes) {
     writeIssue(ready);
@@ -138,7 +160,7 @@ test('handoff rechecks issue prerequisites after review and link reads, before m
 
 
 test('handoff rechecks PR gates before mutation and rejects changed review proof', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   const commit = handoffPr().commits.nodes[0].commit;
@@ -171,7 +193,7 @@ test('handoff rechecks PR gates before mutation and rejects changed review proof
 
 
 test('handoff reports a failed status read-back instead of claiming delivery', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   writeFileSync(join(checkout, 'lost'), 'Ready');
@@ -183,7 +205,7 @@ test('handoff reports a failed status read-back instead of claiming delivery', t
 
 
 test('handoff names every missing point at once, issue side and PR side together', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [] }, bodyHTML: list([task('open box')]) });
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ linkPages: [[]] })));
   writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([]));
@@ -195,7 +217,7 @@ test('handoff names every missing point at once, issue side and PR side together
 
 
 test('handoff reads an undetermined merge state again before it gives up', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
@@ -209,7 +231,7 @@ test('handoff reads an undetermined merge state again before it gives up', t => 
 
 
 test('handoff lists merge conflicts that GitHub reports only after an undetermined state', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+  const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
   writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([{ mergeStateStatus: 'UNKNOWN' }, { mergeStateStatus: 'DIRTY' }]));
@@ -218,4 +240,8 @@ test('handoff lists merge conflicts that GitHub reports only after an undetermin
   assert.match(result.stdout, /blocker: merge conflicts/);
   assert.match(result.stdout, /open acceptance .*open box/);
   assert.doesNotMatch(result.stdout, /WAITING|not determined/);
+});
+
+test('handoff refuses an unknown flag before any write', t => {
+  fixture(t).refusesUnknownFlag('handoff', '1', '7');
 });
