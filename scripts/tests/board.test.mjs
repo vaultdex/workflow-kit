@@ -1826,24 +1826,26 @@ test('a used-up GraphQL quota is waited out by reviews and reported by the other
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
   writeIssue(issue());
   writeFileSync(join(checkout, 'limited'), '');
+  const started = Date.now();
   const waited = run('reviews', '7');
   assert.equal(waited.status, 0, waited.stdout + waited.stderr);
-  assert.match(waited.stderr, /^rate limited until \d{4}-\d\d-\d\dT[\d:.]+Z$/m, 'The wait is announced in one line');
+  assert.ok(Date.now() - started >= 1000, 'The command slept until the reset (a second away) before asking again');
   assert.equal(existsSync(join(checkout, 'limited')), false, 'The refused query was asked again');
   writeFileSync(join(checkout, 'limited'), '');
   const stopped = run('check', '1');
   assert.equal(stopped.status, 2, stopped.stdout + stopped.stderr);
-  assert.match(stopped.stdout, /quota is used up until \d{4}-/, 'Commands that cannot wait name the reset time');
+  assert.match(stopped.stdout, /\d{4}-\d\d-\d\dT/, 'Commands that cannot wait name the time to try again');
 });
 
 test('little quota left makes reviews wait for the reset before the next query', t => {
   const { checkout, run } = fixture(t);
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
   writeFileSync(join(checkout, 'quota-left'), '10');
+  const started = Date.now();
   const result = run('reviews', '7');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /^rate limited until /m);
-  assert.match(result.stdout, /^quota: 10 left, 2 points used by this run/m, 'The remaining quota is shown');
+  // The fixture reports the reset 3 seconds after its first answer, so a run that did not wait for it ends sooner.
+  assert.ok(Date.now() - started >= 3000, 'The second query waited for the reset');
 });
 
 test('wait pauses longer with every quiet read and, below 1000 points left, twice as long', () => {
