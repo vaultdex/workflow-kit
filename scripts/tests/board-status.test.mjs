@@ -191,13 +191,17 @@ test('Automated review requires the declared open PR and every issue backlink be
   assert.equal(run('status', '1', 'Automated review', '7').status, 0, 'Default-branch delivery works too');
 });
 
-test('status and priority refuse an unknown flag, and --help only prints the usage', t => {
+test('status and priority refuse an unknown flag or extra word, and --help or -h only prints the usage', t => {
   const { checkout, run, refusesUnknownFlag, writeIssue } = fixture(t);
   writeIssue(issue('Ready'));
   refusesUnknownFlag('status', '1', 'In progress');
   refusesUnknownFlag('priority', '1', 'High');
-  const help = run('status', '1', 'In progress', '--help');
-  assert.equal(help.status, 0, help.stderr);
-  assert.ok(help.stdout, '--help prints the usage');
-  assert.equal(existsSync(join(checkout, 'queries')), false, '--help reached gh');
+  // "Automated review" keeps its trailing PR and issues, but a flag among them is still refused.
+  assert.equal(run('status', '1', 'Automated review', '7', '-x').status, 2);
+  for (const flag of ['--help', '-h']) {
+    const help = run('status', '1', 'In progress', flag);
+    assert.equal(help.status, 0, help.stderr);
+    assert.ok(help.stdout, `${flag} prints the usage`);
+    assert.equal(existsSync(join(checkout, 'queries')), false, `${flag} reached gh`);
+  }
 });
