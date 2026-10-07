@@ -166,6 +166,12 @@ function api(argv, input, stdout, stderr, exit) {
       }[parts[5]]));
       exit(0);
     }
+    if (parts[3] === 'pulls' && parts[5] === 'reviews' && parts[7] === 'dismissals' && argv.includes('PUT')) {
+      // Dismissing a review: the id and the message are kept in calls.
+      fs.appendFileSync('calls', `dismiss ${parts[6]} ${argv.find(arg => arg.startsWith('message=')).slice(8)}\n`);
+      stdout('{}');
+      exit(0);
+    }
     const file = parts.at(-3) + '-' + parts.at(-1) + '.json';
     const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
     const items = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : [];

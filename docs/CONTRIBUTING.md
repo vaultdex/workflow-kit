@@ -382,7 +382,8 @@ backlink never closes an issue.
    stands. A reviewer the project lists as
    `"optionalReviewers"` ([setup](../SETUP.md#3-board-and-labels)) is never awaited,
    re-requested or replaced by a self-review: `wait` and `handoff` ignore its traces,
-   while its findings, open threads and change requests count like any other.
+   while its findings, open threads and change requests count like any other. Once all threads
+   are resolved, `handoff` dismisses its standing change request itself (GitHub's ruleset would block the merge).
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
    (`board.mjs ready PR SHA`), set Automated review and wait again. When `reviews` or `wait` print
@@ -427,7 +428,8 @@ backlink never closes an issue.
    Otherwise pending or unknown does not count as unavailable. Mergeable is not
    merge-ready: resolve every `blocker:` that `board.mjs reviews` lists (a standing
    change request, conflicts) or name it for the human when only a human may clear
-   it, such as dismissing a review or resolving a thread you declined to fix.
+   it, such as dismissing a review (`handoff` dismisses an optional reviewer's itself)
+   or resolving a thread you declined to fix.
    Handoff reuses the review check, verifies the native PR link and assigned active
    task, rejects Draft/closed PRs, changed heads, conflicts and open threads, waits
    for a determined merge state, rechecks PR proof and issue prerequisites immediately before mutation, then
