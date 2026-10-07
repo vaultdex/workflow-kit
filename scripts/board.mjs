@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { externalTool } from './checkout-root.mjs';
+import { isRateLimited, retryAt, waitInterval } from './quota.mjs';
 
 const [command, ref, value] = process.argv.slice(2);
 const project = JSON.parse(readFileSync('.github/workflow-project.json', 'utf8'));
@@ -12,11 +13,46 @@ const [owner, name] = project.repository.split('/');
 let number = Number(String(ref).replace(/^#/, ''));
 const gh = externalTool('gh', process.cwd());
 
+// The account's GraphQL quota (5000 points an hour) is shared by every agent on it, so each query reads its own cost and the rest.
+// wait, reviews and handoff sleep until the reset instead of failing when it runs out or falls below their reserve;
+// every other command stops with the reset time.
+const sleepers = { wait: 300, reviews: 50, handoff: 50 };
+let quota, spent = 0; // the latest { cost, remaining, resetAt } a query returned, and the points this run has used
+
+/** When the GraphQL quota resets: the REST endpoint costs no points; if it fails, a minute from now. */
+function quotaReset() {
+  try {
+    const { graphql: { reset } } = JSON.parse(execFileSync(gh.file, ['api', 'rate_limit'], { encoding: 'utf8', env: gh.env })).resources;
+    if (Number.isFinite(reset)) return new Date(reset * 1000).toISOString();
+  } catch { /* the line below */ }
+  return new Date(Date.now() + 60_000).toISOString();
+}
+
+/** Say so in one line (stderr keeps stdout for the verdict) and sleep until the reset. */
+function sleepUntilReset(resetAt) {
+  console.error(`rate limited until ${resetAt}`);
+  sleep(Math.max(1, (Date.parse(resetAt) - Date.now()) / 1000 + 1));
+}
+
 function graphql(query, variables = {}) {
   // Organization-linked Priority fields live on the issue and need this preview header.
-  const args = ['api', 'graphql', '-H', 'GraphQL-Features: issue_fields', '-f', `query=${query}`];
+  const args = ['api', 'graphql', '-H', 'GraphQL-Features: issue_fields', '-f',
+    `query=${query.startsWith('query') ? `${query.slice(0, query.lastIndexOf('}'))} rateLimit{cost remaining resetAt}}` : query}`];
   for (const [key, val] of Object.entries(variables)) args.push(typeof val === 'number' ? '-F' : '-f', `${key}=${val}`);
-  return JSON.parse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 })).data;
+  for (let sleeps = 0; ; sleeps++) {
+    if (command in sleepers && quota?.remaining < sleepers[command] && Date.parse(quota.resetAt) > Date.now()) sleepUntilReset(quota.resetAt);
+    try {
+      const { data } = JSON.parse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
+      quota = data?.rateLimit ?? quota;
+      spent += data?.rateLimit?.cost ?? 0;
+      return data;
+    } catch (error) {
+      if (!isRateLimited(`${error.stderr}${error.stdout}`)) throw error;
+      const resetAt = retryAt(`${error.stderr}${error.stdout}`, sleeps, quotaReset);
+      assert.ok(command in sleepers && sleeps < 3, `The GitHub GraphQL quota is used up until ${resetAt}; run ${command} again after that`);
+      sleepUntilReset(resetAt);
+    }
+  }
 }
 
 // A predecessor with the PRs that close it (closed ones included, so a merged one stays visible; stackBase keeps open and merged): the base of a stack is found through the native closing links (manual ones included).
@@ -1299,7 +1335,7 @@ const outcome = ({ failed }) => failed ? ['FAILED', 1] : ['DONE', 0];
 function reviewsOnce() {
   const result = reviews(stallOption());
   const [word, code] = result.done ? outcome(result) : ['WAITING', 3];
-  console.log([word, ...result.lines].join('\n'));
+  console.log([word, ...result.lines, quotaLine()].filter(Boolean).join('\n'));
   process.exitCode = code;
 }
 
@@ -1312,20 +1348,26 @@ function mergeState() {
   return { done: !open, failed: pullRequest.state === 'CLOSED', lines: [`#${pullRequest.number} ${pullRequest.state}`, ...open ? ['waiting: human merge'] : []] };
 }
 
+/** What the last query cost and what is left, so a driver sees the shared quota without a command of its own. */
+const quotaLine = () => quota && `quota: ${quota.remaining} left, ${spent} points used by this run, resets ${quota.resetAt}`;
+
 async function wait() {
   const look = process.argv.includes('--merged') ? mergeState : () => reviews(stallOption());
-  let shown;
+  let shown, quiet = 0;
   for (;;) {
     const result = look(), { done, lines } = result;
     if (done) {
       const [word, code] = outcome(result);
       process.exitCode = code;
-      return console.log([word, ...lines].join('\n'));
+      return console.log([word, ...lines, quotaLine()].filter(Boolean).join('\n'));
     }
     // Interim output names what is still awaited, once per change, so a background run is never silent.
     const waiting = lines.filter(line => line.startsWith('waiting:')).join('\n');
-    if (waiting !== shown) console.log(`WAITING\n${shown = waiting}`);
-    await new Promise(resolve => setTimeout(resolve, 60_000));
+    if (waiting !== shown) {
+      console.log(['WAITING', shown = waiting, quotaLine()].filter(Boolean).join('\n'));
+      quiet = 0;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000 * waitInterval(quiet++, quota?.remaining)));
   }
 }
 

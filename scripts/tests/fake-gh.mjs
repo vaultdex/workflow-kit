@@ -13,6 +13,11 @@ function api(argv, input, stdout, stderr, exit) {
   const path = argv[2] ?? '';
   if (!path.startsWith('graphql')) {
     if (fs.existsSync('fail') || fs.existsSync('fail-rest')) exit(1);
+    // The quota endpoint: the GraphQL quota resets a second from now.
+    if (path === 'rate_limit') {
+      stdout(JSON.stringify({ resources: { graphql: { reset: Math.floor(Date.now() / 1000) + 1 } } }));
+      exit(0);
+    }
     // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
     const parts = path.split('?')[0].split('/');
     const backlink = 'backlink-' + parts[4] + '.json';
@@ -95,6 +100,13 @@ function api(argv, input, stdout, stderr, exit) {
   }
   const query = argv.find(arg => arg.startsWith('query=')).slice(6);
   if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('query{viewer'))) exit(1);
+  // limited: GitHub refuses the next query, like its RATE_LIMITED error, and takes the file away: the quota is back after one wait.
+  if (fs.existsSync('limited')) {
+    fs.unlinkSync('limited');
+    stdout(JSON.stringify({ errors: [{ type: 'RATE_LIMITED', message: 'API rate limit already exceeded for user ID 1.' }] }));
+    stderr('gh: API rate limit already exceeded for user ID 1.\n');
+    exit(1);
+  }
   let data;
   if (query.startsWith('mutation')) {
     // mutation-fails: GitHub refuses every write.
@@ -198,7 +210,9 @@ function api(argv, input, stdout, stderr, exit) {
     }
     data = { repository: { issue } };
   }
-  stdout(JSON.stringify({ data }));
+  // quota-left: the points GitHub reports as left, to be spent until three seconds from now.
+  const rateLimit = fs.existsSync('quota-left') && { cost: 1, remaining: Number(fs.readFileSync('quota-left', 'utf8')), resetAt: new Date(Date.now() + 3000).toISOString() };
+  stdout(JSON.stringify({ data: rateLimit && data ? { ...data, rateLimit } : data }));
 }
 
 /** gh pr merge …: records the call; merge-fails is gh refusing, merge-noop a merge that never shows. */

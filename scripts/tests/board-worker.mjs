@@ -23,8 +23,6 @@ function realExecFileSync(file, args, options) {
 }
 childProcess.execFileSync = (file, args, options) => /(^|[\\/])gh(\.exe)?$/.test(file) ? fakeGh(args, options?.input) : realExecFileSync(file, args, options);
 syncBuiltinESMExports();
-// ponytail: board.mjs waits between reads with Atomics.wait; no test depends on elapsed time, so waits end at once; replace when one does.
-Atomics.wait = () => 'timed-out';
 
 class ProcessExit extends Error {}
 
