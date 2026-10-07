@@ -11,6 +11,9 @@ details only for the current step.
 - Never force-push, rewrite shared history, reset, stash or discard work you don't
   own, or bypass branch protection, required checks or spending limits.
 - Never expose secrets or commit personal configuration.
+- A question a human must decide is never skipped, answered by you or worked around.
+  Ask it overview first, then through the harness's question tool in batches of at
+  most 4 ([Human input](docs/CONTRIBUTING.md#human-input)).
 
 ## Hooks
 
