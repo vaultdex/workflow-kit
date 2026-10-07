@@ -32,7 +32,7 @@ test('merge merges the checked head by its full id only when no review is runnin
   ];
   for (const [label, pr, comments, status] of refused) {
     write(pr, comments);
-    const result = run('merge', '7');
+    const result = run('merge', '7', '--interval', '0');
     assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
     assert.equal(existsSync(merges), false, `${label}: gh pr merge is never called`);
   }

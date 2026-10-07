@@ -28,7 +28,7 @@ Repository-CI ([vaultdex/Vaultdex#980](https://github.com/vaultdex/Vaultdex/issu
 **GitHub-Kontingent.** Das GraphQL-Kontingent (5.000 Punkte pro Stunde) gilt für das ganze
 Konto und wird von allen Drivern gemeinsam verbraucht; ist es leer, scheitert jeder
 `board.mjs`-Befehl bis zum Reset. Gemessene Kosten: eine Lesung von `reviews`/`wait` kostet
-2 Punkte, `check` 4, `next` 8. `wait` fragt zuerst nach 60 s, dann mit wachsendem Abstand bis
+2 Punkte, `check` 1 (2 bei einem Issue, das nur offene Vorgänger hält), `next` 3 (4 bei einem Stapel-Kandidaten, je weitere 30 offene Issues 1 mehr). `wait` fragt zuerst nach 60 s, dann mit wachsendem Abstand bis
 5 Minuten (bei Neuigkeiten wieder von vorn), also etwa 20 bis 40 Punkte pro Stunde und Driver
 statt 120 bei festem Minutentakt. Als Budget gilt: Zahl der Driver mal 40 Punkte, dazu der eigene
 Verbrauch der Agents; höchstens 20 parallele `wait` (rund 800 Punkte pro Stunde, ein Sechstel
@@ -84,7 +84,9 @@ Modellwahl stehen hier nicht.
    und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
    `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
    Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht auf einen Reviewer
-   ohne Spur pollen (ein Review, das nie startet). Freitext-Ankündigungen anderer Bots
+   ohne Spur pollen (ein Review, das nie startet) und keinen Review von Hand anfordern
+   (kein `@codex review`); fehlt die Spur, nennt der Übergabe-Kommentar das
+   ([Review loop](CONTRIBUTING.md#review-loop) Schritt 3). Freitext-Ankündigungen anderer Bots
    erkennt `wait` nicht ([README](../README.md#board-commands)); eine angekündigte
    Review verfolgt der Driver von Hand bis zum Ergebnis oder Stall und führt
    `handoff` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;

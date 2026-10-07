@@ -55,25 +55,48 @@ function graphql(query, variables = {}) {
   }
 }
 
-// A predecessor with the PRs that close it (closed ones included, so a merged one stays visible; stackBase keeps open and merged): the base of a stack is found through the native closing links (manual ones included).
-const predecessorFields = `number state stateReason repository{nameWithOwner}
-  closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
-// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query. Only the issue
-// itself reads the PRs of its predecessors (to find a stack base); the sub-issues' verdicts stay without them.
+// GitHub charges a query by its nested lists, not by what they return: every list inside a list (and every node of a list of
+// up to 100) multiplies the cost. So a query asks for little, and the rest is read only where a verdict needs it.
+// The PRs that close a predecessor (closed ones included, so a merged one stays visible; stackBase keeps open and merged) find the
+// base of a stack through the native closing links (manual ones included). They are read by loadDeliveries, only where a stack is judged.
+const predecessorFields = 'id number state stateReason repository{nameWithOwner}';
+const deliveryFields = `closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
+// Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query.
 const issueFields = predecessor => `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
   blockedBy(first:100){totalCount nodes{${predecessor}}}`;
+// The login of the viewer comes along, so a claim check needs no query of its own. Sub-issues (only `check` lists them) are asked
+// for in the number given: each costs three lists, so the first page is short and a longer list is read again at 100.
 // ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
-const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){
+const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){issue(number:$number){
   ${issueFields(predecessorFields)} bodyHTML
   closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
-  subIssues(first:100){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}}}}`;
+  ${subIssues ? `subIssues(first:${subIssues}){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}` : ''}}}}`;
 /** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
 const named = (label, read) => {
   try { return read(); } catch (error) { throw new Error(`${label}: ${String(error.stderr || error.message).trim()}`, { cause: error }); }
 };
-const readIssue = () => named(`${project.repository}#${number}`,
-  () => graphql(issueQuery, { owner, name, number }).repository.issue ?? assert.fail('issue not found'));
+const readIssue = (withSubIssues = false) => named(`${project.repository}#${number}`, () => {
+  for (let first = withSubIssues && 30; ; first = 100) {
+    const { viewer, repository } = graphql(issueQuery(first), { owner, name, number });
+    const issue = repository.issue ?? assert.fail('issue not found');
+    if (!(issue.subIssues?.totalCount > issue.subIssues?.nodes.length) || first >= 100) return { ...issue, viewer };
+  }
+});
+
+/** Reads the PRs that close the predecessors that have none loaded yet, 100 predecessors per query (a lookup by id is any repository). */
+function loadDeliveries(predecessors) {
+  const missing = predecessors.filter(predecessor => !predecessor.closedByPullRequestsReferences);
+  const ids = [...new Set(missing.map(predecessor => predecessor.id))];
+  for (let from = 0; from < ids.length; from += 100) {
+    const batch = ids.slice(from, from + 100);
+    const { nodes } = graphql(`query{nodes(ids:${JSON.stringify(batch)}){...on Issue{${deliveryFields}}}}`);
+    // The same predecessor can hold several issues: every object of it gets the list. An unreadable one stays without it,
+    // which stackBase reports as unreadable, never as "no PR".
+    batch.forEach((id, index) => missing.filter(predecessor => predecessor.id === id)
+      .forEach(predecessor => { predecessor.closedByPullRequestsReferences = nodes[index]?.closedByPullRequestsReferences; }));
+  }
+}
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
@@ -102,6 +125,7 @@ function predecessorReasons({ totalCount, nodes }) {
  * PR on the trunk, `pr.state` says MERGED.
  */
 function stackBase(open) {
+  loadDeliveries(open);
   const refused = [], unknown = [], prs = new Map();
   for (const predecessor of open) {
     const label = `${predecessor.repository.nameWithOwner}#${predecessor.number}`;
@@ -171,7 +195,7 @@ const handoverField = /^Handover:[ \t]*(\w[\w.-]*)[ \t]*$/im;
 // ponytail: sessions are told apart by the id the driver passes, not authenticated; Claude and Codex share one login.
 /** Blocks when the newest claim or handover of the own login belongs to another session; claims without the field only note. */
 function claimReasons(issue, session) {
-  const { viewer } = graphql('query{viewer{login}}');
+  const viewer = issue.viewer ?? graphql('query{viewer{login}}').viewer;
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
   let holder, legacy;
   // GitHub lists comments oldest first, so for equal times the later one in order wins.
@@ -283,10 +307,11 @@ function check(issue = readIssue(), claims) {
 
 function next() {
   // Advanced issue search understands -is:blocked (open native predecessors). Separate searches keep blocked issues
-  // from crowding unblocked ones out of the 1,000-result search cap; read every page of both before sorting.
+  // from crowding unblocked ones out of the 1,000-result search cap; read every page of both before sorting. A page costs by its size, not by its hits
+  // (4 lists per issue), so it is short: a repository with few open issues pays one point per search.
   const nodes = [];
   for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
-    const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
+    const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:30,after:$after){
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body assignees(first:10){nodes{login}}
       blockedBy(first:100){totalCount nodes{${predecessorFields}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
@@ -317,8 +342,9 @@ function next() {
     + ` (assignees: ${issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none'})`;
   const startable = ready.filter(issue => !issue.reasons.length);
   // Held only by open predecessors that one open PR delivers: stackable on that PR.
-  const stackable = ready.filter(issue => issue.reasons.length && heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors))
-    .map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
+  const candidates = ready.filter(issue => issue.reasons.length && heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors));
+  loadDeliveries(candidates.flatMap(issue => issue.predecessors.open));
+  const stackable = candidates.map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
   const held = ready.filter(issue => issue.reasons.length && !stackable.some(candidate => candidate.number === issue.number));
   for (const issue of startable) console.log(line(issue));
   console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
@@ -1111,10 +1137,13 @@ function openAcceptance(bodyHtml) {
     .map(([, , text]) => decode(text.replace(/<[^>]*>/g, '')).trim());
 }
 
-/** Revalidate active readiness, review status and assignment on the supplied issue snapshot. */
-/** `reviewedHead`: the PR head the proof was gathered for; a stacked layer must still be that head when this reads it. */
-function handoffIssue(issue, viewer, reviewedHead) {
-  if (!mayStart(check(issue))) return false;
+/**
+ * Everything the issue side of the handoff still lacks (readiness, review status, assignment, open acceptance) on the
+ * supplied issue snapshot, or undefined when check() already printed its verdict and stopped.
+ * `reviewedHead`: the PR head the proof was gathered for; a stacked layer must still be that head when this reads it.
+ */
+function handoffIssueReasons(issue, viewer, reviewedHead) {
+  if (!mayStart(check(issue))) return;
   assert.ok(issue.id, 'Issue identity is unreadable');
   const status = projectItem(issue)?.status?.name;
   const reasons = [];
@@ -1146,12 +1175,17 @@ function handoffIssue(issue, viewer, reviewedHead) {
     reasons.push('the issue is not assigned to the authenticated driver');
   }
   for (const line of openAcceptance(issue.bodyHTML)) reasons.push(`open acceptance without an issue reference (check it off, or move it to a follow-up and link that issue): ${line}`);
-  if (reasons.length) {
+  return reasons;
+}
+
+/** The recheck before the write: true when the issue side holds, otherwise the verdict is printed. */
+function handoffIssue(issue, viewer, reviewedHead) {
+  const reasons = handoffIssueReasons(issue, viewer, reviewedHead);
+  if (reasons?.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
     process.exitCode = 1;
-    return false;
   }
-  return true;
+  return reasons?.length === 0;
 }
 
 /**
@@ -1191,58 +1225,76 @@ function retroReasons(bodyHtml) {
  * The PR gate handoff and merge share: an open non-draft PR whose CI and every traced review have finished, without
  * blockers or open threads, and with a determined merge state. Prints the verdict and sets the exit code; returns the
  * review result only when it holds. `extra` adds the caller's own reasons (it runs only once the shared gate holds).
+ * `prior` are reasons the caller found before (the issue side of handoff): they are listed with the PR's, in one run.
+ * GitHub computes the merge state late: an undetermined one is read again a few times (`--interval` seconds apart, at
+ * 1 point each) before it counts as waiting.
  */
-function finishedPr(prNumber, action, expectedHead, extra = () => []) {
+const mergeStates = ['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'], mergeReads = 4;
+function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []) {
   const pr = readPr(prNumber);
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
+  const blockers = reasons => reasons.map(reason => `blocker: ${reason}`);
   if (pr.state !== 'OPEN' || pr.isDraft) {
-    console.log(`FAILED\nblocker: ${action} needs an open non-draft PR`);
+    console.log(['FAILED', ...blockers([...prior, `${action} needs an open non-draft PR`])].join('\n'));
     process.exitCode = 1;
     return;
   }
   const result = reviews(stallOption(), Date.now(), prNumber, pr);
   console.log(result.lines.join('\n'));
   if (!result.done || result.failed) {
-    process.exitCode = result.failed ? 1 : 3;
-    console.log(result.failed ? 'FAILED' : 'WAITING');
+    process.exitCode = result.failed || prior.length ? 1 : 3;
+    console.log([result.failed || prior.length ? 'FAILED' : 'WAITING', ...blockers(prior)].join('\n'));
     return;
   }
   if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, `PR head changed during ${action}`);
-  const reasons = [];
+  const reasons = [...prior];
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
     reasons.push(`resolve review blockers and threads before ${action}`);
   }
   reasons.push(...extra(result));
-  if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
-    console.log('WAITING\nwaiting: PR mergeability is not determined');
-    process.exitCode = 3;
-    return;
+  const undetermined = state => !state || state === 'UNKNOWN';
+  let state = result.pr.mergeStateStatus;
+  for (let read = 1; undetermined(state) && read < mergeReads; read++) {
+    sleep(numberOption('--interval', 3));
+    const fresh = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+      pullRequest(number:$number){headRefOid mergeStateStatus}}}`, { owner, name, number: prNumber }).repository.pullRequest;
+    assert.equal(fresh?.headRefOid, result.pr.headRefOid, `PR head changed during ${action}`);
+    state = fresh.mergeStateStatus;
+  }
+  // The snapshot's own DIRTY is already a blocker line of reviews(); a DIRTY that GitHub computed during the re-reads is new.
+  if (state === 'DIRTY' && result.pr.mergeStateStatus !== 'DIRTY') reasons.push('merge conflicts: resolve them before ' + action);
+  if (!mergeStates.includes(state)) {
+    if (!reasons.length) {
+      console.log('WAITING\nwaiting: PR mergeability is not determined');
+      process.exitCode = 3;
+      return;
+    }
+    if (undetermined(state)) reasons.push('PR mergeability is not determined (GitHub is still computing it): run again in a minute');
   }
   if (reasons.length) {
-    console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    console.log(['FAILED', ...blockers(reasons)].join('\n'));
     process.exitCode = 1;
     return;
   }
   return result;
 }
 
-/** Read all PR gates and native links, optionally requiring the previously checked head. */
-function handoffPr(issueId, viewer, expectedHead) {
+/** Read all PR gates and native links, optionally requiring the previously checked head; `prior`: see finishedPr. */
+function handoffPr(issueId, viewer, expectedHead, prior) {
   const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => {
+    const reasons = [];
     const comment = findHandoffComment(comments, viewer, pr.headRefOid);
-    if (!comment) return [`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line and the "Retro" section (README: Handoff comment)`];
-    // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
-    const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
-      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
-    return retroReasons(rendered.body_html);
-  });
-  if (!result) return;
-  if (!connectedIssues(result.pr).has(issueId)) {
-    console.log(`FAILED\nblocker: PR #${value} is not natively linked to issue #${number}`);
-    process.exitCode = 1;
-    return;
-  }
-  return result.pr;
+    if (!comment) reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line and the "Retro" section (README: Handoff comment)`);
+    else {
+      // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
+      const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
+        { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
+      reasons.push(...retroReasons(rendered.body_html));
+    }
+    if (!connectedIssues(pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
+    return reasons;
+  }, prior);
+  return result?.pr;
 }
 
 /** Guard the Human review write with current PR proof followed by current issue prerequisites. */
@@ -1250,8 +1302,10 @@ function handoff() {
   const issue = readIssue();
   const { viewer } = graphql('query{viewer{login}}');
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
-  if (!handoffIssue(issue, viewer)) return;
-  const pr = handoffPr(issue.id, viewer);
+  // The issue side's reasons wait for the PR side's, so one run names everything that is missing.
+  const prior = handoffIssueReasons(issue, viewer);
+  if (!prior) return;
+  const pr = handoffPr(issue.id, viewer, undefined, prior);
   if (!pr) return;
   if (!set('Status', 'Human review', () => {
     if (!handoffPr(issue.id, viewer, pr.headRefOid)) return;
@@ -1441,14 +1495,14 @@ function sub() {
   console.log(`${project.repository}#${number} has sub-issue ${childOwner}/${childName}#${childNumber}`);
 }
 
-const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
+const commands = { next, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
   reviews: reviewsOnce, wait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] | wait PR --merged'
-  + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
-  + ' | merge PR [--stall MINUTES] [--grace MINUTES]'
+  + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
+  + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFinite(projectGrace) && projectGrace >= 0)) {
@@ -1468,6 +1522,8 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   // A misspelled flag must not silently turn the session check off.
   || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^\w[\w.-]*$/.test(process.argv[5])))
   || (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
+  // sleep(NaN) would wait forever.
+  || (['handoff', 'merge'].includes(command) && !(numberOption('--interval', 3) >= 0 && numberOption('--interval', 3) <= 60))
   // --head is the full id of the pushed commit (git rev-parse HEAD), as for ready; a short or missing one would wait on a head that never matches.
   || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{40}$/i.test(headOption())))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))

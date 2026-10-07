@@ -99,7 +99,9 @@ Settings → Hooks in Cursor, `.github/hooks` for Copilot. Missing snapshots pro
 a SessionStart install hint. Session and subagent starts also run
 `git submodule update --init .vendor/workflow-kit` when the kit checkout is missing (fresh
 worktree) or not at the commit the gitlink pins (a base merge moves the pin, not the checkout); a kit at its pin stays untouched,
-a kit with local changes or unpublished commits is not moved, and both that case and a failure print a hint. A SubagentStart in
+a kit with local changes or unpublished commits is not moved, and both that case and a failure print a hint. A second handler
+reports a checkout that is behind its upstream or `origin/HEAD` and has no commits of its own (a worktree or driver started from a stale branch);
+it compares with the last fetched state, so it needs no network and never delays the session, and it changes nothing. A SubagentStart in
 a worktree whose kit you deliberately moved ahead of the gitlink resets it, so stage the new pin (`git add .vendor/workflow-kit`) before starting subagents. Files and manual runs don't prove agent loading or
 trust; new definitions need personal review and trust. See
 [Ponytail](docs/ponytail.md) and [Impeccable](docs/impeccable.md) for hook behavior.
@@ -244,6 +246,10 @@ the installer, so the kit's current one is copied.
   span or glued to letters is no reference). The handoff comment must also carry a
   `Retro` section whose every list line ends with its resolution (exit 1 otherwise, status
   untouched, every line without one is printed); it is read as GitHub renders it too.
+  One run lists every missing point together (open acceptance, assignment, handoff comment, retro, native link, blockers
+  and threads; a refused issue state, an unreadable read or running reviews are reported alone or first), so one fix round
+  suffices. An undetermined merge state (`UNKNOWN`) is read again up to 3 times, `--interval SECONDS` apart (default 3,
+  1 point per read; `merge` too) before `handoff` reports it as waiting.
   Session ownership, final
   proof and whether a finding is justified remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
