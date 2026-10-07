@@ -1,5 +1,7 @@
-name: Aufgabe
-description: Kurze Aufgabe. Zweck, Nutzen, konkrete Umsetzung und überprüfbares Ergebnis.
+name: Spec oder längere Aufgabe
+description: Wie die Aufgabe, mit einer Kurzfassung in einfacher Sprache vorneweg.
+title: "(Spec) "
+labels: [spec]
 body:
   - type: markdown
     attributes:
@@ -7,6 +9,13 @@ body:
         Braucht die Aufgabe eine menschliche Entscheidung oder Handlung? Dann nach dem Erstellen
         `## Menschliche Mitwirkung nötig` als ersten Abschnitt ergänzen und das Label
         `needs-human-input` setzen (Wer, Was fehlt, Wirkung, Antwortweg). Sonst weglassen.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Kurz gesagt
+      description: 2 bis 4 Sätze in einfacher Sprache. Was stört heute, was wird anders, wer merkt es?
+    validations:
+      required: true
   - type: textarea
     id: purpose
     attributes:

@@ -91,7 +91,10 @@ technical names exact. Before creating one, search open and closed issues and PR
 instead of duplicating it. Separate deliverables need separate issues before
 branching; a kit change and its consumer update are two issues.
 
-Use the issue form's sections:
+Use the issue form's sections. A spec or longer task uses the form „Spec oder längere
+Aufgabe“: the same sections, with the required **Kurz gesagt** first
+([Einfache Sprache](#einfache-sprache)). The form sets the title prefix `(Spec) ` and
+the label `spec`; a spec created another way gets both by hand.
 
 - **Wofür brauchen wir das?** The evidenced problem; for bugs, reproduction and
   expected behavior.
@@ -179,7 +182,8 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
   Abnahmekriterien bleiben.
 - Specs und längere Issues beginnen mit `## Kurz gesagt` (nach `## Menschliche
   Mitwirkung nötig`, falls vorhanden): 2 bis 4 Sätze, was heute stört, was anders wird und
-  wer es merkt.
+  wer es merkt. Eine Spec trägt außerdem den Titelpräfix `(Spec) ` und das Label `spec`;
+  das Formular „Spec oder längere Aufgabe“ setzt beides.
 - PRs und Kommentare beginnen mit dem Ergebnis in einem Satz, Details danach. Das gilt
   auch für den [Übergabekommentar](../README.md#handoff-comment). Maschinell erzeugte
   Kommentare wie der Backlink von `board.mjs link` sind ausgenommen. Ein Hinweis, den
