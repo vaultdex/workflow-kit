@@ -34,3 +34,6 @@ gha-creds-*.json
 
 # Generated source bundles and local skill discovery
 /.workflow-kit/
+
+# Scratch files of drivers (PR bodies, comments); never part of a commit
+/.scratch/
