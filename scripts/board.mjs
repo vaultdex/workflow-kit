@@ -413,7 +413,11 @@ const ago = ms => {
 };
 
 /** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
-function check(issue = readIssue(), claims, currentIssue = currentIssuePr(issue)) {
+function check(issue = readIssue(), claims, currentPrNumber) {
+  let current = currentIssuePr(issue);
+  if (currentPrNumber !== undefined && !current.unknown && current.number !== currentPrNumber) {
+    current = { unknown: `PR #${currentPrNumber} is not the unique open local PR linked to this issue` };
+  }
   const { status, blocked, unknown, predecessors } = issueReasons(issue);
   const notes = [];
   let claim;
@@ -426,23 +430,22 @@ function check(issue = readIssue(), claims, currentIssue = currentIssuePr(issue)
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;
-  if (heldOnlyByOpenPredecessors(blocked, predecessors) && !unknown.length) {
-    const current = typeof currentIssue === 'number' ? { number: currentIssue } : currentIssue;
-    if (current?.unknown) {
-      unknown.push(current.unknown);
+  const heldOnlyByOpen = heldOnlyByOpenPredecessors(blocked, predecessors);
+  if (current?.unknown && (currentPrNumber !== undefined || heldOnlyByOpen)) {
+    unknown.push(current.unknown);
+    if (heldOnlyByOpen) blocked.length = 0;
+  }
+  if (heldOnlyByOpen && !unknown.length) {
+    const stack = stackBase(predecessors.open, current?.number);
+    if (stack.pr) {
+      stackedOn = stack.pr;
+      notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
       blocked.length = 0;
-    } else {
-      const stack = stackBase(predecessors.open, current?.number);
-      if (stack.pr) {
-        stackedOn = stack.pr;
-        notes.push(...blocked.map(reason => `${reason}; delivered by PR #${stack.pr.number}`));
-        blocked.length = 0;
-      } else if (stack.unknown.length && !stack.refused.length) {
-        unknown.push(...stack.unknown);
-        blocked.length = 0;
-      // A definitive refusal stays BLOCKED, whatever else is unreadable: a retry cannot lift it.
-      } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
-    }
+    } else if (stack.unknown.length && !stack.refused.length) {
+      unknown.push(...stack.unknown);
+      blocked.length = 0;
+    // A definitive refusal stays BLOCKED, whatever else is unreadable: a retry cannot lift it.
+    } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
   }
   const plain = verdictOf({ blocked, unknown });
   const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;

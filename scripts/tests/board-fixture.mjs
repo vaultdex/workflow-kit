@@ -50,6 +50,16 @@ export function fixture(t) {
   };
 }
 
+export function handoffFixture(t) {
+  const context = fixture(t), writeIssue = context.writeIssue;
+  context.writeIssue = issue => writeIssue(issue.closedByPullRequestsReferences?.totalCount === 0
+    ? { ...issue, closedByPullRequestsReferences: { totalCount: 1, nodes: [
+      { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/example' } },
+    ] } }
+    : issue);
+  return context;
+}
+
 export const issue = (status = 'Ready', nodes = [], totalCount = nodes.length) => ({
   id: 'I1', number: 1, title: 'Fixture', state: 'OPEN', bodyHTML: '', assignees: { nodes: [] },
   projectItems: { nodes: [{ id: 'PI1', project: { id: 'P1' }, status: { name: status } }] },

@@ -64,7 +64,10 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   assert.equal(readFileSync(join(checkout, 'mutations'), 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 1);
 
   // The upper layer may reach Human review before the base is merged, but only as a layer on that base.
-  const layer = assigned({ projectItems: issue('Automated review').projectItems });
+  const layer = assigned({ projectItems: issue('Automated review').projectItems,
+    closedByPullRequestsReferences: { totalCount: 1, nodes: [
+      { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/example' } },
+    ] } });
   writeIssue(layer);
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   writeFileSync(join(checkout, 'stored'), 'Automated review');
@@ -115,7 +118,10 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   assert.equal(stored(), 'Human review');
 
   // After the base merged into the release branch GitHub has retargeted the layer: a plain PR there, nothing stack-specific left to prove.
-  writeIssue(assigned({ projectItems: issue('Automated review').projectItems, blockedBy: { totalCount: 1, nodes: [open(2, [pr(5, { state: 'MERGED' })])] } }));
+  writeIssue(assigned({ projectItems: issue('Automated review').projectItems, blockedBy: { totalCount: 1, nodes: [open(2, [pr(5, { state: 'MERGED' })])] },
+    closedByPullRequestsReferences: { totalCount: 1, nodes: [
+      { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/example' } },
+    ] } }));
   writeFileSync(join(checkout, 'stored'), 'Automated review');
   writeFileSync(join(checkout, 'stacks.json'), '[]');
   const plain = { baseRefName: 'release/0.1.1', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
