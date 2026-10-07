@@ -144,8 +144,8 @@ Run [board commands](README.md#board-commands) in the project with authenticated
 
 - Tokens and Actions minutes are budgets. Read only what the step needs, reuse
   evidence whose inputs are unchanged, and wait for CI and reviews with
-  `board.mjs wait PR` in the background (a driver subagent runs it in the foreground, see
-  [parallel drivers](docs/parallel-drivers.md#driver-regeln) rule 4) instead of hand-written polling loops.
+  `board.mjs wait PR` in the background (a driver subagent runs it in the foreground and calls it again on
+  exit 4 "still waiting", see [parallel drivers](docs/parallel-drivers.md#driver-regeln) rule 4) instead of hand-written polling loops.
 - Every push restarts CI and reviews: finish fixes and formatting before pushing.
   A stack is at most two layers deep unless the human decides otherwise: a correction in
   the lower layer restarts CI and reviews above it.

@@ -39,3 +39,18 @@ test('wait --head keeps waiting while the PR still shows the previous head, and 
   assert.equal(run('wait', '7', '--head', 'bbbbbbb').status, 2, 'A short id is refused');
   assert.equal(run('reviews', '7', '--head', pushed).status, 2, '--head belongs to wait');
 });
+
+test('wait gives up before the tool limit with exit 4 and names the quota reset when a pause would outlast it', t => {
+  const { checkout, run, check, pr, look } = reviewsFixture(t);
+  assert.equal(look(pr({ contexts: [check('IN_PROGRESS')] })).status, 3, 'Precondition: CI never finishes');
+  const unfinished = run('wait', '7', '--max-minutes', '0.01');
+  assert.equal(unfinished.status, 4, 'An unfinished wait ends with its own exit code');
+  assert.match(unfinished.stdout, /^still waiting: call wait again$/m);
+  // The fake gh reports an empty quota that resets in 3 s: sleeping until then would pass the deadline.
+  writeFileSync(join(checkout, 'quota-left'), '0');
+  const paused = run('wait', '7', '--max-minutes', '0.01');
+  assert.equal(paused.status, 4);
+  assert.match(paused.stdout, /^still waiting: call wait again after \d{4}-\d\d-\d\dT[\d:.]+Z \(GitHub quota pause\)$/m);
+  assert.equal(run('wait', '7', '--max-minutes', 'abc').status, 2, 'A bad limit is refused, not read as no limit');
+  assert.equal(run('reviews', '7', '--max-minutes', '1').status, 2, '--max-minutes belongs to wait');
+});
