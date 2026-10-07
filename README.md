@@ -169,6 +169,15 @@ the installer, so the kit's current one is copied.
   authenticated user, sets Ready, posts `Agent: …, Session: …`, reads the claim back and ends on In progress; it
   refuses a body whose `Wartet bis:` line holds the issue. A failure after the issue exists names its URL and
   the failed step: finish by hand, never create it again. Branch and `check` stay separate.
+- `new --from FILE`: create many issues at once. `FILE` is a JSON list (1 to 50 entries) of
+  `{ "title", "bodyFile", "milestone", "priority", "labels": [..], "fields": { "Size": "XS" } }`: the values of
+  the flags above, `bodyFile` relative to the working directory, Status Backlog, no `--start`. Every entry is checked
+  before the first issue exists (an unknown key, label, milestone or option, or a missing required value creates
+  nothing and names the entry). The issues are created over REST, which costs no GraphQL points; their Project items
+  and fields are then written in one request per 50 writes (aliased mutations) and read back in one more, so the
+  GraphQL cost is 4 requests (points) for up to 16 issues instead of 9 per issue. The output is one `NEW …` line per
+  issue. A failure after the first issue exists names every issue that exists: finish those by hand and create only the
+  missing ones. The field definitions are also read once per run by a single `new`, which therefore needs 4 requests (before: 8 to 9).
 - `field ISSUE NAME VALUE [NAME VALUE ...]`: any single-select fields, all read back together after writing.
   Every pair is checked against the field definitions before the first write: one invalid pair writes
   nothing and names the valid options. `field`, `status` and `priority` report failures as one
@@ -269,7 +278,9 @@ the installer, so the kit's current one is copied.
   ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both end
   with a `quota: …` line (points left, points this run used, reset time). When GitHub's shared GraphQL
   quota is used up or low (under 300 points for `wait`, 50 for `reviews` and `handoff`), these three sleep until the reset and
-  say so on stderr (`rate limited until …`); every other command stops with the reset time
+  say so on stderr (`rate limited until 2026-10-07T04:20:34.000Z (in 7 min)`); every other command stops with the reset time, also as
+  minutes from now. Points left and the reset come from the `x-ratelimit-remaining` and `x-ratelimit-reset` headers of the
+  command's own GraphQL answers, a refusal included, never from `gh api rate_limit`
   ([parallel drivers](docs/parallel-drivers.md)). Both take
   `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3, or `"reviewerGraceMinutes"` of the project file; `0` turns it off): for that long after
   the PR became ready (Ready event, or creation as non-draft) and after each push of the

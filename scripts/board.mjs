@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { externalTool } from './checkout-root.mjs';
-import { isRateLimited, retryAt, waitInterval } from './quota.mjs';
+import { isRateLimited, quotaOf, retryAt, splitResponse, untilText, waitInterval } from './quota.mjs';
 
 const [command, ref, value] = process.argv.slice(2);
 const project = JSON.parse(readFileSync('.github/workflow-project.json', 'utf8'));
@@ -13,11 +13,12 @@ const [owner, name] = project.repository.split('/');
 let number = Number(String(ref).replace(/^#/, ''));
 const gh = externalTool('gh', process.cwd());
 
-// The account's GraphQL quota (5000 points an hour) is shared by every agent on it, so each query reads its own cost and the rest.
+// The account's GraphQL quota (5000 points an hour) is shared by every agent on it. Every response carries what is left and when it
+// resets in its headers (`gh api -i`, also on a refusal), so no extra request asks for it; a query reads its own cost.
 // wait, reviews and handoff sleep until the reset instead of failing when it runs out or falls below their reserve;
 // every other command stops with the reset time.
 const sleepers = { wait: 300, reviews: 50, handoff: 50 };
-let quota, spent = 0; // the latest { cost, remaining, resetAt } a query returned, and the points this run has used
+let quota, spent = 0; // the latest { remaining, resetAt } a response reported, and the points this run has used
 // `wait` gives up at this time (--max-minutes), before the 10-minute limit of an agent's shell tool would push it into the background.
 let deadline = Infinity;
 /** A quota pause that would end after the deadline: `wait` ends "still waiting" instead of sleeping through it. */
@@ -25,38 +26,48 @@ class StillWaiting extends Error {
   constructor(resetAt) { super('still waiting'); this.resetAt = resetAt; }
 }
 
-/** When the GraphQL quota resets: the REST endpoint costs no points; if it fails, a minute from now. */
-function quotaReset() {
-  try {
-    const { graphql: { reset } } = JSON.parse(execFileSync(gh.file, ['api', 'rate_limit'], { encoding: 'utf8', env: gh.env })).resources;
-    if (Number.isFinite(reset)) return new Date(reset * 1000).toISOString();
-  } catch { /* the line below */ }
-  return new Date(Date.now() + 60_000).toISOString();
-}
-
 /** Say so in one line (stderr keeps stdout for the verdict) and sleep until the reset. */
 function sleepUntilReset(resetAt) {
   if (Date.parse(resetAt) > deadline) throw new StillWaiting(resetAt);
-  console.error(`rate limited until ${resetAt}`);
+  console.error(`rate limited until ${untilText(resetAt)}`);
   sleep(Math.max(1, (Date.parse(resetAt) - Date.now()) / 1000 + 1));
 }
 
-function graphql(query, variables = {}) {
+/**
+ * One GraphQL request. `tolerate` is a pattern for a failure whose partial answer is still wanted (one of several aliased mutations
+ * failed): gh then exits non-zero, but the data of the others is in its output.
+ */
+function graphql(query, variables = {}, tolerate) {
   // Organization-linked Priority fields live on the issue and need this preview header.
-  const args = ['api', 'graphql', '-H', 'GraphQL-Features: issue_fields', '-f',
-    `query=${query.startsWith('query') ? `${query.slice(0, query.lastIndexOf('}'))} rateLimit{cost remaining resetAt}}` : query}`];
+  const args = ['api', 'graphql', '-i', '-H', 'GraphQL-Features: issue_fields', '-f',
+    `query=${query.startsWith('query') ? `${query.slice(0, query.lastIndexOf('}'))} rateLimit{cost}}` : query}`];
   for (const [key, val] of Object.entries(variables)) args.push(typeof val === 'number' ? '-F' : '-f', `${key}=${val}`);
   for (let sleeps = 0; ; sleeps++) {
     if (command in sleepers && quota?.remaining < sleepers[command] && Date.parse(quota.resetAt) > Date.now()) sleepUntilReset(quota.resetAt);
     try {
-      const { data } = JSON.parse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
-      quota = data?.rateLimit ?? quota;
-      spent += data?.rateLimit?.cost ?? 0;
+      const { headers, body } = splitResponse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
+      const { data } = JSON.parse(body);
+      quota = quotaOf(headers) ?? quota;
+      // A mutation reports no cost; GitHub charges it one point.
+      spent += data?.rateLimit?.cost ?? (query.startsWith('mutation') ? 1 : 0);
       return data;
     } catch (error) {
-      if (!isRateLimited(`${error.stderr}${error.stdout}`)) throw error;
-      const resetAt = retryAt(`${error.stderr}${error.stdout}`, sleeps, quotaReset);
-      assert.ok(command in sleepers && sleeps < 3, `The GitHub GraphQL quota is used up until ${resetAt}; run ${command} again after that`);
+      const text = `${error.stderr}${error.stdout}`, { headers, body } = splitResponse(error.stdout);
+      if (tolerate?.test(text)) {
+        let partial;
+        try { partial = JSON.parse(body).data; } catch { /* no usable answer: the error below */ }
+        if (partial) return partial;
+      }
+      if (!isRateLimited(text)) throw error;
+      quota = quotaOf(headers) ?? quota;
+      // A primary refusal whose own headers show free quota is stale (the window reset meanwhile): ask again now, never wait for a reset time.
+      if (!/secondary rate limit/i.test(text) && quota?.remaining > 0 && quotaOf(headers)) {
+        assert.ok(sleeps < 3, `GitHub keeps refusing although its headers report ${quota.remaining} points left; run ${command} again later`);
+        continue;
+      }
+      // The refusal names its own reset; without headers, a minute from now.
+      const resetAt = retryAt(text, sleeps, () => quotaOf(headers)?.resetAt ?? new Date(Date.now() + 60_000).toISOString(), Date.now(), headers);
+      assert.ok(command in sleepers && sleeps < 3, `The GitHub GraphQL quota is used up until ${untilText(resetAt)}; run ${command} again after that`);
       sleepUntilReset(resetAt);
     }
   }
@@ -361,11 +372,13 @@ function next() {
   for (const issue of held) console.log([line(issue), ...issue.reasons.map(reason => `  - ${reason}`)].join('\n'));
 }
 
-/** A single-select Project field with its options in configured order. */
+/** A single-select Project field with its options in configured order. The definitions are read once per run, however many fields are looked up. */
+let projectFields;
 function selectField(fieldName) {
-  const fields = graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:100){nodes{...on ProjectV2SingleSelectField{
+  projectFields ??= graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:100){nodes{...on ProjectV2SingleSelectField{
     id name options{id name} issueField{...on IssueFieldSingleSelect{id options{id name}}}}}}}}}`, { id: project.id })
     .node.fields.nodes.filter(candidate => candidate.name && candidate.options);
+  const fields = projectFields;
   const field = fields.find(candidate => candidate.name === fieldName);
   assert.ok(field, `${project.url} has no single-select ${fieldName} field; use one of: ${fields.map(candidate => candidate.name).join(', ')}`);
   // An empty Project option list means the field mirrors an organization issue field.
@@ -508,59 +521,144 @@ function newOptions(args) {
 }
 
 /**
+ * One issue to create, every value checked and resolved before anything exists: body, Project fields (all of them against one read
+ * of the field definitions), milestone and labels. `status` is the Status the command sets (Backlog; Ready first with --start).
+ */
+let repositoryLists;
+function planNew({ title, bodyFile, milestone, priority, labels: wanted, fields }, status = 'Backlog') {
+  for (const [what, text] of [['title', title], ['body file', bodyFile], ['milestone', milestone], ['priority', priority]]) assert.ok(text, `${what} is required`);
+  assert.ok(wanted.length, 'at least one label is required');
+  const text = readFileSync(bodyFile, 'utf8').replaceAll('\r\n', '\n').trimEnd();
+  assert.ok(text, `${bodyFile} is empty`);
+  assert.ok(!fields.some(([fieldName]) => ['status', 'priority'].includes(fieldName.toLowerCase())), 'Status and Priority are not field values (give the priority; the command sets Status)');
+  const pairs = [['Status', status], ['Priority', priority], ...fields];
+  for (const required of project.requiredFields ?? []) {
+    assert.ok(pairs.some(([fieldName]) => fieldName.toLowerCase() === required.toLowerCase()), `the project requires ${required}: give a value for it`);
+  }
+  const plans = planFields(pairs);
+  repositoryLists ??= { milestones: restAll(`repos/${project.repository}/milestones`), labels: restAll(`repos/${project.repository}/labels`) };
+  const exact = (list, name, key) => list.find(item => item[key].toLowerCase() === name.toLowerCase());
+  const found = exact(repositoryLists.milestones, milestone, 'title');
+  assert.ok(found, `${project.repository} has no open milestone "${milestone}"`);
+  // The REST API would silently create an unknown label.
+  // A repeated label (any casing) is one label: GitHub stores it once, and the read-back compares exactly.
+  const labels = [...new Set(wanted.map(label => exact(repositoryLists.labels, label, 'name')?.name ?? assert.fail(`${project.repository} has no label "${label}"`)))];
+  return { title, text, plans, milestone: found, labels };
+}
+
+/** The REST call that creates the issue (no GraphQL point). A lost or unreadable answer does not prove that nothing was created. */
+function post({ title, text, milestone, labels }, assignees) {
+  try {
+    const created = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues`, '-X', 'POST', '--input', '-'],
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: JSON.stringify({ title, body: text, milestone: milestone.number, labels, ...assignees && { assignees } }) }));
+    assert.ok(Number.isSafeInteger(created?.number) && created.html_url && created.node_id, 'GitHub did not report the new issue');
+    return created;
+  } catch (error) {
+    throw new Error(`creating the issue failed (${String(error.stderr || error.message).trim()}); it may exist anyway: search ${project.repository} for "${title}" before trying again`, { cause: error });
+  }
+}
+
+/** The milestone, labels and (with `viewer`) assignee GitHub stored. */
+function readBackIssue(created, { milestone, labels }, viewer) {
+  const stored = rest(`repos/${project.repository}/issues/${created.number}`);
+  assert.equal(stored.milestone?.title, milestone.title, `Read-back of the milestone shows ${stored.milestone?.title ?? 'none'}`);
+  assert.deepEqual(stored.labels.map(label => label.name).sort(), [...labels].sort(), 'Read-back of the labels differs');
+  if (viewer) assert.ok(stored.assignees.some(assignee => assignee.login.toLowerCase() === viewer.toLowerCase()), 'Read-back of the assignee differs');
+}
+
+/** The one-line result of `new`. Later plans replace earlier ones of the same field (Status: Ready, then In progress). */
+const newLine = (created, { milestone, labels, plans }, ...more) => [`NEW ${created.html_url}`, `milestone: ${milestone.title}`, `labels: ${labels.join(', ')}`,
+  ...Object.entries(Object.fromEntries(plans.map(plan => [plan.fieldName, plan.option.name]))).map(([fieldName, value]) => `${fieldName}: ${value}`), ...more].join(' | ');
+
+// GitHub cuts a request off after 10 seconds. Measured on 2026-10-07: 50 aliased Project writes took 2 to 3 seconds, 100 took 3 to 4.
+// ponytail: 50 stays well inside that and below any size seen to fail; raise it only when a measured batch needs fewer requests.
+const mutationsPerRequest = 50;
+// GitHub's ids and field options are plain text: a JSON string is a valid GraphQL string.
+const quoted = JSON.stringify;
+
+/**
+ * Mutations in as many aliased requests as `mutationsPerRequest` needs; the answers are keyed `m0`, `m1`, … in the order of `calls`.
+ * `tolerate`: see graphql().
+ */
+function mutateAll(calls, tolerate) {
+  const results = {};
+  for (let from = 0; from < calls.length; from += mutationsPerRequest) {
+    const chunk = calls.slice(from, from + mutationsPerRequest).map((call, index) => `m${from + index}:${call}`);
+    Object.assign(results, graphql(`mutation{${chunk.join(' ')}}`, {}, tolerate));
+  }
+  return results;
+}
+
+/**
+ * Put freshly created issues on the Project and write their fields with a handful of requests, however many there are: one
+ * to add them all, one to write every value, one to read every value back. `rows`: { id: issue node id, number, plans }.
+ * Costs the same for one issue as for twenty-five.
+ */
+function setFields(rows) {
+  const onProject = rows.filter(row => row.plans.some(plan => !plan.linked));
+  // The Project's own automation may have added an issue already: GitHub then refuses that one with "already exists", which is
+  // no failure as long as its item can be read.
+  const added = mutateAll(onProject.map(row => `addProjectV2ItemById(input:{projectId:${quoted(project.id)},contentId:${quoted(row.id)}}){item{id}}`),
+    /already exists in this project/i);
+  onProject.forEach((row, index) => { row.item = added[`m${index}`]?.item.id; });
+  const raced = onProject.filter(row => !row.item);
+  if (raced.length) {
+    const { nodes } = graphql(`query{nodes(ids:${quoted(raced.map(row => row.id))}){...on Issue{projectItems(first:100){nodes{id project{id}}}}}}`);
+    raced.forEach((row, index) => {
+      row.item = nodes[index]?.projectItems.nodes.find(item => item.project.id === project.id)?.id;
+      assert.ok(row.item, `GitHub reports #${row.number} as already on the Project, but its item is unreadable`);
+    });
+  }
+  mutateAll(rows.flatMap(row => row.plans.map(({ field, linked, option }) => linked
+    ? `setIssueFieldValue(input:{issueId:${quoted(row.id)},issueFields:[{fieldId:${quoted(linked.id)},singleSelectOptionId:${quoted(option.id)}}]}){clientMutationId}`
+    : `updateProjectV2ItemFieldValue(input:{projectId:${quoted(project.id)},itemId:${quoted(row.item)},fieldId:${quoted(field.id)},value:{singleSelectOptionId:${quoted(option.id)}}}){projectV2Item{id}}`)));
+  // Read back by id, so a silent API no-op cannot pass; the read costs by the number of ids, not by the 100-value limits of an issue's lists.
+  const onIssue = rows.filter(row => row.plans.some(plan => plan.linked));
+  const read = graphql(`query{
+    ${onProject.length ? `items:nodes(ids:${quoted(onProject.map(row => row.item))}){...on ProjectV2Item{fieldValues(first:100){nodes{
+      ...on ProjectV2ItemFieldSingleSelectValue{name field{...on ProjectV2FieldCommon{name}}}}}}}` : ''}
+    ${onIssue.length ? `issues:nodes(ids:${quoted(onIssue.map(row => row.id))}){...on Issue{issueFieldValues(first:100){nodes{
+      ...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}}}` : ''}}`);
+  for (const row of rows) {
+    const values = [...read.items?.[onProject.indexOf(row)]?.fieldValues.nodes ?? [], ...read.issues?.[onIssue.indexOf(row)]?.issueFieldValues.nodes ?? []];
+    for (const { fieldName, option } of row.plans) {
+      const stored = values.find(entry => entry?.field?.name === fieldName)?.name;
+      assert.equal(stored, option.name, `Read-back of ${fieldName} on #${row.number} shows ${stored ?? 'no value'}`);
+    }
+  }
+}
+
+/**
  * Create an issue with everything the workflow requires and read every value back. All inputs are checked before the
  * issue exists (Project fields, milestone, labels, start prerequisites); a failure after it names the issue so it is
  * finished by hand, never created twice. `--start` then runs the start steps: Ready, assignee, claim, In progress.
+ * `--from FILE` creates a whole list instead (createMany).
  */
 function create() {
-  const options = newOptions(process.argv.slice(3));
-  const { title, bodyFile, milestone, priority, agent, session, start } = options;
-  for (const [flag, text] of [['--title', title], ['--body-file', bodyFile], ['--milestone', milestone], ['--priority', priority]]) assert.ok(text, `new: ${flag} is required`);
-  assert.ok(options.labels.length, 'new: at least one --label is required');
+  const args = process.argv.slice(3);
+  if (args[0] === '--from') return createMany(args.slice(1));
+  const options = newOptions(args);
+  const { agent, session, start } = options;
   if (start) {
     assert.ok(['claude', 'codex'].includes(agent) && /^\w[\w.-]*$/.test(session ?? ''), 'new: --start needs --agent claude|codex and --session ID (the claim comment)');
   } else assert.ok(!agent && !session, 'new: --agent and --session belong to --start');
-  const text = readFileSync(bodyFile, 'utf8').replaceAll('\r\n', '\n').trimEnd();
-  assert.ok(text, `new: ${bodyFile} is empty`);
   // Status is set by the command: Backlog, or Ready then In progress with --start.
-  const pairs = [['Status', start ? 'Ready' : 'Backlog'], ['Priority', priority], ...options.fields];
-  assert.ok(!options.fields.some(([fieldName]) => ['status', 'priority'].includes(fieldName.toLowerCase())), 'new: Status and Priority are not --field values (use --priority; --start sets Status)');
-  for (const required of project.requiredFields ?? []) {
-    assert.ok(pairs.some(([fieldName]) => fieldName.toLowerCase() === required.toLowerCase()), `new: the project requires ${required}: add --field ${required}=VALUE`);
-  }
-  const plans = planFields(pairs), progress = start ? planFields([['Status', 'In progress']]) : [];
-  const exact = (list, wanted, key) => list.find(item => item[key].toLowerCase() === wanted.toLowerCase());
-  const found = exact(restAll(`repos/${project.repository}/milestones`), milestone, 'title');
-  assert.ok(found, `new: ${project.repository} has no open milestone "${milestone}"`);
-  const known = restAll(`repos/${project.repository}/labels`);
-  // The REST API would silently create an unknown label.
-  // A repeated label (any casing) is one label: GitHub stores it once, and the read-back compares exactly.
-  const labels = [...new Set(options.labels.map(label => exact(known, label, 'name')?.name ?? assert.fail(`new: ${project.repository} has no label "${label}"`)))];
+  const plan = named('new', () => planNew(options, start ? 'Ready' : 'Backlog'));
+  const progress = start ? planFields([['Status', 'In progress']]) : [];
   let viewer;
   if (start) {
     viewer = graphql('query{viewer{login}}').viewer?.login;
     assert.ok(viewer, 'Cannot verify the authenticated GitHub user');
-    const waits = waitReasons(text);
+    const waits = waitReasons(plan.text);
     assert.ok(!waits.blocked.length && !waits.unknown.length, `new: the issue would not be startable: ${[...waits.blocked, ...waits.unknown].join('; ')}`);
   }
-  let created;
-  try {
-    created = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues`, '-X', 'POST', '--input', '-'],
-      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: JSON.stringify({ title, body: text, milestone: found.number, labels, ...start && { assignees: [viewer] } }) }));
-    assert.ok(Number.isSafeInteger(created?.number) && created.html_url, 'GitHub did not report the new issue');
-  } catch (error) {
-    // A lost or unreadable answer does not prove that nothing was created.
-    throw new Error(`creating the issue failed (${String(error.stderr || error.message).trim()}); it may exist anyway: search ${project.repository} for "${title}" before trying again`, { cause: error });
-  }
+  const created = post(plan, start && [viewer]);
   number = created.number;
   let step = 'reading it back';
   try {
-    const stored = rest(`repos/${project.repository}/issues/${number}`);
-    assert.equal(stored.milestone?.title, found.title, `Read-back of the milestone shows ${stored.milestone?.title ?? 'none'}`);
-    assert.deepEqual(stored.labels.map(label => label.name).sort(), [...labels].sort(), 'Read-back of the labels differs');
-    if (start) assert.ok(stored.assignees.some(assignee => assignee.login.toLowerCase() === viewer.toLowerCase()), 'Read-back of the assignee differs');
+    readBackIssue(created, plan, viewer);
     step = 'setting the Project fields';
-    applyFields(readIssue(), plans);
+    setFields([{ id: created.node_id, number, plans: plan.plans }]);
     let claim;
     if (start) {
       step = 'posting the claim comment';
@@ -572,12 +670,51 @@ function create() {
       step = 'setting In progress';
       applyFields(readIssue(), progress);
     }
-    // Later plans replace earlier ones of the same field (Status: Ready, then In progress).
-    const values = Object.entries(Object.fromEntries([...plans, ...progress].map(plan => [plan.fieldName, plan.option.name])));
-    console.log([`NEW ${created.html_url}`, `milestone: ${found.title}`, `labels: ${labels.join(', ')}`,
-      ...values.map(([fieldName, value]) => `${fieldName}: ${value}`), ...start ? [`assignee: ${viewer}`, `claim: ${claim}`] : []].join(' | '));
+    console.log(newLine(created, { ...plan, plans: [...plan.plans, ...progress] }, ...start ? [`assignee: ${viewer}`, `claim: ${claim}`] : []));
   } catch (error) {
     throw new Error(`${created.html_url} was created, but ${step} failed: ${String(error.stderr || error.message).trim()}; finish by hand with board.mjs field/status, do not create it again`, { cause: error });
+  }
+}
+
+// ponytail: 50 issues per file stay far below GitHub's limit for creating content (80 a minute); split a longer list by hand.
+const manyLimit = 50;
+const entryKeys = ['title', 'bodyFile', 'milestone', 'priority', 'labels', 'fields'];
+
+/**
+ * `new --from FILE`: FILE is a JSON list of `{ title, bodyFile, milestone, priority, labels: [..], fields: { NAME: VALUE } }`
+ * (the flags of a single `new`; the Status is Backlog). Every entry is checked before the first issue exists, so one bad entry
+ * creates nothing. The issues are created over REST, then all of them get their Project fields in a handful of GraphQL requests
+ * (setFields), and one line per issue is printed after everything was read back. Later failures name every issue that exists.
+ */
+function createMany([file, ...extra]) {
+  assert.ok(file && !file.startsWith('--') && !extra.length, 'new --from takes one FILE and no other option');
+  const list = named(`new --from: ${file}`, () => JSON.parse(readFileSync(file, 'utf8')));
+  assert.ok(Array.isArray(list) && list.length && list.length <= manyLimit, `new --from: ${file} must hold a JSON list of 1 to ${manyLimit} issues`);
+  const plans = list.map((entry, index) => named(`new --from: entry ${index + 1}${typeof entry?.title === 'string' ? ` "${entry.title}"` : ''}`, () => {
+    assert.ok(entry && typeof entry === 'object' && !Array.isArray(entry), 'an entry is an object');
+    const unknown = Object.keys(entry).filter(key => !entryKeys.includes(key));
+    assert.ok(!unknown.length, `unknown key ${unknown.join(', ')}; the keys are ${entryKeys.join(', ')}`);
+    const { labels = [], fields = {} } = entry;
+    assert.ok(['title', 'bodyFile', 'milestone', 'priority'].every(key => entry[key] === undefined || typeof entry[key] === 'string'), 'title, bodyFile, milestone and priority are text');
+    assert.ok(Array.isArray(labels) && labels.every(label => typeof label === 'string'), 'labels is a list of label names');
+    assert.ok(fields && typeof fields === 'object' && !Array.isArray(fields) && Object.values(fields).every(value => typeof value === 'string'), 'fields is an object of NAME: VALUE');
+    return planNew({ ...entry, labels, fields: Object.entries(fields) });
+  }));
+  const made = [];
+  const known = () => made.length ? `${made.length} of ${plans.length} issues exist: ${made.map(({ created }) => created.html_url).join(' ')}` : 'none was created';
+  try {
+    for (const plan of plans) made.push({ plan, created: post(plan) });
+  } catch (error) {
+    throw new Error(`${error.message}; ${known()}; create only the missing ones, never an existing one again`, { cause: error });
+  }
+  let step = 'reading them back';
+  try {
+    for (const { created, plan } of made) readBackIssue(created, plan);
+    step = 'setting the Project fields';
+    setFields(made.map(({ created, plan }) => ({ id: created.node_id, number: created.number, plans: plan.plans })));
+    console.log(made.map(({ created, plan }) => newLine(created, plan)).join('\n'));
+  } catch (error) {
+    throw new Error(`${known()}, but ${step} failed: ${String(error.stderr || error.message).trim()}; finish by hand with board.mjs field/status, do not create them again`, { cause: error });
   }
 }
 
@@ -1519,6 +1656,7 @@ const commands = { next, check: () => check(readIssue(true), { session: sessionO
   reviews: reviewsOnce, wait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
 const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
+  + ' | new --from FILE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] | wait PR --merged [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
