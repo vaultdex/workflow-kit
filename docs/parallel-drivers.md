@@ -86,7 +86,10 @@ Modellwahl stehen hier nicht.
 4. **Warten ohne Handarbeit.** Abweichend von [AGENT_RULES.md](../AGENT_RULES.md#economy)
    und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
    `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
-   Zuges von Hintergrundaufgaben erfährt. Nach DONE nicht auf einen Reviewer
+   Zuges von Hintergrundaufgaben erfährt. `wait` endet nach 9 Minuten von selbst (`--max-minutes N`,
+   0 = unbegrenzt) mit Exit-Code 4 und der Zeile `still waiting: call wait again`, damit das
+   Bash-Werkzeug es nicht nach 10 Minuten in den Hintergrund schiebt: bei Exit 4 einfach erneut
+   aufrufen. Nach DONE nicht auf einen Reviewer
    ohne Spur pollen (ein Review, das nie startet) und keinen Review von Hand anfordern
    (kein `@codex review`); fehlt die Spur, nennt der Übergabe-Kommentar das
    ([Review loop](CONTRIBUTING.md#review-loop) Schritt 3). Freitext-Ankündigungen anderer Bots
