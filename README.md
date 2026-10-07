@@ -276,17 +276,24 @@ and then work in that directory, their relative paths (changed files given to `a
   Session ownership, final
   proof and whether a finding is justified remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
-- `merge PR [--stall MINUTES] [--grace MINUTES]`: the only way for an agent with merge
+- `merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]`: the only way for an agent with merge
   authority to merge ([review loop](docs/CONTRIBUTING.md#review-loop) step 7). It applies the review gates of
   `handoff` (open non-draft PR, CI green, every reviewer with a trace on the head finished or
   stalled, no `blocker:` line, no open thread, determined merge state) and prints the same
   lines; a running reviewer ends `WAITING` (exit 3) and names it, a red check or blocker
-  `FAILED` (exit 1), and nothing is merged. Otherwise it runs `gh pr merge --merge
+  `FAILED` (exit 1), and nothing is merged. If the base moved and `changed on both sides` lists files, it first
+  merges the base into the PR branch (`PUT pulls/N/update-branch` with the checked head as `expected_head_sha`),
+  waits for the new head and its CI like `wait` (`--max-minutes`, default 9: then `still waiting: call merge again`,
+  exit 4; run `merge` again), checks the gates again and merges that head; a base that moved without
+  an overlap does not hold the merge. Then it runs `gh pr merge --merge
   --match-head-commit <full head id>` once (a push after the check makes gh refuse) and counts
   only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; gh
   refusal or a read-back that differs: `ERROR`, exit 2). A layer of a [stack](docs/CONTRIBUTING.md#stacked-pull-requests)
-  with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. It does not read the issue, claims or the
-  [handoff comment](#handoff-comment).
+  with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. After the merge it
+  deletes the head branch (`branch deleted: …`) unless the repository's setting "Automatically delete head branches" does it,
+  the branch is not of this repository, is the default branch or is the base of another open PR (a stack: GitHub would close
+  that PR); it prints `branch kept: …` with the reason. A failed or already done delete is a `note:` or `branch gone:` line,
+  never an error of the merge. It does not read the issue, claims or the [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` (first after 60 s, then at longer intervals up to 5 minutes, again from 60 s
   when what it awaits changes; twice as long below 1000 quota points), prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails or a non-draft PR has merge conflicts, `blocker: merge conflicts`) or `ERROR`. Both end

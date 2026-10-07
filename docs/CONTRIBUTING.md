@@ -429,7 +429,10 @@ backlink never closes an issue.
    command applies the review gates of `handoff` (CI, every review with a trace on the head
    finished, no `blocker:`, no open thread, determined merge state) and refuses while a
    reviewer is still running. It merges exactly the checked head by its full commit id
-   (`gh pr merge --merge --match-head-commit`) and reads the merge back. Codex is the only
+   (`gh pr merge --merge --match-head-commit`) and reads the merge back. When the base moved
+   under files the PR changes too, it first merges the base into the PR branch and waits for CI
+   again; afterwards it deletes the head branch (not a stack base, not the default branch, not
+   where the repository deletes it itself). Codex is the only
    required review bot; CodeRabbit is optional and is neither awaited nor re-requested.
 8. After the merge, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
