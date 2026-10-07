@@ -343,7 +343,7 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title detailsUrl checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
       ...on StatusContext{context state description creator{login}}}}}}}}
-  reviewRequests(first:100){totalCount nodes{requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}
+  reviewRequests(first:100){totalCount nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
     requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}}`;
 // ponytail: checks, check suites, review requests and opinionated reviews stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
@@ -425,7 +425,7 @@ const login = user => user?.login?.replace(/\[bot\]$/, '');
 const isBot = user => user?.type === 'Bot';
 // "optionalReviewers" lists bot logins or app slugs whose traces are shown but never awaited, stalled or counted as red
 // (a review bot on a free plan that is rate limited most of the time). Their open threads and change requests still block.
-const reviewerKey = name => name?.toLowerCase().replace(/^(@|app\/)/, '').replace(/\[bot\]$/, '');
+const reviewerKey = name => name?.trim().toLowerCase().replace(/^(@|app\/)/, '').replace(/\[bot\]$/, '');
 // Read on use, so a malformed list is an ERROR of the review commands, not a crash of every command.
 const optionalReviewers = () => {
   const list = project.optionalReviewers ?? [];
@@ -611,7 +611,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const draftStart = convertEvent || (Number.isFinite(readyEvent) ? Date.parse(pr.createdAt) : -Infinity);
   assert.ok(!Number.isNaN(draftStart), 'The PR creation time is unreadable');
   const readyBoundary = Math.max(readyEvent, draftStart + 10_000);
-  const runs = contexts.nodes.filter(orderable);
+  const runs = contexts.nodes.filter(check => orderable(check) && !isOptionalCheck(check));
   const startedAt = check => Date.parse(check.checkSuite?.createdAt);
   const flowOf = check => JSON.stringify([check.checkSuite?.app?.slug, check.checkSuite?.workflowRun?.workflow?.id]);
   const sinceReady = check => startedAt(check) >= readyBoundary;
@@ -674,7 +674,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // GitHub drops a request once the review arrives, so every remaining request is an outstanding review.
   assert.equal(pr.reviewRequests.nodes.length, pr.reviewRequests.totalCount, 'Not every review request is readable');
   const reviewerName = reviewer => reviewer?.login ?? reviewer?.name;
-  for (const { requestedReviewer: reviewer } of pr.reviewRequests.nodes.filter(({ requestedReviewer }) => !isOptional(reviewerName(requestedReviewer)))) {
+  for (const { requestedReviewer: reviewer } of pr.reviewRequests.nodes.filter(({ requestedReviewer }) => !(requestedReviewer?.__typename === 'Bot' && isOptional(requestedReviewer.login)))) {
     // A request added later starts its own clock.
     const requested = pr.requestEvents.nodes.filter(event => reviewerName(event.requestedReviewer) === reviewerName(reviewer))
       .map(event => Date.parse(event.createdAt));

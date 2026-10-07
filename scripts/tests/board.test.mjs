@@ -890,7 +890,7 @@ test('reviews waits only for traces on the current head and never reads failures
   const rabbit = { login: 'coderabbitai[bot]', type: 'Bot' };
   const rabbitStatus = (state, description = 'Review rate limited') => ({ __typename: 'StatusContext', context: 'CodeRabbit', state, description, creator: { login: 'coderabbitai' } });
   const rabbitRunning = { ...codex('Running', 0.5), user: rabbit };
-  const rabbitRequest = { requestedReviewer: { login: 'coderabbitai' } };
+  const rabbitRequest = { requestedReviewer: { __typename: 'Bot', login: 'coderabbitai' } };
   const rabbitTraces = [
     [pr({ contexts: [check('COMPLETED'), rabbitStatus('PENDING')] }), {}],
     [pr({ contexts: [check('COMPLETED'), rabbitStatus('FAILURE')] }), {}],
@@ -900,7 +900,7 @@ test('reviews waits only for traces on the current head and never reads failures
     [{ ...pr(), reviewRequests: { totalCount: 1, nodes: [rabbitRequest] }, requestEvents: { totalCount: 0, nodes: [] } }, {}]];
   const waitingFor = [3, 1, 3, 3, 3, 3];
   rabbitTraces.forEach(([data, traces], index) => assert.equal(reviews(data, traces), waitingFor[index], `Precondition: unlisted trace ${index} decides`));
-  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: ['CodeRabbitAI[bot]'] }));
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: [' CodeRabbitAI[bot] '] }));
   rabbitTraces.forEach(([data, traces], index) => assert.equal(reviews(data, traces), 0, `Optional reviewer trace ${index} never waits or fails`));
   assert.equal(reviews(pr({ pushed: 60, contexts: [check('IN_PROGRESS')] })), 3, 'Other checks still wait');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE'), rabbitStatus('SUCCESS')] })), 1, 'A listed reviewer does not hide red CI');
@@ -911,6 +911,13 @@ test('reviews waits only for traces on the current head and never reads failures
     latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'coderabbitai' } }] } });
   assert.match(optionalFindings.stdout, /^unresolved threads: 1$/m, 'An open thread of an optional reviewer still counts');
   assert.match(optionalFindings.stdout, /^blocker: changes requested by coderabbitai$/m, 'A change request of an optional reviewer still blocks');
+  // A workflow run of an optional app that was skipped while Draft is no missing Ready run either.
+  const rabbitDraftRun = draftRun(3, 'SKIPPED', { name: 'Review', workflow: 'Review' });
+  const rabbitReadyHead = readyHead([{ ...rabbitDraftRun, checkSuite: { ...rabbitDraftRun.checkSuite, app: { slug: 'coderabbitai' } } }, draftRun(2, 'SUCCESS', { minutes: 2 })]);
+  assert.equal(reviews(rabbitReadyHead, oldTraces), 0, 'A Draft-skipped run of an optional reviewer never waits');
+  // The list names bots and apps: a team of the same name is still a required reviewer.
+  const teamRequest = { ...pr(), reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { __typename: 'Team', name: 'coderabbitai' } }] }, requestEvents: { totalCount: 0, nodes: [] } };
+  assert.equal(reviews(teamRequest), 3, 'A team with an optional name is no optional reviewer');
   assert.match(look(rabbitTraces[0][0]).stdout, /Review rate limited/, 'The optional trace keeps its description');
   assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 3, 'An optional check alone is no CI: the first CI check is still awaited');
   const rabbitSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'coderabbitai' } };
@@ -922,6 +929,7 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr()), 2, 'A malformed list is an error, never silently ignored');
   writeFileSync(config, plain);
   assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 0, 'Precondition: unlisted, the same lone status is CI');
+  assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
   const oldHeadReview ={ user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
   assert.equal(reviews(pr({ pushed: 60, requests: ['maintainer'], requestedAgo: 1 })), 3, 'A late review request starts its own clock');
