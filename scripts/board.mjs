@@ -608,7 +608,7 @@ const isBot = user => user?.type === 'Bot';
 const reviewerKey = name => name?.trim().toLowerCase().replace(/^(@|app\/)/, '').replace(/\[bot\]$/, '');
 // Read on use, so a malformed list is an ERROR of the review commands, not a crash of every command.
 const optionalReviewers = () => {
-  const list = project.optionalReviewers ?? [];
+  const list = project.optionalReviewers === undefined ? [] : project.optionalReviewers; // only a missing field is allowed; null is malformed
   assert.ok(Array.isArray(list) && list.every(name => typeof name === 'string' && name.trim()),
     'optionalReviewers must be a list of non-empty bot logins or app slugs');
   return new Set(list.map(reviewerKey));
@@ -871,7 +871,12 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => [login(review.user), review.submitted_at]),
     // 👍 is Codex's "no findings"; a later 👀 is its own open trace below.
     ...reactions.map(reaction => [login(reaction.user), reaction.created_at])];
-  for (const reaction of reactions.filter(reaction => isBot(reaction.user) && !isOptional(reaction.user.login) && after(reaction.created_at))) {
+  for (const reaction of reactions.filter(reaction => isBot(reaction.user) && after(reaction.created_at))) {
+    // An optional reviewer's 👀 is shown and never awaited.
+    if (isOptional(reaction.user.login)) {
+      if (reaction.content === 'eyes') lines.push(`reaction ${login(reaction.user)} 👀 [optional reviewer, not awaited]`);
+      continue;
+    }
     // 👀 announces a review; a later comment, head review or final reaction by the same bot is its result.
     const answered = activity.some(([author, time]) => author === login(reaction.user) && Date.parse(time) > Date.parse(reaction.created_at));
     if (reaction.content === 'eyes' && !answered) waiting.push({ text: `${login(reaction.user)} reacted 👀`, since: Date.parse(reaction.created_at) });

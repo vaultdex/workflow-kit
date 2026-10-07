@@ -269,7 +269,8 @@ the installer, so the kit's current one is copied.
   review), bot 👀 reactions and review requests. Free-text announcements of other bots are not
   detected; check such reviewers by hand. Reviewers in `"optionalReviewers"`
   ([setup](SETUP.md#3-board-and-labels)) are skipped for all of these: their checks, comments and
-  reviews are listed, but they never wait, stall or fail; their open threads and change requests still block.
+  reviews are listed and their 👀 reaction is shown as a note, but they never wait, stall or fail; their open threads and
+  change requests still block, and an analyzer such as SonarCloud listed there still reports open issues as a blocker.
 
 ### Handoff comment
 
