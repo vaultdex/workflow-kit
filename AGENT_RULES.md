@@ -7,7 +7,9 @@ details only for the current step.
 ## Hard rules
 
 - Humans accept and merge. Never merge, enable auto-merge or set Done before a
-  human merged.
+  human merged. One exception, decided by the maintainer
+  ([#244](https://github.com/vaultdex/workflow-kit/issues/244)): the Renovate bot merges
+  its own dependency PRs of this kit once their CI is green. It binds the bot, never an agent.
 - Never force-push, rewrite shared history, reset, stash or discard work you don't
   own, or bypass branch protection, required checks or spending limits. One exception:
   `--force-with-lease` on your own upper layer of a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests),
