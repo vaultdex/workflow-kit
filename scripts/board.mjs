@@ -18,9 +18,9 @@ function graphql(query, variables = {}) {
   return JSON.parse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 })).data;
 }
 
-// A predecessor with its open PRs: the base of a stack is found through the native closing links (manual ones included).
+// A predecessor with the PRs that close it (closed ones included, so a merged one stays visible; stackBase keeps open and merged): the base of a stack is found through the native closing links (manual ones included).
 const predecessorFields = `number state stateReason repository{nameWithOwner}
-  closedByPullRequestsReferences(first:10,includeClosedPrs:false){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
+  closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
 // Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query. Only the issue
 // itself reads the PRs of its predecessors (to find a stack base); the sub-issues' verdicts stay without them.
 const issueFields = predecessor => `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
@@ -887,23 +887,27 @@ function handoffIssue(issue, viewer, reviewedHead) {
   const status = projectItem(issue)?.status?.name;
   const reasons = [];
   // An upper layer may be handed off before the base is merged, but only as a layer on that base.
-  // A merged base leaves a plain PR on the trunk: nothing stack-specific to verify any more.
-  if (stackedOn?.state === 'OPEN') {
+  // A merged base leaves a plain PR on the trunk; it still has to come from this repository and target that trunk.
+  if (stackedOn) {
     const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
       pullRequest(number:$number){baseRefName headRefOid isCrossRepository headRepository{nameWithOwner}}}}`, { owner, name, number: Number(value) }).repository;
     if (reviewedHead && pr?.headRefOid !== reviewedHead) reasons.push(`PR #${value} changed its head from ${reviewedHead.slice(0, 7)} during handoff; read it again`);
     if (pr?.isCrossRepository !== false || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) reasons.push(`PR #${value} comes from a fork or another repository: stacks stay inside ${project.repository}`);
-    // An aligned branch chain is no stack: GitHub must list both PRs in one open stack (the read-back of the docs, step 2).
-    const stacks = rest(`repos/${project.repository}/stacks?pull_request=${Number(value)}`);
-    if (!Array.isArray(stacks) || !stacks.some(stack => stack.open !== false && [stackedOn.number, Number(value)].every(prNumber => stack.pull_requests?.some(member => member.number === prNumber)))) {
-      reasons.push(`PR #${value} and PR #${stackedOn.number} are not linked as a stack on GitHub (GET repos/${project.repository}/stacks?pull_request=${value} lists none): link them (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
+    if (stackedOn.state === 'MERGED') {
+      if (pr?.baseRefName !== stackedOn.baseRefName) reasons.push(`PR #${stackedOn.number} is merged into ${stackedOn.baseRefName}: PR #${value} must target it, not ${pr?.baseRefName}`);
+    } else {
+      // An aligned branch chain is no stack: GitHub must list both PRs in one open stack (the read-back of the docs, step 2).
+      const stacks = rest(`repos/${project.repository}/stacks?pull_request=${Number(value)}`);
+      if (!Array.isArray(stacks) || !stacks.some(stack => stack.open !== false && [stackedOn.number, Number(value)].every(prNumber => stack.pull_requests?.some(member => member.number === prNumber)))) {
+        reasons.push(`PR #${value} and PR #${stackedOn.number} are not linked as a stack on GitHub (GET repos/${project.repository}/stacks?pull_request=${value} lists none): link them (docs/CONTRIBUTING.md#stacked-pull-requests) or stop`);
+      }
+      // Proof of the upper head only counts when that head contains the base PR's current head (a later push below leaves the branch name unchanged).
+      if (!reasons.length && pr?.baseRefName === stackedOn.headRefName) {
+        const { status } = rest(`repos/${project.repository}/compare/${stackedOn.headRefOid}...${pr.headRefOid}`);
+        if (!['ahead', 'identical'].includes(status)) reasons.push(`PR #${value} does not contain the current head ${stackedOn.headRefOid.slice(0, 7)} of PR #${stackedOn.number} (compare says ${status}): rebase onto it and push with the lease`);
+      }
+      if (pr?.baseRefName !== stackedOn.headRefName) reasons.push(`the open predecessor PR #${stackedOn.number} is not merged: PR #${value} must target its branch ${stackedOn.headRefName}, not ${pr?.baseRefName}`);
     }
-    // Proof of the upper head only counts when that head contains the base PR's current head (a later push below leaves the branch name unchanged).
-    if (!reasons.length && pr?.baseRefName === stackedOn.headRefName) {
-      const { status } = rest(`repos/${project.repository}/compare/${stackedOn.headRefOid}...${pr.headRefOid}`);
-      if (!['ahead', 'identical'].includes(status)) reasons.push(`PR #${value} does not contain the current head ${stackedOn.headRefOid.slice(0, 7)} of PR #${stackedOn.number} (compare says ${status}): rebase onto it and push with the lease`);
-    }
-    if (pr?.baseRefName !== stackedOn.headRefName) reasons.push(`the open predecessor PR #${stackedOn.number} is not merged: PR #${value} must target its branch ${stackedOn.headRefName}, not ${pr?.baseRefName}`);
   }
   if (!['Automated review', 'Human review'].includes(status)) reasons.push('finish implementation and Automated review first');
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {

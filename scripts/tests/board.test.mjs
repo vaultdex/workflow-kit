@@ -536,8 +536,13 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   // After the base merged into the release branch GitHub has retargeted the layer: a plain PR there, nothing stack-specific left to prove.
   writeIssue(assigned({ projectItems: issue('Automated review').projectItems, blockedBy: { totalCount: 1, nodes: [open(2, [pr(5, { state: 'MERGED' })])] } }));
   writeFileSync(join(checkout, 'stored'), 'Automated review');
-  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'release/0.1.1' })));
   writeFileSync(join(checkout, 'stacks.json'), '[]');
+  const plain = { baseRefName: 'release/0.1.1', isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' } };
+  for (const wrong of [{ baseRefName: 'main' }, { isCrossRepository: true }, { headRepository: { nameWithOwner: 'someone/example' } }]) {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ ...plain, ...wrong })));
+    rejected('a merged base with a PR that is not a plain PR of this repository on the release branch');
+  }
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(plain)));
   assert.equal(run('handoff', '1', '7').status, 0);
   assert.equal(stored(), 'Human review');
 });
