@@ -2045,7 +2045,7 @@ const fullReadEvery = 5 * 60_000;
 function reviewsForHead() {
   const marker = changeMarker(), started = Date.now();
   try {
-    if (marker && lastRead?.marker.text === marker.text && started - lastRead.at < fullReadEvery) {
+    if (marker && lastRead?.marker?.text === marker.text && started - lastRead.at < fullReadEvery) {
       const result = lookAtHead(lastRead.pr, () => lastRead.threads);
       if (!result.done) return result;
     }

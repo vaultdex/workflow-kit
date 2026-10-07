@@ -94,6 +94,31 @@ test('wait reads PR and threads in one GraphQL query per change REST reports', t
   assert.deepEqual(graphqlReads(), { pr: 2, threads: 0, all: 2 }, 'The change costs exactly one more query');
 });
 
+test('wait retries a missing cache when GraphQL initially lags behind the REST head', t => {
+  const { checkout, run, check, pr, show, restReads, graphqlReads } = restFixture(t);
+  const oldHead = 'a'.repeat(40), newHead = 'b'.repeat(40);
+  for (const [reason, changes] of [
+    ['CI', { contexts: [check('IN_PROGRESS')] }],
+    ['requested review', { contexts: [check('COMPLETED')], requests: ['maintainer'], threadPages: [[false]] }],
+  ]) {
+    const data = pr(changes);
+    data.headRefOid = data.commits.nodes[0].commit.oid = newHead;
+    const outdated = structuredClone(data);
+    outdated.headRefOid = outdated.commits.nodes[0].commit.oid = oldHead;
+    show(data);
+    writeFileSync(join(checkout, 'rest-reads'), '');
+    writeFileSync(join(checkout, 'pr-rest-reads.json'), JSON.stringify([{ headRefOid: newHead }]));
+    writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([outdated, data]));
+    const result = run('wait', '7', '--interval', '0', '--max-minutes', '0.02');
+    assert.equal(result.status, 4, `${reason} must keep waiting after the first uncached round: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /^WAITING$/m);
+    assert.doesNotMatch(result.stdout, /^DONE$/m, `${reason} is still a blocker`);
+    assert.ok(restReads() >= 3, 'Precondition: at least two rounds followed the mismatched head');
+    assert.deepEqual(graphqlReads(), { pr: 2, threads: 0, all: 2 }, 'The missing cache is read again, then the matching head can be cached');
+    assert.equal(readFileSync(join(checkout, 'pr.json'), 'utf8').includes(newHead), true, 'GraphQL caught up to the REST head');
+  }
+});
+
 test('wait confirms every end with a full read', t => {
   const { run, check, readyHead, show, graphqlReads } = restFixture(t);
   // Ready since 5 minutes with a 5 minute and 2 second grace: the cached look says "waiting" first, then "done" once the clock passed the grace.
