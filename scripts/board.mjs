@@ -1018,7 +1018,7 @@ function verifyBacklinks() {
 const login = user => user?.login?.replace(/\[bot\]$/, '');
 const isBot = user => user?.type === 'Bot';
 // "optionalReviewers" lists bot logins or app slugs whose traces are shown but never awaited, stalled or counted as red
-// (a review bot on a free plan that is rate limited most of the time). Their open threads and change requests still block.
+// (a review bot on a free plan that is rate limited most of the time). Their open threads and change requests still block; `handoff` dismisses a change request once all threads are resolved.
 const reviewerKey = name => name?.trim().toLowerCase().replace(/^(@|app\/)/, '').replace(/\[bot\]$/, '');
 // Read on use, so a malformed list is an ERROR of the review commands, not a crash of every command.
 const optionalReviewers = () => {
@@ -1108,7 +1108,7 @@ function baseMovement(pr) {
 }
 const filesText = files => files.slice(0, 10).join(', ') + (files.length > 10 ? `, and ${files.length - 10} more` : '');
 
-/** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. `threadsOf` reads the unresolved threads (wait reuses the last answer). */
+/** One look at the PR head: done or still waiting, and whether CI failed; read failures throw (`dismissStale`, handoff only, is the one write). `threadsOf` reads the unresolved threads (wait reuses the last answer). */
 function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption(), threadsOf = current => unresolvedThreads(current.number, current.reviewThreads), dismissStale = false) {
   isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
@@ -1359,10 +1359,10 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) {
     // GitHub's ruleset blocks the merge on a standing change request, so an optional reviewer's answered one (all threads resolved)
     // is dismissed here, on handoff only; it is never re-requested. The review id comes from the REST list read above.
-    const stale = dismissStale && !threads.length && isOptional(review.author?.login)
+    const latest = dismissStale && !threads.length && isOptional(review.author?.login)
       && reviewList.findLast(item => login(item.user) === login(review.author) && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(item.state));
-    if (stale?.state === 'CHANGES_REQUESTED') {
-      execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${pr.number}/reviews/${stale.id}/dismissals`, '-X', 'PUT', '-f',
+    if (latest?.state === 'CHANGES_REQUESTED') {
+      execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${pr.number}/reviews/${latest.id}/dismissals`, '-X', 'PUT', '-f',
         `message=All review threads are resolved on head ${short}; the change request is stale.`], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
       lines.push(`dismissed stale change request by ${login(review.author)}: all threads are resolved`);
     } else lines.push(`blocker: changes requested by ${login(review.author)}`);
