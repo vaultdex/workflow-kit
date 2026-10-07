@@ -434,7 +434,7 @@ function create() {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state isDraft createdAt headRefName headRefOid mergeStateStatus reviewDecision
+  number state isDraft createdAt headRefName headRefOid baseRefName mergeStateStatus reviewDecision
   readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
@@ -579,6 +579,20 @@ function headSetAt(pr, log = pushLog(pr)) {
   return time;
 }
 
+/** Commits the base gained since the PR's merge-base and the files both sides changed; null while the base has not moved.
+ * ponytail: compare lists the first 300 changed files only (GitHub's cap, all on page 1) and renames match by their new name; replace when a miss costs a CI run. */
+function baseMovement(pr) {
+  assert.ok(pr.baseRefName, 'The PR base is not readable');
+  // A branch may contain "#" or "?"; "/" stays a separator. per_page=1 keeps the commit list short, the file list is not paged.
+  const ref = pr.baseRefName.split('/').map(encodeURIComponent).join('/');
+  const compare = basehead => rest(`repos/${project.repository}/compare/${basehead}?per_page=1`);
+  const { behind_by: behind, files: own = [] } = compare(`${ref}...${pr.headRefOid}`);
+  assert.ok(Number.isSafeInteger(behind), 'The base comparison is unreadable');
+  if (!behind) return null;
+  const base = new Set((compare(`${pr.headRefOid}...${ref}`).files ?? []).map(file => file.filename));
+  return { behind, shared: own.map(file => file.filename).filter(file => base.has(file)) };
+}
+
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
 function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption()) {
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
@@ -668,6 +682,17 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   } catch (error) {
     // The count is information only: an unreadable one never changes the verdict (neither red into ERROR nor green into ERROR).
     lines.push(`note: correction pushes unreadable (${error.message})`);
+  }
+  // The base moves whenever other PRs merge; one merge before the next push is cheaper than a red CI run per move. Information only.
+  try {
+    const moved = baseMovement(pr);
+    if (moved) {
+      lines.push(`base moved: ${moved.behind} commits since merge-base (${pr.baseRefName}); merge it once before the next push`);
+      const shown = moved.shared.slice(0, 10).join(', ') + (moved.shared.length > 10 ? `, and ${moved.shared.length - 10} more` : '');
+      lines.push(moved.shared.length ? `changed on both sides: ${shown}` : 'no file is changed on both sides');
+    }
+  } catch (error) {
+    lines.push(`note: base movement unreadable (${error.message})`);
   }
   // A known CI failure is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, lines, pr };
