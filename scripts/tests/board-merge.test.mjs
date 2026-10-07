@@ -69,3 +69,85 @@ test('merge merges the checked head by its full id only when no review is runnin
     rmSync(join(checkout, flag));
   }
 });
+
+/** A checkout whose PR 7 is ready to merge from the branch `claude/7-topic` of this repository; `calls` is what merge did, in order. */
+function mergeFixture(t) {
+  const { checkout, run } = fixture(t);
+  const [first, second] = ['abcdef1', '1234567'].map(prefix => prefix + '0'.repeat(33));
+  const commit = handoffPr().commits.nodes[0].commit;
+  const headOf = (oid, changes) => ({ headRefOid: oid, commits: { nodes: [{ commit: { ...commit, oid, ...changes } }] } });
+  const show = (changes = {}) => {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ headRefName: 'claude/7-topic', isCrossRepository: false,
+      headRepository: { nameWithOwner: 'Test/Example' }, ...headOf(first), ...changes })));
+    writeFileSync(join(checkout, 'issues-comments.json'), '[]');
+    for (const file of ['calls', 'merges', 'pr-reads.json', 'compare.json', 'dependents.json', 'update-fails', 'delete-fails', 'delete-gone', 'auto-delete']) rmSync(join(checkout, file), { force: true });
+  };
+  const calls = () => existsSync(join(checkout, 'calls')) ? readFileSync(join(checkout, 'calls'), 'utf8').trim().split('\n') : [];
+  const flag = name => writeFileSync(join(checkout, name), '');
+  const json = (name, data) => writeFileSync(join(checkout, name), JSON.stringify(data));
+  return { run, show, calls, flag, json, first, second, headOf };
+}
+
+test('merge merges a base that moved under the same files into the PR branch, waits for CI on the new head, then merges', t => {
+  const { run, show, calls, flag, json, first, second, headOf } = mergeFixture(t);
+  const running = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS', conclusion: null }] } } };
+  // GitHub shows the previous head for one more read after the update, then the new one.
+  const staleThenNew = (...overlays) => json('pr-reads.json', [{}, {}, ...overlays]);
+
+  show();
+  json('compare.json', { behind: 2, own: ['a.txt', 'b.txt'], base: ['a.txt', 'c.txt'] });
+  staleThenNew(headOf(second));
+  const updated = run('merge', '7', '--interval', '0');
+  assert.equal(updated.status, 0, updated.stdout + updated.stderr);
+  assert.deepEqual(calls(), [`update-branch ${first}`, 'merge', 'delete claude/7-topic'], 'update first, then the merge of the new head, then the branch');
+  assert.match(updated.stdout, new RegExp(`^MERGED #7 head ${second} `, 'm'), 'the new head is the one merged');
+
+  // The new head's CI still runs: nothing is merged, the next call continues.
+  show();
+  json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
+  staleThenNew(headOf(second, running));
+  const waiting = run('merge', '7', '--interval', '0', '--max-minutes', '0.01');
+  assert.equal(waiting.status, 4, waiting.stdout + waiting.stderr);
+  assert.deepEqual(calls(), [`update-branch ${first}`]);
+
+  // The base moved without touching the PR's files: no update, straight to the merge.
+  show();
+  json('compare.json', { behind: 2, own: ['a.txt'], base: ['c.txt'] });
+  assert.equal(run('merge', '7').status, 0);
+  assert.deepEqual(calls(), ['merge', 'delete claude/7-topic']);
+
+  // GitHub refuses the update (conflict, or another head): an error, never a merge of the old head.
+  show();
+  json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
+  flag('update-fails');
+  const refused = run('merge', '7');
+  assert.equal(refused.status, 2, refused.stdout + refused.stderr);
+  assert.deepEqual(calls(), [`update-branch ${first}`]);
+});
+
+test('merge deletes the head branch only when nothing else needs it, and the merge stands when the delete fails', t => {
+  const { run, show, calls, flag, json } = mergeFixture(t);
+  const dependent = (number, ref) => ({ number, base: { ref } });
+  const cases = [
+    ['a free branch is deleted', {}, () => {}, ['merge', 'delete claude/7-topic']],
+    ['the base of an open PR (a stack) is kept', {}, () => json('dependents.json', [dependent(8, 'claude/7-topic')]), ['merge']],
+    ['an open PR on another base does not hold it', {}, () => json('dependents.json', [dependent(9, 'main')]), ['merge', 'delete claude/7-topic']],
+    ['a repository that deletes merged branches itself is left alone', {}, () => flag('auto-delete'), ['merge']],
+    ['a branch of a fork is kept', { isCrossRepository: true, headRepository: { nameWithOwner: 'someone/example' } }, () => {}, ['merge']],
+    ['the default branch is kept', { headRefName: 'main' }, () => {}, ['merge']],
+    ['a branch that is already gone is no failure', {}, () => flag('delete-gone'), ['merge', 'delete claude/7-topic']],
+    ['a refused delete is a note, not an error', {}, () => flag('delete-fails'), ['merge', 'delete claude/7-topic']],
+  ];
+  for (const [label, changes, prepare, expected] of cases) {
+    show(changes);
+    prepare();
+    const result = run('merge', '7');
+    assert.equal(result.status, 0, `${label}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /^MERGED #7 /m, label);
+    assert.deepEqual(calls(), expected, label);
+  }
+  // No merge, no delete.
+  show({ mergeStateStatus: 'DIRTY' });
+  assert.equal(run('merge', '7').status, 1);
+  assert.deepEqual(calls(), []);
+});

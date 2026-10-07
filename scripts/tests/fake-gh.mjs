@@ -69,6 +69,34 @@ function api(argv, input, stdout, stderr, exit) {
       stdout(JSON.stringify(items.slice((page - 1) * 100, page * 100)));
       exit(0);
     }
+    // What merge does to the repository, in order (calls): update-branch, merge, delete of the head branch.
+    if (parts[3] === 'pulls' && parts[5] === 'update-branch' && argv.includes('PUT')) {
+      // update-fails: GitHub refuses (conflict, or the head is not the expected one). Otherwise the base is part of the branch now;
+      // the new head shows through pr-reads.json, which GitHub also shows late.
+      fs.appendFileSync('calls', `update-branch ${argv.find(arg => arg.startsWith('expected_head_sha=')).slice(18)}\n`);
+      if (fs.existsSync('update-fails')) { stderr('gh: merge conflict (HTTP 422)\n'); exit(1); }
+      fs.rmSync('compare.json', { force: true });
+      stdout('{"message":"Updating pull request branch."}');
+      exit(0);
+    }
+    if (parts[3] === 'pulls' && parts.length === 4) {
+      // The open PRs on a base branch (dependents.json: PRs with base.ref, the default is none).
+      const base = new URLSearchParams(path.split('?')[1]).get('base');
+      stdout(JSON.stringify((fs.existsSync('dependents.json') ? JSON.parse(fs.readFileSync('dependents.json')) : []).filter(pr => pr.base.ref === base)));
+      exit(0);
+    }
+    if (parts[3] === 'git' && argv.includes('DELETE')) {
+      // delete-fails: GitHub refuses; delete-gone: the branch was deleted already.
+      fs.appendFileSync('calls', `delete ${decodeURIComponent(parts.slice(6).join('/'))}\n`);
+      if (fs.existsSync('delete-gone')) { stderr('gh: Reference does not exist (HTTP 422)\n'); exit(1); }
+      if (fs.existsSync('delete-fails')) { stderr('gh: Resource not accessible by integration (HTTP 403)\n'); exit(1); }
+      exit(0);
+    }
+    if (parts.length === 3) {
+      // auto-delete: the repository setting "Automatically delete head branches" is on.
+      stdout(JSON.stringify({ default_branch: 'main', delete_branch_on_merge: fs.existsSync('auto-delete') }));
+      exit(0);
+    }
     if (parts[3] === 'stacks') {
       // The stack read-back: by default PR 5 and PR 7 are linked in one open stack.
       stdout(fs.existsSync('stacks.json') ? fs.readFileSync('stacks.json') : '[]');
@@ -294,6 +322,7 @@ function api(argv, input, stdout, stderr, exit) {
 /** gh pr merge …: records the call; merge-fails is gh refusing, merge-noop a merge that never shows. */
 function pr(argv, input, stdout, stderr, exit) {
   fs.appendFileSync('merges', argv.slice(2).join(' ') + '\n');
+  fs.appendFileSync('calls', 'merge\n');
   if (fs.existsSync('merge-fails')) { stderr('gh: Head branch was modified\n'); exit(1); }
   if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));
 }

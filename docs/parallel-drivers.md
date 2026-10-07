@@ -33,6 +33,11 @@ Repository-CI ([vaultdex/Vaultdex#980](https://github.com/vaultdex/Vaultdex/issu
 **Sonar.** Null offene Sonar-Issues prüft `board.mjs handoff` bereits mechanisch
 ([#134](https://github.com/vaultdex/workflow-kit/issues/134)); nichts weiter zu tun.
 
+**Merge-Vollmacht.** Agents mit Merge-Vollmacht mergen nur über `board.mjs merge PR` und
+bauen kein eigenes Gate nach: der Befehl prüft CI, Reviews, Sonar und offene Threads, zieht bei
+überschneidenden Änderungen die Basis nach, wartet erneut auf die CI und löscht danach den
+Branch ([README](../README.md#board-commands), [#319](https://github.com/vaultdex/workflow-kit/issues/319)).
+
 **GitHub-Kontingent.** Das GraphQL-Kontingent (5.000 Punkte pro Stunde) gilt für das ganze
 Konto und wird von allen Drivern gemeinsam verbraucht; ist es leer, scheitert jeder
 `board.mjs`-Befehl bis zum Reset. Gemessene Kosten: eine Lesung von `reviews`/`wait` kostet

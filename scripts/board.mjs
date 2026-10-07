@@ -799,7 +799,7 @@ function createMany([file, ...extra]) {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state isDraft createdAt headRefName headRefOid baseRefName mergeStateStatus reviewDecision
+  number state isDraft createdAt headRefName headRefOid baseRefName mergeStateStatus reviewDecision isCrossRepository headRepository{nameWithOwner}
   readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
@@ -982,6 +982,7 @@ function baseMovement(pr) {
   const base = new Set((compare(`${pr.headRefOid}...${ref}`).files ?? []).map(file => file.filename));
   return { behind, shared: own.map(file => file.filename).filter(file => base.has(file)) };
 }
+const filesText = files => files.slice(0, 10).join(', ') + (files.length > 10 ? `, and ${files.length - 10} more` : '');
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. */
 function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption()) {
@@ -1084,8 +1085,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     const moved = baseMovement(pr);
     if (moved) {
       lines.push(`base moved: ${moved.behind} commits since merge-base (${pr.baseRefName}); merge it once before the next push`);
-      const shown = moved.shared.slice(0, 10).join(', ') + (moved.shared.length > 10 ? `, and ${moved.shared.length - 10} more` : '');
-      lines.push(moved.shared.length ? `changed on both sides: ${shown}` : 'no file is changed on both sides');
+      lines.push(moved.shared.length ? `changed on both sides: ${filesText(moved.shared)}` : 'no file is changed on both sides');
     }
   } catch (error) {
     lines.push(`note: base movement unreadable (${error.message})`);
@@ -1561,33 +1561,89 @@ function handoff() {
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
 }
 
+/** The merge gate: handoff's PR gate plus the stack rule. Merging an upper layer of a stack merges every open layer below it too
+ * (GitHub: "merge the top pull request, every pull request below it comes with it"), so the lower layer goes first, by itself.
+ * No Stacks API (404) means no stack. */
+const mergeGate = () => finishedPr(number, 'merge', undefined, () => {
+  let stacks;
+  try { stacks = rest(`repos/${project.repository}/stacks?pull_request=${number}`); } catch (error) {
+    if (!/\b404\b|Not Found/.test(String(error.stderr))) throw error;
+    stacks = [];
+  }
+  assert.ok(Array.isArray(stacks), 'The stack membership is unreadable');
+  return stacks.flatMap(({ pull_requests: members = [] }) => members.slice(0, Math.max(0, members.findIndex(member => member.number === number)))
+    .filter(member => member.state === 'open').map(member => `PR #${member.number} below it in its stack is still open: merge it first, merging this layer would merge it too`));
+});
+
+/** Merge the moved base into the PR branch (update-branch, only if the head is still `head`), then wait until the PR shows the new head. */
+function updateBranch(head) {
+  execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/update-branch`, '-X', 'PUT', '-f', `expected_head_sha=${head}`], { encoding: 'utf8', env: gh.env });
+  // update-branch answers 202 before the new head exists, and the PR reports the previous head for a moment.
+  for (let read = 1; ; read++) {
+    const fresh = graphql(readyQuery, { owner, name, number }).repository.pullRequest.headRefOid;
+    if (fresh !== head) return fresh;
+    assert.ok(read < 10, `PR #${number} still shows head ${head.slice(0, 7)} after the branch update; run merge again`);
+    sleep(numberOption('--interval', 3));
+  }
+}
+
+/**
+ * Delete the merged head branch, unless the repository does it itself (`delete_branch_on_merge`) or it is not ours to delete: another repository's, the default branch (a sync PR from
+ * `main` has it as head), or the base of an open PR (a stack: GitHub would close that PR). Returns the line to print.
+ * ponytail: check and delete are two calls, a PR opened on the branch in between is closed by the delete; replace when GitHub offers a conditional delete.
+ */
+function deleteHeadBranch(pr) {
+  const branch = pr.headRefName;
+  if (pr.isCrossRepository !== false || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) return `branch kept: ${branch} is not a branch of ${project.repository}`;
+  const repository = rest(`repos/${project.repository}`);
+  // With "Automatically delete head branches" GitHub deletes it itself, and a manual delete would answer 422.
+  if (repository.delete_branch_on_merge) return `branch kept: ${project.repository} deletes merged head branches itself`;
+  if (branch === repository.default_branch) return `branch kept: ${branch} is the default branch`;
+  const dependents = rest(`repos/${project.repository}/pulls?state=open&base=${encodeURIComponent(branch)}&per_page=100`);
+  assert.ok(Array.isArray(dependents), 'The open PRs on the branch are unreadable');
+  if (dependents.length) return `branch kept: ${branch} is the base of open PR ${dependents.map(({ number: dependent }) => `#${dependent}`).join(', ')}`;
+  try {
+    execFileSync(gh.file, ['api', `repos/${project.repository}/git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, '-X', 'DELETE'], { encoding: 'utf8', env: gh.env });
+  } catch (error) {
+    // A branch that is already gone (the repository deletes merged branches itself) is no failure.
+    if (!/\b(404|422)\b|Reference does not exist|Not Found/.test(`${error.stderr}${error.stdout}`)) throw error;
+    return `branch gone: ${branch}`;
+  }
+  return `branch deleted: ${branch}`;
+}
+
 /**
  * Merge for agents with merge authority: the same gate as handoff (CI, every traced review finished, no blocker or open
- * thread), then exactly the checked head. `--match-head-commit` needs the full object id, and it also refuses a push that
- * lands after the check, so no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR.
+ * thread). When the base moved under files the PR changes too (#190), the base is merged into the PR branch first and the
+ * gate runs again on the new head after its CI; a base that moved without overlap does not hold the merge. Then exactly the
+ * checked head: `--match-head-commit` needs the full object id, and it also refuses a push that lands after the check, so
+ * no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR. Afterwards the head branch goes (see deleteHeadBranch).
  */
-function merge() {
-  // Merging an upper layer of a stack merges every open layer below it too (GitHub: "merge the top pull request, every pull
-  // request below it comes with it"), so the lower layer goes first, by itself. No Stacks API (404) means no stack.
-  const result = finishedPr(number, 'merge', undefined, () => {
-    let stacks;
-    try { stacks = rest(`repos/${project.repository}/stacks?pull_request=${number}`); } catch (error) {
-      if (!/\b404\b|Not Found/.test(String(error.stderr))) throw error;
-      stacks = [];
-    }
-    assert.ok(Array.isArray(stacks), 'The stack membership is unreadable');
-    return stacks.flatMap(({ pull_requests: members = [] }) => members.slice(0, Math.max(0, members.findIndex(member => member.number === number)))
-      .filter(member => member.state === 'open').map(member => `PR #${member.number} below it in its stack is still open: merge it first, merging this layer would merge it too`));
-  });
+async function merge() {
+  let result = mergeGate();
   if (!result) return;
+  const { baseRefName, headRefOid: before } = result.pr;
+  assert.match(before, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
+  const moved = baseMovement(result.pr);
+  if (moved?.shared.length) {
+    console.log(`update: ${baseRefName} gained ${moved.behind} commits that change ${filesText(moved.shared)} like this PR; merging it into the PR branch first`);
+    console.log(`updated: head ${before.slice(0, 7)} -> ${updateBranch(before).slice(0, 7)}; waiting for CI`);
+    // The new head's CI (and any reviewer that answers the push) decides, so the gate runs again; one update per run.
+    if (!await poll(() => reviews(stallOption()))) return;
+    result = mergeGate();
+    if (!result) return;
+  }
   const { headRefOid } = result.pr;
-  assert.match(headRefOid, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
   execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
     { encoding: 'utf8', env: gh.env });
   const { state, mergeCommit } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     pullRequest(number:$number){state mergeCommit{oid}}}}`, { owner, name, number }).repository.pullRequest;
   assert.equal(state, 'MERGED', `Merge read-back shows #${number} as ${state}`);
   console.log(`MERGED #${number} head ${headRefOid} merge commit ${mergeCommit?.oid}`);
+  // The merge is done and read back: nothing about the branch may turn it into an ERROR.
+  try { console.log(deleteHeadBranch(result.pr)); } catch (error) {
+    console.log(`note: branch ${result.pr.headRefName} not deleted (${String(error.stderr || error.message).trim()})`);
+  }
 }
 
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
@@ -1689,24 +1745,20 @@ function reviewsForHead() {
     `waiting: PR still shows head ${pr.headRefOid.slice(0, 7)}, expected ${expected.slice(0, 7)}`] };
 }
 
-async function wait() {
-  const look = process.argv.includes('--merged') ? mergeState : reviewsForHead;
+/** Looks again and again until `look` is done and returns that result; returns nothing after printing "still waiting" (exit 4). */
+async function poll(look) {
   const maxMinutes = numberOption('--max-minutes', 9);
   if (maxMinutes > 0) deadline = Date.now() + maxMinutes * 60_000;
   let shown, quiet = 0;
-  // Exit 4: not finished, call `wait` again (a driver's tool call must end before its 10-minute limit).
+  // Exit 4: not finished, call the command again (a driver's tool call must end before its 10-minute limit).
   const stillWaiting = resetAt => {
     process.exitCode = 4;
-    console.log(['WAITING', shown, `still waiting: call wait again${resetAt ? ` after ${resetAt} (GitHub quota pause)` : ''}`, quotaLine()].filter(Boolean).join('\n'));
+    console.log(['WAITING', shown, `still waiting: call ${command} again${resetAt ? ` after ${resetAt} (GitHub quota pause)` : ''}`, quotaLine()].filter(Boolean).join('\n'));
   };
   try {
     for (;;) {
       const result = look(), { done, lines } = result;
-      if (done) {
-        const [word, code] = outcome(result);
-        process.exitCode = code;
-        return console.log([word, ...lines, quotaLine()].filter(Boolean).join('\n'));
-      }
+      if (done) return result;
       // Interim output names what is still awaited, once per change, so a background run is never silent.
       const waiting = lines.filter(line => line.startsWith('waiting:')).join('\n');
       if (waiting !== shown) {
@@ -1720,6 +1772,14 @@ async function wait() {
     if (!(error instanceof StillWaiting)) throw error;
     stillWaiting(error.resetAt);
   }
+}
+
+async function wait() {
+  const result = await poll(process.argv.includes('--merged') ? mergeState : reviewsForHead);
+  if (!result) return;
+  const [word, code] = outcome(result);
+  process.exitCode = code;
+  console.log([word, ...result.lines, quotaLine()].filter(Boolean).join('\n'));
 }
 
 // OWNER/REPO#N names a blocker in another repository; N or #N one in this project's repository.
@@ -1760,7 +1820,7 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | check ISSUE [--sessio
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] | wait PR --merged [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
-  + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
+  + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFinite(projectGrace) && projectGrace >= 0)) {
@@ -1789,7 +1849,7 @@ if (!commands[command] || (!['next', 'new'].includes(command) && !Number.isSafeI
   // --head is the full id of the pushed commit (git rev-parse HEAD), as for ready; a short or missing one would wait on a head that never matches.
   || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{40}$/i.test(headOption())))
   // 0 = no limit; a missing or non-numeric value must not silently mean that.
-  || (process.argv.includes('--max-minutes') && (command !== 'wait' || !(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
+  || (process.argv.includes('--max-minutes') && (!['wait', 'merge'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'merge' && value && !value.startsWith('--'))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
