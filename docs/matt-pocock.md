@@ -15,6 +15,11 @@ in an update (changed files, new reference files, new revision) passes without a
 the Renovate regenerate workflow regenerates the outputs, and the test compares every
 tracked file of every listed skill with the published copy.
 
+**Deviation from upstream.** The generated `retro` copy drops `disable-model-invocation`
+(`adapt` in `setup-matt-pocock.mjs`), because the review loop makes every agent run the
+retro before handoff and the Skill tool refuses a flagged skill. No other file or skill
+is changed; the test pins both. A Renovate update keeps the deviation.
+
 Follow [generated files](../README.md#generated-files-and-ownership) for updates,
 discovery paths and preservation. Each provider's `MATT-POCOCK-SOURCES.json`
 records revision/source paths; `MATT-POCOCK-LICENSE.md` preserves attribution.
