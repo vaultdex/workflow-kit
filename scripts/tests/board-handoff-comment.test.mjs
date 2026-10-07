@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { codeBlock, handoffFixture, handoffComment, handoffPr, issue, list, reference, task, test } from './board-fixture.mjs';
 
-test('handoff rejects open acceptance without an issue reference and names each line', t => {
+test('handoff only notes open acceptance without an issue reference, one note per line', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
   const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
   writeFileSync(join(checkout, 'handoff-fixture'), '');
@@ -19,16 +19,16 @@ test('handoff rejects open acceptance without an issue reference and names each 
   for (const [bodyHTML, lines] of open) {
     writeIssue({ ...ready, bodyHTML });
     const result = run('handoff', '1', '7');
-    assert.equal(result.status, 1, bodyHTML + result.stdout + result.stderr);
-    for (const line of lines) assert.ok(result.stdout.includes(': ' + line), result.stdout);
+    assert.equal(result.status, 0, bodyHTML + result.stdout + result.stderr);
+    for (const line of lines) assert.ok(result.stdout.includes('note: open acceptance without an issue reference: ' + line), result.stdout);
     assert.doesNotMatch(result.stdout, /sample in code|second/);
-    assert.equal(existsSync(join(checkout, 'mutations')), false, 'Rejected handoff never mutates status');
   }
   // No list, only code, checked off, or moved to a follow-up: the issue may go to Human review.
   for (const bodyHTML of ['', '<p>no list</p>', codeBlock, list([task('done', true)]), list([task('moved to ' + reference), task('b', true)])]) {
     writeIssue({ ...ready, bodyHTML });
     const result = run('handoff', '1', '7');
     assert.equal(result.status, 0, bodyHTML + result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /^note:/m);
   }
   writeIssue({ ...ready, bodyHTML: undefined });
   assert.equal(run('handoff', '1', '7').status, 2, 'An unreadable rendered body is unknown, never a handoff');
@@ -80,7 +80,7 @@ const quote = html => `<blockquote>\n${html}\n</blockquote>`;
 const retro = (...lines) => '<h2 dir="auto">Übergabe</h2>\n<p dir="auto">Head: abcdef1</p>\n<h3 dir="auto">Retro</h3>\n<ul dir="auto">\n'
   + lines.map(line => `<li>${line}</li>`).join('\n') + '\n</ul>';
 
-test('handoff needs a retro section whose every line ends with its resolution', t => {
+test('handoff notes a retro section whose lines do not end with a resolution, and still hands off', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
@@ -91,9 +91,9 @@ test('handoff needs a retro section whose every line ends with its resolution', 
   };
   const rejected = (html, named, label) => {
     const result = handoff(html);
-    assert.equal(result.status, 1, label + result.stdout + result.stderr);
-    for (const line of named) assert.ok(result.stdout.includes(': ' + line), label + result.stdout);
-    assert.equal(existsSync(join(checkout, 'mutations')), false, label + 'Rejected handoff never mutates status');
+    assert.equal(result.status, 0, label + result.stdout + result.stderr);
+    assert.match(result.stdout, /^note: /m, label + result.stdout);
+    for (const line of named) assert.ok(result.stdout.includes('note: retro line without a resolution (end it with an issue link, "behoben in <SHA>", "persönlich gemeldet" or "kein Handlungsbedarf: <Grund>"): ' + line), label + result.stdout);
   };
 
   rejected(retro('Kit-Init dauert: ' + link, 'Rate-Limit: ohne Erledigung', 'Memory veraltet: persönlich gemeldet'), ['Rate-Limit: ohne Erledigung'], 'one line without resolution: ');
@@ -117,6 +117,7 @@ test('handoff needs a retro section whose every line ends with its resolution', 
   ]) {
     const result = handoff(html);
     assert.equal(result.status, 0, label + ': ' + result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /^note:/m, label);
   }
   assert.equal(handoff(undefined).status, 2, 'An unreadable rendered comment is unknown, never a handoff');
 });
@@ -127,7 +128,7 @@ const selfReview = (level, ...lines) => `<h${level} dir="auto">Selbstprüfung</h
 
 test('handoff needs the Selbstprüfung section of the PR body to name every check the project lists, and nothing without the field', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
-  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'handoff-fixture'), '');
   const config = join(checkout, '.github/workflow-project.json'), plain = JSON.parse(readFileSync(config, 'utf8'));
   const project = changes => writeFileSync(config, JSON.stringify({ ...plain, ...changes }));
@@ -137,12 +138,12 @@ test('handoff needs the Selbstprüfung section of the PR body to name every chec
     return run('handoff', '1', '7');
   };
   const both = '<code>ponytail-review</code>: nichts mehr zu streichen. <code>code-review</code>: ein Fund, behoben.';
-  // The reason names what is missing; one run also lists the other missing point (the open box), so one fix round is enough.
+  // The reason names what is missing.
   const rejected = (bodyHTML, named, label) => {
     const result = handoff(bodyHTML);
     assert.equal(result.status, 1, label + result.stdout + result.stderr);
     const blockers = result.stdout.split('\n').filter(line => line.startsWith('blocker:'));
-    assert.equal(blockers.length, 2, label + result.stdout);
+    assert.equal(blockers.length, 1, label + result.stdout);
     for (const name of named) assert.ok(blockers.some(line => line.includes('Selbstprüfung') && line.includes(name)), label + result.stdout);
     assert.equal(existsSync(join(checkout, 'mutations')), false, label + 'Rejected handoff never mutates status');
   };

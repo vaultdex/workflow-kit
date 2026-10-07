@@ -198,7 +198,7 @@ and then work in that directory, their relative paths (changed files given to `a
   and comment backlink on every delivered issue before writing status. A missing
   backlink on an issue of this repository is set like `link` does and read back
   (a failure refuses); `link` first is not needed. It also prints one `warning:` line per open acceptance box
-  of the issue that names no issue (what `handoff` will refuse); the status is written regardless.
+  of the issue that names no issue; the status is written regardless.
   See [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks).
 - `body ISSUE FILE BASE_FILE`: replace an issue body with `FILE` only if the current body
   still equals `BASE_FILE` (the body your change is based on; line endings and trailing
@@ -271,17 +271,15 @@ and then work in that directory, their relative paths (changed files given to `a
   1 blocked, 2 unreadable or changed state, 3 waiting). Native links are read on
   every page, including manual links on release branches; text and branch links
   alone do not count. It also requires the [handoff comment](#handoff-comment) on the
-  PR for the current head and rejects an issue body that still has an open task-list item
-  (`- [ ]`) without an issue reference (`#N` or `OWNER/REPO#N`; exit 1 otherwise, status
-  untouched, every such item is printed). It reads the body as GitHub renders it: checked-off
+  PR for the current head. It prints a `note:` (never a refusal) for each open task-list item
+  (`- [ ]`) of the issue body without an issue reference (`#N` or `OWNER/REPO#N`) and for a missing or
+  malformed `Retro` section of the handoff comment. Both are read as GitHub renders them: checked-off
   items, items with a reference GitHub links, and code blocks do not count (a `#N` in a code
-  span or glued to letters is no reference). The handoff comment must also carry a
-  `Retro` section whose every list line ends with its resolution (exit 1 otherwise, status
-  untouched, every line without one is printed); it is read as GitHub renders it too.
+  span or glued to letters is no reference).
   When the project file lists `"selfReview"` (for example `["ponytail-review", "code-review"]`), the PR body must also
   carry a `## Selbstprüfung` section that names each of those checks (`merge` asks for it too); a heading of any level counts,
   quoted templates do not, and whether a check was good is not judged. Without the field nothing changes.
-  One run lists every missing point together (open acceptance, assignment, handoff comment, retro, self-review section, native link, blockers
+  One run lists every missing point together (assignment, handoff comment, self-review section, native link, blockers
   and threads; a refused issue state, an unreadable read or running reviews are reported alone or first), so one fix round
   suffices. An undetermined merge state (`UNKNOWN`) is read again up to 3 times, `--interval SECONDS` apart (default 3,
   1 point per read; `merge` too) before `handoff` reports it as waiting.
@@ -362,10 +360,9 @@ stalled, the reviewer, cause and evidence (an optional reviewer only when it fou
 - `persönlich gemeldet` (memory, shell profile: the human changes those),
 - `kein Handlungsbedarf: <Grund>`.
 
-Without findings the section has the single line `Keine Funde`. The command checks that the
-section exists and that each line ends this way, as GitHub renders the comment (an issue
-reference in a code span does not count); it does not judge whether a finding is justified.
-Of the rest, only heading, head and author are checked; the content is for the human reviewer.
+Without findings the section has the single line `Keine Funde`. The command only notes a missing
+section or a line that ends otherwise, as GitHub renders the comment (an issue
+reference in a code span does not count). Of the rest, only heading, head and author are checked; the content is for the human reviewer.
 With several comments for the head the newest counts.
 
 ```md

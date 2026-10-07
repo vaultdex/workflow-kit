@@ -623,8 +623,8 @@ function guardOption(issue, { fieldName, option }) {
   }
   if (fieldName === 'Status' && option.name === 'Automated review') {
     verifyBacklinks();
-    // Only a hint, never a refusal: `handoff` refuses these later, and finding out now saves the round trip.
-    if (typeof issue.bodyHTML === 'string') for (const line of openAcceptance(issue.bodyHTML)) console.log(`warning: open acceptance in the issue, handoff will refuse it (check it off, or move it to a follow-up and link that issue): ${line}`);
+    // Only a hint, never a refusal; `handoff` notes these again.
+    if (typeof issue.bodyHTML === 'string') for (const line of openAcceptance(issue.bodyHTML)) console.log(`warning: open acceptance in the issue (check it off, or move it to a follow-up and link that issue): ${line}`);
   }
 }
 
@@ -1550,7 +1550,7 @@ function openAcceptance(bodyHtml) {
 }
 
 /**
- * Everything the issue side of the handoff still lacks (readiness, review status, assignment, open acceptance) on the
+ * Everything the issue side of the handoff still lacks (readiness, review status, assignment) on the
  * supplied issue snapshot, or undefined when check() already printed its verdict and stopped.
  * `reviewedHead`: the PR head the proof was gathered for; a stacked layer must still be that head when this reads it.
  */
@@ -1600,7 +1600,6 @@ function handoffIssueReasons(issue, viewer, reviewedHead, currentPrNumber) {
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
     reasons.push('the issue is not assigned to the authenticated driver');
   }
-  for (const line of openAcceptance(issue.bodyHTML)) reasons.push(`open acceptance without an issue reference (check it off, or move it to a follow-up and link that issue): ${line}`);
   return reasons;
 }
 
@@ -1617,7 +1616,7 @@ function handoffIssue(issue, viewer, reviewedHead, currentPrNumber) {
 /**
  * The driver's handoff comment: a "## Übergabe" heading and a "Head: <SHA>" line in a PR comment by the authenticated
  * user. The comment names the head it is about, so a new head asks for a new comment however (and whenever) the push
- * happened, which no timestamp reliably tells. Of its content only the retro section is judged, see `retroReasons`;
+ * happened, which no timestamp reliably tells. Of its content only the retro section is noted, see `retroNotes`;
  * with several matching comments the newest counts.
  */
 const findHandoffComment = (comments, viewer, headRefOid) => comments.findLast(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
@@ -1659,17 +1658,17 @@ function selfReviewReasons(bodyHtml, checks) {
 }
 
 /**
- * Why the retro section of the handoff comment, as GitHub renders it, does not pass: a heading "Retro" with one list
+ * Why the retro section of the handoff comment, as GitHub renders it, is not as asked (a note, never a refusal): a heading "Retro" with one list
  * line per finding, each ending with its resolution (an issue link, "behoben in <SHA>", "persönlich gemeldet" or
  * "kein Handlungsbedarf: <Grund>"), or the single line "Keine Funde". Whether a finding is justified is not judged.
  * GitHub's rendering decides what a heading, a list line and an issue reference are, so no Markdown is parsed here.
  */
-function retroReasons(bodyHtml) {
+function retroNotes(bodyHtml) {
   assert.equal(typeof bodyHtml, 'string', 'The rendered handoff comment is unreadable');
   const unquoted = withoutQuotes(bodyHtml);
   const section = unquoted.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && headingText(part) === 'Retro');
   const lines = [...(section ?? '').matchAll(/<li[^>]*>([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>])/g)].map(([, line]) => [line, text(line)]);
-  if (!lines.length) return ['the handoff comment needs a "Retro" section with one list line per finding, each ending with its resolution, or the single line "Keine Funde" (README: Handoff comment)'];
+  if (!lines.length) return ['the handoff comment has no "Retro" section with list lines (README: Handoff comment)'];
   if (lines.length === 1 && /^keine funde\.?$/i.test(lines[0][1])) return [];
   // The last element must be an issue link (GitHub renders a pull request reference the same way, but with /pull/N); a loose list wraps the line in <p>.
   // Closing punctuation and spaces after the resolution (`… #230.`) do not hide it.
@@ -1745,12 +1744,12 @@ function handoffPr(issueId, viewer, expectedHead, prior) {
   const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => {
     const reasons = [];
     const comment = findHandoffComment(comments, viewer, pr.headRefOid);
-    if (!comment) reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line and the "Retro" section (README: Handoff comment)`);
-    else {
+    if (!comment) reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading and a "Head: ${pr.headRefOid.slice(0, 7)}" line (README: Handoff comment)`);
+    else if (!expectedHead) {
       // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
       const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
         { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
-      reasons.push(...retroReasons(rendered.body_html));
+      for (const note of retroNotes(rendered.body_html)) console.log(`note: ${note}`);
     }
     if (!connectedIssues(pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
     return reasons;
@@ -1763,6 +1762,7 @@ function handoff() {
   const issue = readIssue();
   const { viewer } = graphql('query{viewer{login}}');
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
+  for (const line of openAcceptance(issue.bodyHTML)) console.log(`note: open acceptance without an issue reference: ${line}`);
   // The issue side's reasons wait for the PR side's, so one run names everything that is missing.
   const currentPrNumber = Number(value);
   const prior = handoffIssueReasons(issue, viewer, undefined, currentPrNumber);
