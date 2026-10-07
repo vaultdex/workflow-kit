@@ -239,6 +239,8 @@ reviewer:
 ```md
 ## Übergabe
 
+<Ergebnis in einem Satz in einfacher Sprache>
+
 Head: abcdef1
 
 - Retro: <Ergebnis oder „keine Befunde“>
