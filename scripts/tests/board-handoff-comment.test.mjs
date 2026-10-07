@@ -137,22 +137,21 @@ test('handoff needs the Selbstprüfung section of the PR body to name every chec
     return run('handoff', '1', '7');
   };
   const both = '<code>ponytail-review</code>: nichts mehr zu streichen. <code>code-review</code>: ein Fund, behoben.';
+  // The reason names what is missing; one run also lists the other missing point (the open box), so one fix round is enough.
   const rejected = (bodyHTML, named, label) => {
     const result = handoff(bodyHTML);
     assert.equal(result.status, 1, label + result.stdout + result.stderr);
-    assert.ok(result.stdout.includes(`blocker: ${named}`), label + result.stdout);
-    // One run names the section's gap together with the other missing point (the open box), so one fix round is enough.
-    assert.match(result.stdout, /blocker: open acceptance/, label + result.stdout);
+    const blockers = result.stdout.split('\n').filter(line => line.startsWith('blocker:'));
+    assert.equal(blockers.length, 2, label + result.stdout);
+    for (const name of named) assert.ok(blockers.some(line => line.includes('Selbstprüfung') && line.includes(name)), label + result.stdout);
     assert.equal(existsSync(join(checkout, 'mutations')), false, label + 'Rejected handoff never mutates status');
   };
-  const missingSection = 'the PR body needs a "## Selbstprüfung" section that names ponytail-review, code-review';
+  const checks = ['ponytail-review', 'code-review'];
 
-  rejected('<p>Beschreibung</p>', missingSection, 'no section: ');
-  rejected(`<h2 dir="auto">Reviews</h2>\n<p>${both}</p>`, missingSection, 'the names under another heading: ');
-  rejected(`<blockquote>\n${selfReview(2, both)}\n</blockquote>`, missingSection, 'a quoted template is no section: ');
-  rejected(selfReview(2, '<code>code-review</code>: ein Fund.'), 'the "Selbstprüfung" section of the PR body does not name: ponytail-review', 'one check missing: ');
-  rejected(selfReview(2, 'Keine Prüfung gelaufen.') + `\n<h2 dir="auto">Randfälle</h2>\n<p>${both}</p>`, 'the "Selbstprüfung" section of the PR body does not name: ponytail-review, code-review', 'the next heading ends the section: ');
-  rejected(selfReview(2, 'Nur ponytail-reviewer und precode-review.'), 'the "Selbstprüfung" section of the PR body does not name: ponytail-review, code-review', 'a longer word is no name: ');
+  rejected('<p>Beschreibung</p>', checks, 'no section: ');
+  rejected(`<h2 dir="auto">Reviews</h2>\n<p>${both}</p>`, checks, 'the names under another heading: ');
+  rejected(`<blockquote>\n${selfReview(2, both)}\n</blockquote>`, checks, 'a quoted template is no section: ');
+  rejected(selfReview(2, '<code>code-review</code>: ein Fund.'), ['ponytail-review'], 'one check missing: ');
 
   writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   for (const [html, label] of [

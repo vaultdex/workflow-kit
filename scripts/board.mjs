@@ -1495,8 +1495,8 @@ function retroReasons(bodyHtml) {
 /**
  * The PR gate handoff and merge share: an open non-draft PR whose CI and every traced review have finished, without
  * blockers or open threads, and with a determined merge state. Prints the verdict and sets the exit code; returns the
- * review result only when it holds. Its own reasons: the self-review section of the PR body ("selfReview" of the project file).
- * `extra` adds the caller's own reasons (it runs only once the shared gate holds).
+ * review result only when it holds. Its own reasons include the self-review section of the PR body ("selfReview" of the project file).
+ * `extra` adds the caller's own further reasons (it runs only once the shared gate holds).
  * `prior` are reasons the caller found before (the issue side of handoff): they are listed with the PR's, in one run.
  * GitHub computes the merge state late: an undetermined one is read again a few times (`--interval` seconds apart, at
  * 1 point each) before it counts as waiting.

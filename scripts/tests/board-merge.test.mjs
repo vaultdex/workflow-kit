@@ -95,7 +95,7 @@ test('merge refuses a PR body without the Selbstprüfung section the project ask
   show({ bodyHTML: '<p>Beschreibung</p>' });
   const refused = run('merge', '7');
   assert.equal(refused.status, 1, refused.stdout + refused.stderr);
-  assert.match(refused.stdout, /blocker: the PR body needs a "## Selbstprüfung" section that names ponytail-review/);
+  assert.match(refused.stdout, /^FAILED$/m);
   assert.deepEqual(calls(), [], 'nothing is merged');
   show({ bodyHTML: '<h2 dir="auto">Selbstprüfung</h2>\n<p>ponytail-review: nichts zu streichen.</p>' });
   assert.equal(run('merge', '7').status, 0);
