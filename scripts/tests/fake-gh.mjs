@@ -75,7 +75,7 @@ function api(argv, input, stdout, stderr, exit) {
       // the new head shows through pr-reads.json, which GitHub also shows late.
       fs.appendFileSync('calls', `update-branch ${argv.find(arg => arg.startsWith('expected_head_sha=')).slice(18)}\n`);
       // update-fails: GitHub refuses; "403" in the file: the refusal of a PR with stacked children.
-      if (fs.existsSync('update-fails')) { stderr(fs.readFileSync('update-fails', 'utf8') === '403' ? 'gh: Forbidden (HTTP 403)\n' : 'gh: merge conflict (HTTP 422)\n'); exit(1); }
+      if (fs.existsSync('update-fails')) { stderr(fs.readFileSync('update-fails', 'utf8') === '403' ? 'gh: Updating a stacked PR\'s branch via this endpoint is not supported. (HTTP 403)\n' : 'gh: merge conflict (HTTP 422)\n'); exit(1); }
       fs.rmSync('compare.json', { force: true });
       stdout('{"message":"Updating pull request branch."}');
       exit(0);
