@@ -1,4 +1,4 @@
-// Zweck: Kit-Hooks und .gitignore in das Projekt übernehmen; neue Projekte erhalten die Vorlagen.
+// Zweck: Kit-Hooks, .gitignore und .ignore (Suche) in das Projekt übernehmen; neue Projekte erhalten die Vorlagen.
 // Aufruf: Bei Einrichtung oder Kit-Updates; --existing lässt die Vorlagen weg.
 // Nutzen: Kit-Handler werden am Befehl erkannt und ersetzt; fremde Hooks und Einstellungen bleiben.
 import assert from 'node:assert/strict';
@@ -81,6 +81,11 @@ const patterns = ['/.workflow-kit/', '/.impeccable/vendor/', '/.impeccable/setup
 const ignore = existsSync(safe('.gitignore')) ? text(safe('.gitignore')).split('\n').filter(line => !legacy.has(line)).join('\n') : '';
 const additions = patterns.filter(p => !ignore.split('\n').includes(p));
 write('.gitignore', ignore.trimEnd() + (additions.length ? '\n' + additions.join('\n') : '') + '\n');
+// .ignore is read by ripgrep, not git. Like .gitignore it grows by the template's missing lines, also with --existing.
+// Existing text stays byte for byte: a trailing space can be significant (`name\ `).
+const searchIgnore = existsSync(safe('.ignore')) ? text(safe('.ignore')) : '';
+const missing = text(join(kit, 'templates/.ignore')).split('\n').filter(line => line && !searchIgnore.split('\n').includes(line));
+if (missing.length) write('.ignore', searchIgnore + (searchIgnore && !searchIgnore.endsWith('\n') ? '\n' : '') + missing.join('\n') + '\n');
 // Earlier kit versions tracked ownership in a receipt; handlers are now recognized by their commands.
 if (existsSync(safe('.github/workflow-kit.json'))) unlinkSync(safe('.github/workflow-kit.json'));
 console.log('Project files configured. Generate and commit skills for this kit update; install and trust hooks explicitly.');
