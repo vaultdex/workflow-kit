@@ -351,6 +351,27 @@ Head: abcdef1
 Before implementation, complete [Start or resume](AGENT_RULES.md#start-or-resume);
 a check alone does not claim work.
 
+## Project test map
+
+`node .vendor/workflow-kit/scripts/affected-tests.mjs` knows only the kit's tests. A project adds its own map in
+`.github/affected-tests.json` (`init-project.mjs` does not create it): a path pattern (`*` inside a folder, `**` across
+folders, relative to the project root) and a command or a list of commands. The script prints each matching
+command once after the kit's tests; `--run` runs them in the project root and stops at the first failure.
+Without the file nothing changes. The changed files are those against the merge base with `origin/main`, or with
+`--base origin/release/1.2` for projects that target release branches; files listed as arguments replace them.
+Run it from the project root: the working directory decides which project it reads.
+
+```json
+{
+  "backend/domain/**": "backend/gradlew -p backend :domain:test",
+  "backend/api/**": ["backend/gradlew -p backend :api:test", "backend/gradlew -p backend :tests:test"],
+  "frontend/web/**": "npm --prefix frontend/web run test -- --changed"
+}
+```
+
+The commands run with the permissions of whoever runs the script, like a `package.json` script; change the
+file only through a reviewed pull request.
+
 ## Developing the kit
 
 ```sh
