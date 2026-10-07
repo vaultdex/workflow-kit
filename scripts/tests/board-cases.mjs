@@ -1,10 +1,22 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import test from 'node:test';
+import nodeTest from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+// Every case starts Node processes (board.mjs, and Node again as the fake gh for each call), and node:test runs the
+// tests of one file one after the other. So board-1.test.mjs … board-6.test.mjs each import this file with ?shard=N and
+// run every 6th test, side by side. A new test needs nothing: it lands in the next shard by its position.
+const SHARDS = 6, shard = Number(new URL(import.meta.url).searchParams.get('shard'));
+for (let index = 1; index <= SHARDS; index++) assert.ok(existsSync(new URL(`board-${index}.test.mjs`, import.meta.url)), `board-${index}.test.mjs is missing: its tests would silently not run`);
+assert.ok(shard >= 1 && shard <= SHARDS, 'import this file as board-cases.mjs?shard=N');
+const CALL_TIMEOUT_MS = 60_000;
+let position = 0;
+// The start line names the running test: a hung file shows its last "start" instead of staying silent (node:test prints a test only when it ends).
+const test = (name, body) => position++ % SHARDS + 1 === shard
+  ? nodeTest(name, t => { console.error(`start: ${name}`); return body(t); }) : undefined;
 
 // body_html is what GitHub renders for the body (the handoff check reads that, like the open acceptance of the issue).
 const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\nHead: abcdef1\n\n### Retro\n\n- Keine Funde',
@@ -20,8 +32,11 @@ function fixture(t) {
   mkdirSync(bin);
   // Node acts as the fixture gh: `gh api graphql …` runs the checkout's `api` script.
   const gh = join(bin, process.platform === 'win32' ? 'gh.exe' : 'gh');
-  copyFileSync(process.execPath, gh);
-  chmodSync(gh, 0o755);
+  // A hard link, not a copy: on Windows the first start of every fresh executable is scanned for ~0.7 s; a link to Node is not.
+  try { linkSync(process.execPath, gh); } catch {
+    copyFileSync(process.execPath, gh);
+    chmodSync(gh, 0o755);
+  }
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1' }));
   // By default the driver has posted the handoff comment long after any push; tests about it replace this file.
   writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment()]));
@@ -210,8 +225,13 @@ if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ .
   const env = {};
   return {
     checkout, env,
-    run: (...args) => spawnSync(process.execPath, [fileURLToPath(new URL('../board.mjs', import.meta.url)), ...args],
-      { cwd: checkout, encoding: 'utf8', env: { ...process.env, PATH: bin, ...env } }),
+    // A call that hangs (a `wait` that never ends, a dead gh) would block the whole file silently: kill it and name test and command.
+    run: (...args) => {
+      const result = spawnSync(process.execPath, [fileURLToPath(new URL('../board.mjs', import.meta.url)), ...args],
+        { cwd: checkout, encoding: 'utf8', env: { ...process.env, PATH: bin, ...env }, timeout: CALL_TIMEOUT_MS });
+      assert.ifError(result.error && new Error(`"${t.name}": board.mjs ${args.join(' ')} did not finish in ${CALL_TIMEOUT_MS / 1000} s (${result.error.code})`));
+      return result;
+    },
     writeIssue: issue => writeFileSync(join(checkout, 'issue.json'), JSON.stringify(issue)),
   };
 }
@@ -665,7 +685,8 @@ test('Automated review requires the declared open PR and every issue backlink be
   assert.equal(run('status', '1', 'Automated review', '7').status, 0, 'Default-branch delivery works too');
 });
 
-test('reviews waits only for traces on the current head and never reads failures as done', t => {
+/** What the reviews tests share: a checkout, PR snapshots, Codex traces and `look` (write the snapshot, run `reviews`). */
+function reviewsFixture(t) {
   const { checkout, run } = fixture(t);
   const minutesAgo = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
   const codexUser = { login: 'chatgpt-codex-connector[bot]', type: 'Bot' };
@@ -698,6 +719,12 @@ test('reviews waits only for traces on the current head and never reads failures
     return run('reviews', '7', ...options);
   };
   const reviews = (...args) => look(...args).status;
+
+  return { checkout, run, minutesAgo, codexUser, check, suite, pr, codex, reaction, look, reviews };
+}
+
+test('reviews waits only for traces on the current head and never reads failures as done', t => {
+  const { checkout, run, minutesAgo, codexUser, check, suite, pr, codex, reaction, look, reviews } = reviewsFixture(t);
 
   assert.equal(reviews(pr()), 0, 'Green CI without other traces is done');
   // Codex starts on "ready for review" and shows its first trace a minute or two later, often after CI is green.
@@ -759,6 +786,10 @@ test('reviews waits only for traces on the current head and never reads failures
   // Without the grace nothing else reads the log, so an unreadable one must not turn green into ERROR either.
   assert.equal(look({ ...readied(30, {}, 5), firstReadyEvents: { nodes: [{ createdAt: minutesAgo(20) }] } }, undefined, '--grace', '0').status, 0, 'An unreadable push log keeps the green verdict');
   rmSync(join(checkout, 'activity.json'));
+});
+
+test('reviews reads CI checks, check suites and the traces of reviewers on the head', t => {
+  const { checkout, run, minutesAgo, codexUser, check, suite, pr, codex, reaction, look, reviews } = reviewsFixture(t);
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'Red CI ends the wait as FAILED, never DONE');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'SKIPPED')] })), 0);
   assert.equal(reviews(pr({ contexts: [check('IN_PROGRESS')] })), 3);
@@ -802,6 +833,10 @@ test('reviews waits only for traces on the current head and never reads failures
   assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'SUCCESS', 11, 'W-Frontend', 'other-app')] })), 1, 'Another app does not replace it');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 0, 1, 'CANCELLED', 12), suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 1, 'An older successful suite does not replace a newer cancelled one');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 0, 1, 'CANCELLED'), suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 1, 'A suite without a workflow run cannot be ordered and stays a failure');
+});
+
+test('reviews tells the newest run of a job from cancelled, skipped and Draft runs', t => {
+  const { checkout, run, minutesAgo, codexUser, check, suite, pr, codex, reaction, look, reviews } = reviewsFixture(t);
   // Draft then Ready starts a second run of the same job and cancels the first: only the newest run of a job counts.
   // `run` is the workflow run the job belongs to; by default every job is the only one of its own run.
   const job = (run, status, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null, name = 'Backend', workflow = 'Backend importer', workflowId = `W-${workflow}`) =>
@@ -881,6 +916,11 @@ test('reviews waits only for traces on the current head and never reads failures
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED', 'FAILURE')] })), 1, 'A later read failure keeps the known CI verdict');
   rmSync(join(checkout, 'fail-rest'));
+});
+
+test('reviews reads Codex rows, blockers and threads, and wait ends with the verdict', t => {
+  const { checkout, run, minutesAgo, codexUser, check, suite, pr, codex, reaction, look, reviews } = reviewsFixture(t);
+  let commentId = 1000; // after the ids of `codex`, so no two comments share one
   const headReview = { user: codexUser, commit_id: 'abcdef1234', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { comments: [codex('Running', 1)], reviewList: [headReview] }), 0, 'A head review ends a Running summary');
   assert.equal(reviews(pr(), { comments: [{ ...codex('Running', 3), updated_at: minutesAgo(0) }] }), 3, 'A later edit of the summary itself is no result');
