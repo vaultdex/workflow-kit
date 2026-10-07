@@ -1,8 +1,8 @@
 // Zweck: install-git-hooks an echten Git-Repos mit Worktree pruefen, ohne Netzwerk.
-// Nutzen: Jeder Clone und Worktree nutzt die Hooks seines Branches; fremde Hooks gehen nie verloren.
+// Nutzen: Ein ausgecheckter Branch führt keinen eigenen Hook-Code aus (Kopie im Git-Verzeichnis); fremde Hooks gehen nie verloren.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -40,17 +40,18 @@ function fixture(t, { hooks = true, extraEnv = {} } = {}) {
   const value = (...source) => spawnSync('git', ['config', ...source, '--get', 'core.hooksPath'],
     { cwd: repo, env, encoding: 'utf8' }).stdout.trim();
   const effective = cwd => spawnSync('git', ['config', '--get', 'core.hooksPath'], { cwd, env, encoding: 'utf8' }).stdout.trim();
-  return { repo, linked, global, linkedConfig, git, run, value, effective };
+  const hooksDir = join(realpathSync.native(repo), '.git', 'workflow-kit-hooks').replaceAll('\\', '/');
+  return { repo, linked, global, linkedConfig, hooks: hooksDir, git, run, value, effective };
 }
 
-test('unset or own absolute paths become relative .githooks; --check and reruns change nothing', t => {
+test('unset or own absolute paths become the hook copy in the Git directory; --check and reruns change nothing', t => {
   const f = fixture(t);
   f.run('--check');
   assert.equal(f.value('--local'), '');
   f.run();
-  assert.equal(f.value('--local'), '.githooks');
+  assert.equal(f.value('--local'), f.hooks);
   f.run();
-  assert.equal(f.value('--local'), '.githooks');
+  assert.equal(f.value('--local'), f.hooks);
 
   // Absolute paths into this repo's worktrees, as earlier manual setups wrote them.
   f.git('config', '--local', 'core.hooksPath', join(f.linked, '.githooks'));
@@ -59,9 +60,9 @@ test('unset or own absolute paths become relative .githooks; --check and reruns 
   assert.equal(f.value('--local'), join(f.linked, '.githooks'));
   assert.notEqual(f.value('--file', f.linkedConfig), '');
   f.run();
-  assert.equal(f.value('--local'), '.githooks');
+  assert.equal(f.value('--local'), f.hooks);
   assert.equal(f.value('--file', f.linkedConfig), '');
-  assert.equal(f.effective(f.linked), '.githooks');
+  assert.equal(f.effective(f.linked), f.hooks);
 });
 
 test('foreign hook paths stay, local or global; without .githooks nothing changes', t => {
@@ -84,7 +85,7 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   writeFileSync(own, `[core]\n\thooksPath = ${join(i.repo, '.githooks').replaceAll('\\', '/')}\n`);
   writeFileSync(i.linkedConfig, `[include]\n\tpath = ${own.replaceAll('\\', '/')}\n`);
   i.run();
-  assert.equal(i.value('--local'), '.githooks');
+  assert.equal(i.value('--local'), i.hooks);
   assert.equal(i.value('--includes', '--file', i.linkedConfig), join(i.repo, '.githooks').replaceAll('\\', '/'));
 
   // A foreign entry repeated before an own one in the same file is not lost.
@@ -123,7 +124,7 @@ test('foreign hook paths stay, local or global; without .githooks nothing change
   // An inherited GIT_DIR of another repository neither redirects the write nor touches that repository.
   const other = fixture(t), e = fixture(t, { extraEnv: { GIT_DIR: join(other.repo, '.git') } });
   e.run();
-  assert.equal(e.value('--local'), '.githooks');
+  assert.equal(e.value('--local'), e.hooks);
   assert.equal(other.value('--local'), '');
 
   const none = fixture(t, { hooks: false });
@@ -139,7 +140,7 @@ test('an own worktree path with a newline is still migrated', { skip: process.pl
   f.git('worktree', 'add', '-q', '--detach', odd);
   f.git('config', '--local', 'core.hooksPath', join(odd, '.githooks'));
   f.run();
-  assert.equal(f.value('--local'), '.githooks');
+  assert.equal(f.value('--local'), f.hooks);
 });
 
 /** A consumer with the kit as submodule: main pins kit commit one, `other` pins commit two; the kit's own main is a third, newer commit. The installer ran in it. */
@@ -168,7 +169,6 @@ function kitFixture(t) {
   assert.equal(installed.status, 0, installed.stderr);
   sh(repo, 'submodule', '-q', 'add', kit.replaceAll('\\', '/'), '.vendor/workflow-kit');
   sh(repo, '-C', '.vendor/workflow-kit', 'checkout', '-q', one);
-  sh(repo, 'add', '--chmod=+x', '.githooks/post-checkout');
   sh(repo, 'add', '.');
   sh(repo, 'commit', '-q', '-m', 'pin one');
   sh(repo, 'switch', '-q', '-c', 'other');
@@ -253,19 +253,50 @@ test('the kit update runs no hooks of the kit clone', t => {
   assert.equal(existsSync(marker), false);
 });
 
-test('an installed hook without the executable bit is repaired', { skip: process.platform === 'win32' }, t => {
-  const f = fixture(t), hook = join(f.repo, '.githooks/post-checkout');
+test('a branch that changes the tracked hooks does not run them on checkout or push', t => {
+  const f = fixture(t), tracked = join(f.repo, '.githooks'), commit = message => f.git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-am', message);
+  const markers = { checkout: join(f.repo, '../ran-checkout'), push: join(f.repo, '../ran-push') };
+  const touch = name => `#!/bin/sh\ntouch "${markers[name].replaceAll('\\', '/')}"\n`;
+  f.git('add', '.githooks');
+  commit('hooks');
+  const base = f.git('rev-parse', 'HEAD');
+  f.git('init', '-q', '--bare', '../remote.git');
+  f.git('remote', 'add', 'origin', '../remote.git');
+  f.git('switch', '-q', '-c', 'evil');
+  writeFileSync(join(tracked, 'post-checkout'), touch('checkout'), { mode: 0o755 });
+  writeFileSync(join(tracked, 'pre-push'), touch('push'));
+  chmodSync(join(tracked, 'pre-push'), 0o755); // the mode of an existing file stays
+  f.git('add', '--chmod=+x', '.githooks');
+  commit('evil hooks');
+  const visit = () => {
+    for (const marker of Object.values(markers)) rmSync(marker, { force: true });
+    f.git('switch', '-q', '--detach', base);
+    f.git('switch', '-q', 'evil');
+    f.git('push', '-q', 'origin', 'evil', '--force');
+  };
+  // Precondition: with the pre-#194 setting the branch's own hooks run.
+  f.git('config', '--local', 'core.hooksPath', '.githooks');
+  visit();
+  assert.deepEqual(Object.values(markers).map(existsSync), [true, true]);
+
+  f.git('switch', '-q', '--detach', base);
   f.run();
-  chmodSync(hook, 0o644);
-  f.run('--check');
-  assert.equal(statSync(hook).mode & 0o111, 0);
-  f.run();
-  assert.notEqual(statSync(hook).mode & 0o111, 0);
+  visit();
+  assert.deepEqual(Object.values(markers).map(existsSync), [false, false]);
+  assert.equal(f.value('--local'), f.hooks);
 });
 
-test('an existing, different post-checkout hook of the project is kept', t => {
-  const f = fixture(t);
+test('a rerun replaces the hook copy; the project post-checkout wins over the kit one', t => {
+  const f = fixture(t), copy = name => join(f.hooks, name);
+  f.run();
+  assert.deepEqual(readdirSync(f.hooks).sort(), ['post-checkout', 'pre-push']);
+  writeFileSync(join(f.repo, '.githooks/pre-push'), '#!/bin/sh\necho changed\n');
+  assert.equal(readFileSync(copy('pre-push'), 'utf8'), '#!/bin/sh\n');
+  f.run();
+  assert.equal(readFileSync(copy('pre-push'), 'utf8'), '#!/bin/sh\necho changed\n');
+  rmSync(join(f.repo, '.githooks/pre-push'));
   writeFileSync(join(f.repo, '.githooks/post-checkout'), '#!/bin/sh\necho mine\n');
   f.run();
-  assert.equal(readFileSync(join(f.repo, '.githooks/post-checkout'), 'utf8'), '#!/bin/sh\necho mine\n');
+  assert.deepEqual(readdirSync(f.hooks), ['post-checkout']);
+  assert.equal(readFileSync(copy('post-checkout'), 'utf8'), '#!/bin/sh\necho mine\n');
 });

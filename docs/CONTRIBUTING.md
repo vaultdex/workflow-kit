@@ -88,8 +88,8 @@ never claim, change status or approve.
 
 ## Issues
 
-Write issues and PRs in simple German and keep technical names exact. Before
-creating one, search open and closed issues and PRs, and extend compatible work
+Write issues, PRs and comments in [simple German](#einfache-sprache) and keep
+technical names exact. Before creating one, search open and closed issues and PRs, and extend compatible work
 instead of duplicating it. Separate deliverables need separate issues before
 branching; a kit change and its consumer update are two issues.
 
@@ -147,6 +147,54 @@ recommendation or elapsed time is not approval. Remove the section and the label
 only when every point is resolved. Routine technical decisions are yours.
 [Example](task-writing-examples.md#menschliche-mitwirkung).
 
+**Asking a human.** This applies to every question a human must decide, in a
+grilling or anywhere else, not to routine technical choices:
+
+1. **Overview first.** Start with a numbered overview in plain language. For each
+   question give the context, the options with their consequences, and your
+   recommendation.
+2. **Then the question tool.** Ask the same questions through the harness's question
+   tool (Claude Code: `AskUserQuestion`), in batches of at most 4. Questions only as
+   text in a status report are not enough: they get lost. A harness without such a
+   tool gets the numbered list at the end of your answer, and you stop there.
+3. **Never skip.** Don't answer the question yourself, skip it, postpone it
+   silently or work around it. Work that depends on the answer waits; everything
+   else continues. If the human closes the dialog without answering, the question
+   stays open. This extends "Silence, a recommendation or elapsed time is not
+   approval" above.
+
+### Einfache Sprache
+
+Issues, Specs, PRs und Kommentare muss ein Mensch ohne Code-Kenntnis verstehen. Das gilt
+beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statuskommentaren.
+
+- Titel: was besser wird oder was kaputt ist, in Alltagssprache, etwa 40 bis 70 Zeichen.
+  Keine Klassen-, Modul- oder Frameworknamen und nicht mehrere Ziele in einem Titel.
+  Beispiele sind nicht das Ziel: Ein allgemeiner Umbau nennt nicht eine einzelne
+  Beispielquelle im Titel.
+- Kurze Sätze, ein Gedanke pro Satz. Einen Fachbegriff beim ersten Auftreten in wenigen
+  Worten erklären; konkrete Beispiele vor abstrakten Regeln.
+- Technisches nie weglassen: Implementierende Agenten brauchen exakte Namen, Verträge,
+  Befehle, Reihenfolgen und Belege. Sie stehen im Text oder am Ende ihres Abschnitts in
+  `<details><summary>Technische Details</summary>`. Vereinfachen heißt umformulieren,
+  nicht löschen; Entscheidungen mit Quelle, Blocker, Teiltickets, Links und
+  Abnahmekriterien bleiben.
+- Specs und längere Issues beginnen mit `## Kurz gesagt` (nach `## Menschliche
+  Mitwirkung nötig`, falls vorhanden): 2 bis 4 Sätze, was heute stört, was anders wird und
+  wer es merkt.
+- PRs und Kommentare beginnen mit dem Ergebnis in einem Satz, Details danach. Das gilt
+  auch für den [Übergabekommentar](../README.md#handoff-comment). Maschinell erzeugte
+  Kommentare wie der Backlink von `board.mjs link` sind ausgenommen. Ein Hinweis, den
+  ein Skill an den Anfang stellt (der KI-Hinweis von `/triage`), steht zuerst, das
+  Ergebnis direkt danach.
+- Kein Status im Text: Project-Status, Priorität und Größe stehen nur auf dem Board. Ein
+  Issue-Text schreibt keine Zeilen wie „Status: Backlog, keine Ready-Freigabe“; sie
+  veralten beim nächsten Statuswechsel. Das gilt auch, wenn die Vorlage eines Skills
+  (zum Beispiel `to-tickets`) eine Statuszeile zeigt. Eine Ausnahme ist die Statuszeile
+  einer lokalen Ticketdatei (Tracker „lokales Markdown“): Sie ist dort der Triage-Stand
+  und bleibt. Freigaben und Entscheidungen stehen weiter mit Quelle im Text, aber ohne
+  den Board-Status zu wiederholen.
+
 ## Delivery
 
 **Branch.** Create the branch from the issue so GitHub links it:
@@ -167,8 +215,11 @@ command reads the connection back. This connection closes
 the issue only when merged into the default branch; keep the project's release
 rules for references and completion.
 
-Write the PR in German: **Was wurde geändert und warum?** covers the result, the
-reason and the benefit, with before/after where useful, plus the issue links. Add
+Write the PR in [simple German](#einfache-sprache): **Was wurde geändert und warum?**
+starts with the result in one plain sentence, then the reason and the benefit, with
+before/after where useful, plus the issue links. The `pr` skill's template (Summary,
+Evidence, Merge Danger) is upstream and doesn't override this; keep its technical
+evidence (diagrams, diffs, test output) after that sentence. Add
 **Prüfung und Grenzen** only for problems, skipped checks or proof limits. Link the
 evidence in the issue instead of pasting logs or CI status. Delete template hints
 and empty sections.
@@ -221,7 +272,8 @@ otherwise: every correction below restarts CI and reviews above.
    then requires your PR to come from this repository, to be linked with the base PR as a stack on GitHub
    (the Stacks API read-back from step 2, not just an aligned branch chain), to target the base PR's branch
    and to contain that branch's current head (after a push below, rebase first and let CI run again). The handoff
-   comment names the merge order (base PR first, then yours).
+   comment names the merge order (base PR first, then yours). `board.mjs merge` refuses an upper layer while a layer below it is
+   open, because GitHub would merge that one along.
 
 ### PR backlinks
 
@@ -290,7 +342,10 @@ backlink never closes an issue.
    current commit without a concrete reason.
 4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
    set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
-   (`board.mjs ready PR SHA`), set Automated review and wait again. Merge main only for conflicts or a real need.
+   (`board.mjs ready PR SHA`), set Automated review and wait again. When `reviews` or `wait` print
+   `base moved: N commits since merge-base`, merge the base once before the next correction push: the files listed
+   as changed on both sides are where a parallel merge conflicts or breaks a test, and it saves the red CI run that would
+   show it. Otherwise merge the base only for conflicts or a real need.
    After two correction pushes, collect new findings that neither block (P0/P1,
    security, data loss) nor regress against main in one follow-up issue instead of
    another push; every push restarts CI and reviews. `board.mjs reviews` and `wait` print
@@ -328,7 +383,14 @@ backlink never closes an issue.
    Check off every fulfilled acceptance box in the issue body (`board.mjs body`) before the handoff; a part
    moved to a follow-up stays unchecked and links that issue (`- [ ] … → #12`). `board.mjs handoff`
    refuses while an open `- [ ]` line has no issue reference.
-7. After the human merges, confirm the delivered scope is accepted and the issue is
+7. A human merges. An agent that was given merge authority (for example by the chief of
+   staff) merges only with `board.mjs merge PR`, never with a plain `gh pr merge`: the
+   command applies the review gates of `handoff` (CI, every review with a trace on the head
+   finished, no `blocker:`, no open thread, determined merge state) and refuses while a
+   reviewer is still running. It merges exactly the checked head by its full commit id
+   (`gh pr merge --merge --match-head-commit`) and reads the merge back. Codex is the only
+   required review bot; CodeRabbit is optional and is neither awaited nor re-requested.
+8. After the merge, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.
 
 Update the affected docs (behavior, API, operations, workflow) in the same PR, and
