@@ -7,6 +7,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Git for Windows stops at 260 characters; the long TEMP of an agent session pushes the clones of these fixtures
+// past it (#370). Every Git child of the tests inherits the setting.
+Object.assign(process.env, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.longpaths', GIT_CONFIG_VALUE_0: 'true' });
+
 /** spawnSync's result shape for an asynchronous child. stdin is closed at once, as spawnSync does without input. */
 export const run = (file, args = [], { input, ...options } = {}) => new Promise(resolve => {
   const child = execFile(file, args, { encoding: 'utf8', maxBuffer: 1 << 26, ...options }, (error, stdout, stderr) =>
