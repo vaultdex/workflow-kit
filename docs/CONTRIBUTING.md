@@ -355,7 +355,8 @@ backlink never closes an issue.
    reviewer's last completed review on this PR took (otherwise its usual duration),
    it is stalled. Pending, cancelled or missing expected CI checks are not success; a
    workflow whose only runs for the head were skipped before the PR became ready (Draft
-   guard) has no run for the Ready head yet and keeps `wait` waiting.
+   guard) has no run for the Ready head yet and keeps `wait` waiting for up to 10 minutes after Ready;
+   after that it is only a `note:` (a workflow that does not start on Ready never will).
    Read all findings and every review, comment and thread from bots and humans,
    including every page of analyzer results such as Sonar issues and hotspots. A
    green quality gate does not mean zero findings, and a missing or stale analysis
