@@ -60,6 +60,16 @@ test('reviews tells the newest run of a job from cancelled, skipped and Draft ru
   assert.equal(reviews(openedDraft([lateSkip()]), oldTraces), 3, 'An opened-as-Draft run just after Ready is no Ready proof');
   assert.equal(reviews(openedDraft([lateSkip(), draftRun(2, 'SUCCESS', { minutes: 3 })]), oldTraces), 0, 'A later executed run of the workflow is the proof');
   assert.equal(reviews(readyHead([lateSkip()], { createdAt: 'unreadable' }), oldTraces), 2, 'An unreadable creation time is an error, never proof');
+  // Ready two seconds after opening as Draft: the executed run created just after the Ready event is a Ready run, though inside the 10 s window.
+  const quickReady = contexts => readyHead(contexts, { createdAt: minutesAgo(5 + 2 / 60) });
+  assert.equal(reviews(quickReady([draftRun(1, 'SKIPPED', { minutes: 5 + 1 / 60 }), draftRun(2, 'SUCCESS', { minutes: 5 - 2 / 60 })]), oldTraces), 0, 'A run executed just after a quick Ready is the proof');
+  assert.equal(reviews(quickReady([draftRun(1, 'SKIPPED', { minutes: 5 + 1 / 60 }), draftRun(2, 'SKIPPED', { minutes: 5 - 2 / 60 })]), oldTraces), 3, 'A skip just after a quick Ready stays a Draft skip');
+  // A workflow that does not start on Ready (default pull_request_target types) leaves its skip from opening as the only run: wait waits a while, then notes it.
+  const noReadyRun = { event: 'pull_request_target', minutes: 25 };
+  assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', noReadyRun)]), oldTraces), 3, 'Precondition: shortly after Ready the missing run may still start');
+  const longReady = readyHead([draftRun(1, 'SKIPPED', noReadyRun)], { readyEvents: { nodes: [{ createdAt: minutesAgo(11) }] } });
+  assert.equal(reviews(longReady, oldTraces), 0, 'A skip from opening with no run after Ready for 10 minutes does not wait forever');
+  assert.match(look(longReady, oldTraces).stdout, /^note: check Backend was skipped while Draft; no run since Ready/m, 'The ended wait is still shown');
   assert.equal(reviews(readyHead([draftRun(1, 'SUCCESS', { event: 'push' }), draftRun(2)]), oldTraces), 3, 'An executed push run of the same job from before Ready does not hide the Draft skip');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: null, minutes: 2 })]), oldTraces), 0, 'A skip after Ready needs no readable event');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: 'push' })]), oldTraces), 0, 'Only pull_request runs carry a Draft guard');
