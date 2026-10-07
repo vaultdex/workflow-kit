@@ -485,13 +485,11 @@ function check(issue = readIssue(), claims, currentPrNumber) {
 }
 
 /**
- * Human review means mergeable (docs/parallel-drivers.md): a Human-review issue whose open PR has conflicts (DIRTY) goes back to
- * "Automated review" with a comment; its owner resolves them and hands off again. One search reads the open issues with their
- * closing PRs (a further page only beyond 100); only a reset writes (the status, the comment) and reads the Project fields.
- * ponytail: UNKNOWN (GitHub still computing) is left alone and caught by the next sweep.
+ * Human review means mergeable (docs/parallel-drivers.md): a Human-review issue whose open PR is DIRTY goes back to "Automated review" with a comment.
+ * ponytail: search cannot filter by Project status, so it reads every open issue (100 per page); UNKNOWN (still computing) waits for the next sweep.
  */
 function sweep() {
-  const reset = [];
+  let plan, resets = 0;
   for (let after; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
       pageInfo{hasNextPage endCursor} nodes{...on Issue{id number
@@ -501,20 +499,20 @@ function sweep() {
     for (const issue of search.nodes) {
       if (projectItem(issue)?.status?.name !== 'Human review') continue;
       const pr = issue.closedByPullRequestsReferences.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
-      if (pr) reset.push({ issue, pr });
+      if (!pr) continue;
+      plan ??= resolveOption('Status', 'Automated review');
+      // The comment first: a failed comment must not leave an issue out of Human review that nobody was told about.
+      graphql('mutation($issue:ID!,$body:String!){addComment(input:{subjectId:$issue,body:$body}){clientMutationId}}', { issue: issue.id,
+        body: `Der PR ${pr.url} hat Konflikte mit seiner Basis, ein Issue in Human review muss aber mergebar sein. Das Issue geht zurück auf Automated review. Konflikt lösen, dann neu übergeben (\`board.mjs handoff\`).` });
+      writeOption(issue, plan);
+      console.log(`#${issue.number} reset to Automated review: PR #${pr.number} has merge conflicts`);
+      resets++;
     }
     if (!search.pageInfo.hasNextPage) break;
     assert.ok(search.pageInfo.endCursor && search.pageInfo.endCursor !== after, 'Search pagination did not advance');
     after = search.pageInfo.endCursor;
   }
-  if (!reset.length) return console.log('clean');
-  const plan = resolveOption('Status', 'Automated review');
-  for (const { issue, pr } of reset) {
-    writeOption(issue, plan);
-    graphql('mutation($issue:ID!,$body:String!){addComment(input:{subjectId:$issue,body:$body}){clientMutationId}}', { issue: issue.id,
-      body: `Der PR ${pr.url} hat Konflikte mit seiner Basis, ein Issue in Human review muss aber mergebar sein. Das Issue geht zurück auf Automated review. Konflikt lösen, dann neu übergeben (\`board.mjs handoff\`).` });
-    console.log(`#${issue.number} reset to Automated review: PR #${pr.number} has merge conflicts`);
-  }
+  if (!resets) console.log('clean');
 }
 
 function next() {

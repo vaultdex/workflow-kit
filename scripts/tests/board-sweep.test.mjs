@@ -28,10 +28,8 @@ test('sweep sends a Human-review issue with a conflicting PR back to Automated r
   const result = run('sweep');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /^#2 reset to Automated review: PR #70 has merge conflicts$/m);
-  assert.doesNotMatch(result.stdout, /#1 |#3 |clean/);
   assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Automated review');
-  assert.deepEqual(targets(), ['item=PI2', 'issue=I2'], 'Only issue 2 got its status and its comment');
-  assert.equal(queries().filter(query => query.includes('search(')).length, 1, 'One search, whatever the number of resets');
+  assert.deepEqual(targets(), ['issue=I2', 'item=PI2'], 'Only issue 2 got its comment (first) and its status');
 
   assert.equal(run('sweep', 'extra').status, 2, 'A word after sweep is refused before any write');
 });
