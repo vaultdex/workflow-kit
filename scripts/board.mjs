@@ -1,5 +1,5 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run in the project: board.mjs next | check | status | priority | field | block | sub | reviews | wait (see usage below).
+// Run in the project: board.mjs next | check | status | priority | field | block | sub | reviews | wait | merge (see usage below).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -27,7 +27,12 @@ const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(
   ${issueFields} bodyHTML
   closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner}}}
   subIssues(first:100){totalCount nodes{${issueFields}}}}}}`;
-const readIssue = () => graphql(issueQuery, { owner, name, number }).repository.issue;
+/** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
+const named = (label, read) => {
+  try { return read(); } catch (error) { throw new Error(`${label}: ${String(error.stderr || error.message).trim()}`, { cause: error }); }
+};
+const readIssue = () => named(`${project.repository}#${number}`,
+  () => graphql(issueQuery, { owner, name, number }).repository.issue ?? assert.fail('issue not found'));
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
@@ -150,7 +155,7 @@ function check(issue = readIssue(), claims) {
     claim = found.claim;
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
   const verdict = verdictOf({ blocked, unknown });
-  console.log(`#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
+  console.log(`${project.repository}#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
   for (const note of notes) console.log(`note: ${note}`);
   if (claim) {
@@ -214,10 +219,11 @@ function next() {
 
 /** A single-select Project field with its options in configured order. */
 function selectField(fieldName) {
-  const field = graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:100){nodes{...on ProjectV2SingleSelectField{
+  const fields = graphql(`query($id:ID!){node(id:$id){...on ProjectV2{fields(first:100){nodes{...on ProjectV2SingleSelectField{
     id name options{id name} issueField{...on IssueFieldSingleSelect{id options{id name}}}}}}}}}`, { id: project.id })
-    .node.fields.nodes.find(candidate => candidate.name === fieldName);
-  assert.ok(field, `${project.url} has no single-select ${fieldName} field`);
+    .node.fields.nodes.filter(candidate => candidate.name && candidate.options);
+  const field = fields.find(candidate => candidate.name === fieldName);
+  assert.ok(field, `${project.url} has no single-select ${fieldName} field; use one of: ${fields.map(candidate => candidate.name).join(', ')}`);
   // An empty Project option list means the field mirrors an organization issue field.
   const linked = !field.options.length && field.issueField;
   return { field, linked, choices: linked ? linked.options : field.options };
@@ -239,51 +245,91 @@ function addToProject(issue) {
   }
 }
 
-/** Write a selected field option; guarded delivery can reject the fresh issue before mutation. */
-function set(fieldName, optionName = value, beforeWrite) {
-  let issue = readIssue();
+/** Look up a field and option; nothing is printed or written. */
+function resolveOption(fieldName, optionName) {
   const { field, linked, choices } = selectField(fieldName);
   const option = choices.find(choice => choice.name.toLowerCase() === String(optionName).toLowerCase());
-  assert.ok(option, `Use one of: ${choices.map(choice => choice.name).join(', ')}`);
+  assert.ok(option, `${fieldName}: "${optionName}" is not an option; use one of: ${choices.map(choice => choice.name).join(', ')}`);
+  return { fieldName, field, linked, option };
+}
+
+/** Guards of a transition; a refusal throws. They print (backlinks), so run them only after every pair is valid. */
+function guardOption(issue, { fieldName, option }) {
   if (fieldName === 'Status' && option.name === 'In progress') {
-    if (check(issue) !== 'STARTABLE') return;
+    // Assignment first, so a missing assignment is named even when the issue is also blocked.
     const { viewer } = graphql('query{viewer{login}}');
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     assert.ok(issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase()),
       `Assign yourself first: gh issue edit ${number} --repo ${project.repository} --add-assignee "@me". Verify session ownership before assigning.`);
+    // A refusal is an error like the others: its verdict lines become the one ERROR line instead of a second output format.
+    const log = console.log, verdict = [];
+    console.log = (...parts) => verdict.push(parts.join(' '));
+    try { if (check(issue) !== 'STARTABLE') throw new Error(verdict.join('; ')); } finally { console.log = log; }
   }
   if (fieldName === 'Status' && option.name === 'Automated review') verifyBacklinks();
-  // A guarded handoff rechecks current ownership/readiness after the potentially lengthy review reads.
-  if (beforeWrite) {
-    issue = beforeWrite();
-    if (!issue) return;
-  }
+}
+
+function writeOption(issue, { fieldName, field, linked, option }) {
   if (linked) {
     graphql(`mutation($issue:ID!,$field:ID!,$option:ID!){setIssueFieldValue(input:{issueId:$issue,
       issueFields:[{fieldId:$field,singleSelectOptionId:$option}]}){clientMutationId}}`,
     { issue: issue.id, field: linked.id, option: option.id });
   } else {
-    const item = projectItem(issue)?.id ?? addToProject(issue);
+    let item = projectItem(issue)?.id;
+    if (!item) {
+      item = addToProject(issue);
+      // Later writes of the same call reuse the item instead of adding it again.
+      issue.projectItems.nodes.push({ id: item, project: { id: project.id } });
+    }
     graphql(`mutation($project:ID!,$item:ID!,$field:ID!,$option:String!){updateProjectV2ItemFieldValue(input:{projectId:$project,
       itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
     { project: project.id, item, field: field.id, option: option.id });
   }
-  console.log(`#${issue.number} ${fieldName}: ${option.name}`);
-  return option.name;
+  return `${project.repository}#${issue.number} ${fieldName}: ${option.name}`;
 }
 
-/** Any single-select field, read back after writing so a silent API no-op cannot pass. */
+/** Write a selected field option; guarded delivery can reject the fresh issue before mutation. */
+function set(fieldName, optionName = value, beforeWrite) {
+  let issue = readIssue();
+  const plan = resolveOption(fieldName, optionName);
+  guardOption(issue, plan);
+  // A guarded handoff rechecks current ownership/readiness after the potentially lengthy review reads.
+  if (beforeWrite) {
+    issue = beforeWrite();
+    if (!issue) return;
+  }
+  console.log(writeOption(issue, plan));
+  return plan.option.name;
+}
+
+/** NAME VALUE pairs after the issue; `Status "Automated review" PR [OTHER_ISSUE...]` keeps its own trailing arguments. */
+function fieldPairs() {
+  const args = process.argv.slice(4);
+  if (args[0].toLowerCase() === 'status' && args[1].toLowerCase() === 'automated review') return [args.slice(0, 2)];
+  assert.ok(args.length % 2 === 0, 'field takes NAME VALUE pairs: field ISSUE NAME VALUE [NAME VALUE ...]');
+  const pairs = Array.from({ length: args.length / 2 }, (_, index) => args.slice(index * 2, index * 2 + 2));
+  assert.equal(new Set(pairs.map(([fieldName]) => fieldName.toLowerCase())).size, pairs.length, 'Each field may appear once per call');
+  return pairs;
+}
+
+/** Any single-select fields: every pair is validated before the first write, then all are read back together so a silent API no-op cannot pass. */
 function setField() {
-  const fieldName = value, wanted = set(fieldName, process.argv[5]);
-  if (!wanted) return;
-  const { repository } = graphql(`query($owner:String!,$name:String!,$number:Int!,$field:String!){repository(owner:$owner,name:$name){
-    issue(number:$number){projectItems(first:100){nodes{project{id} value:fieldValueByName(name:$field){
-      ...on ProjectV2ItemFieldSingleSelectValue{name}}}}
+  const issue = readIssue();
+  const plans = fieldPairs().map(([fieldName, optionName]) => resolveOption(fieldName, optionName));
+  for (const plan of plans) guardOption(issue, plan);
+  // Confirmation lines come after the read-back, so a failed call never shows a write as confirmed.
+  const written = plans.map(plan => writeOption(issue, plan));
+  const { repository } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    issue(number:$number){projectItems(first:100){nodes{project{id} fieldValues(first:100){nodes{
+      ...on ProjectV2ItemFieldSingleSelectValue{name field{...on ProjectV2FieldCommon{name}}}}}}}
     issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}}}}`,
-  { owner, name, number, field: fieldName });
-  const stored = projectItem(repository.issue)?.value?.name
-    ?? repository.issue.issueFieldValues.nodes.find(field => field.field?.name === fieldName)?.name;
-  assert.equal(stored, wanted, `Read-back of ${fieldName} shows ${stored ?? 'no value'}`);
+  { owner, name, number });
+  const values = [...projectItem(repository.issue)?.fieldValues.nodes ?? [], ...repository.issue.issueFieldValues.nodes];
+  for (const { fieldName, option } of plans) {
+    const stored = values.find(entry => entry?.field?.name === fieldName)?.name;
+    assert.equal(stored, option.name, `Read-back of ${fieldName} shows ${stored ?? 'no value'}`);
+  }
+  console.log(written.join('\n'));
 }
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
@@ -787,38 +833,52 @@ function handoffIssue(issue, viewer) {
 const hasHandoffComment = (comments, viewer, headRefOid) => comments.some(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
   && /^## Übergabe\s*$/m.test(comment.body ?? '') && new RegExp(`^Head:\\s*${headRefOid.slice(0, 7)}`, 'im').test(comment.body ?? ''));
 
-/** Read all PR gates and native links, optionally requiring the previously checked head. */
-function handoffPr(issueId, viewer, expectedHead) {
-  const reasons = [];
-  const pr = readPr(Number(value));
+/**
+ * The PR gate handoff and merge share: an open non-draft PR whose CI and every traced review have finished, without
+ * blockers or open threads, and with a determined merge state. Prints the verdict and sets the exit code; returns the
+ * review result only when it holds. `extra` adds the caller's own reasons (it runs only once the shared gate holds).
+ */
+function finishedPr(prNumber, action, expectedHead, extra = () => []) {
+  const pr = readPr(prNumber);
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
   if (pr.state !== 'OPEN' || pr.isDraft) {
-    console.log('FAILED\nblocker: handoff needs an open non-draft PR');
+    console.log(`FAILED\nblocker: ${action} needs an open non-draft PR`);
     process.exitCode = 1;
     return;
   }
-  const result = reviews(stallOption(), Date.now(), Number(value), pr);
+  const result = reviews(stallOption(), Date.now(), prNumber, pr);
   console.log(result.lines.join('\n'));
   if (!result.done || result.failed) {
     process.exitCode = result.failed ? 1 : 3;
     console.log(result.failed ? 'FAILED' : 'WAITING');
     return;
   }
-  if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, 'PR head changed during handoff');
+  if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, `PR head changed during ${action}`);
+  const reasons = [];
   if (result.lines.some(line => line.startsWith('blocker:') || /^unresolved threads: [1-9]/.test(line))) {
-    reasons.push('resolve review blockers and threads before handoff');
+    reasons.push(`resolve review blockers and threads before ${action}`);
   }
-  if (!hasHandoffComment(result.comments, viewer, result.pr.headRefOid)) {
-    reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${result.pr.headRefOid.slice(0, 7)}" line, the retro result and the findings list (README: Handoff comment)`);
-  }
+  reasons.push(...extra(result));
   if (!reasons.length && !['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS'].includes(result.pr.mergeStateStatus)) {
     console.log('WAITING\nwaiting: PR mergeability is not determined');
     process.exitCode = 3;
     return;
   }
-  if (!reasons.length && !connectedIssues(result.pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
   if (reasons.length) {
     console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+    process.exitCode = 1;
+    return;
+  }
+  return result;
+}
+
+/** Read all PR gates and native links, optionally requiring the previously checked head. */
+function handoffPr(issueId, viewer, expectedHead) {
+  const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => hasHandoffComment(comments, viewer, pr.headRefOid) ? [] :
+    [`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line, the retro result and the findings list (README: Handoff comment)`]);
+  if (!result) return;
+  if (!connectedIssues(result.pr).has(issueId)) {
+    console.log(`FAILED\nblocker: PR #${value} is not natively linked to issue #${number}`);
     process.exitCode = 1;
     return;
   }
@@ -841,6 +901,24 @@ function handoff() {
   })) return;
   assert.equal(projectItem(readIssue())?.status?.name, 'Human review', 'Human review status read-back differs');
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
+}
+
+/**
+ * Merge for agents with merge authority: the same gate as handoff (CI, every traced review finished, no blocker or open
+ * thread), then exactly the checked head. `--match-head-commit` needs the full object id, and it also refuses a push that
+ * lands after the check, so no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR.
+ */
+function merge() {
+  const result = finishedPr(number, 'merge');
+  if (!result) return;
+  const { headRefOid } = result.pr;
+  assert.match(headRefOid, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
+  execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
+    { encoding: 'utf8', env: gh.env });
+  const { state, mergeCommit } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+    pullRequest(number:$number){state mergeCommit{oid}}}}`, { owner, name, number }).repository.pullRequest;
+  assert.equal(state, 'MERGED', `Merge read-back shows #${number} as ${state}`);
+  console.log(`MERGED #${number} head ${headRefOid} merge commit ${mergeCommit?.oid}`);
 }
 
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
@@ -949,56 +1027,67 @@ const validBlocker = reference => /^\d+$/.test(reference.slice(reference.lastInd
 function block() {
   const [blockerOwner, blockerName] = blockerRepository(value).split('/');
   const blockerNumber = value.slice(value.lastIndexOf('#') + 1);
-  const { id } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id}}}`,
-    { owner: blockerOwner, name: blockerName, number: Number(blockerNumber) }).repository.issue;
+  const { id } = named(`${blockerOwner}/${blockerName}#${blockerNumber}`, () => graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id}}}`,
+    { owner: blockerOwner, name: blockerName, number: Number(blockerNumber) }).repository.issue ?? assert.fail('issue not found'));
   graphql(`mutation($issue:ID!,$blocker:ID!){addBlockedBy(input:{issueId:$issue,blockingIssueId:$blocker}){issue{number}}}`,
     { issue: readIssue().id, blocker: id });
-  console.log(`#${number} is blocked by ${value}`);
+  console.log(`${project.repository}#${number} is blocked by ${blockerOwner}/${blockerName}#${blockerNumber}`);
 }
 
 // Attaches CHILD as a native sub-issue of ISSUE and reads the parent link back; an existing link is a success.
 function sub() {
   const [childOwner, childName] = blockerRepository(value).split('/');
   const childNumber = Number(value.slice(value.lastIndexOf('#') + 1));
-  const read = () => graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id parent{number repository{nameWithOwner}}}}}`,
-    { owner: childOwner, name: childName, number: childNumber }).repository.issue;
+  const read = () => named(`${childOwner}/${childName}#${childNumber}`, () => graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){id parent{number repository{nameWithOwner}}}}}`,
+    { owner: childOwner, name: childName, number: childNumber }).repository.issue ?? assert.fail('issue not found'));
   const underParent = ({ parent }) => parent?.number === number && parent.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase();
   const child = read();
   // Without replaceParent GitHub refuses a child that already has another parent; that error is left to surface.
   if (!underParent(child)) graphql(`mutation($issue:ID!,$sub:ID!){addSubIssue(input:{issueId:$issue,subIssueId:$sub}){issue{number}}}`,
     { issue: readIssue().id, sub: child.id });
   assert.ok(underParent(read()), `#${number} did not take ${value} as sub-issue (read-back shows another parent)`);
-  console.log(`#${number} has sub-issue ${value.includes('/') ? value : `#${childNumber}`}`);
+  console.log(`${project.repository}#${number} has sub-issue ${childOwner}/${childName}#${childNumber}`);
 }
 
 const commands = { next, check: () => check(undefined, { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField,
-  reviews: reviewsOnce, wait, handoff, ready, link, body };
-const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE'
+  reviews: reviewsOnce, wait, handoff, merge, ready, link, body };
+const usage = 'Usage: board.mjs next | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] | wait PR --merged'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES]'
+  + ' | merge PR [--stall MINUTES] [--grace MINUTES]'
   + ' | ready PR SHA [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE';
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (!commands[command] || (command !== 'next' && !Number.isSafeInteger(number))
   || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
-  || (command === 'field' && ![value, process.argv[5]].every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text ?? '')))
+  || (command === 'field' && !(process.argv.length > 5 && process.argv.slice(4).every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text))))
   // A misspelled flag must not silently turn the session check off.
   || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^\w[\w.-]*$/.test(process.argv[5])))
-  || (['reviews', 'wait', 'handoff'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
+  || (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
+  || (command === 'merge' && value && !value.startsWith('--'))
   || (command === 'ready' && (!/^[0-9a-f]{40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
   || (['block', 'sub'].includes(command) && !validBlocker(value ?? ''))) {
   console.error(usage);
   process.exit(2);
 }
+// field, status and priority report a failure as one "ERROR - reason" line: their output (verdicts, backlinks, confirmations)
+// is held until the command succeeds, so no failed call shows a write or a check as confirmed. The other commands keep ERROR
+// with "- reason" below it.
+const oneLine = ['field', 'status', 'priority'].includes(command), print = console.log, held = [];
+if (oneLine) console.log = (...parts) => held.push(parts.join(' '));
 try {
   await commands[command]();
+  console.log = print;
+  for (const line of held) print(line);
 } catch (error) {
+  console.log = print;
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'handoff', 'ready', 'link', 'body'].includes(command)) throw error;
-  console.log(`${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${String(error.stderr || error.message).trim()}`);
+  if (!['check', 'reviews', 'wait', 'handoff', 'merge', 'ready', 'link', 'body', 'field', 'status', 'priority'].includes(command)) throw error;
+  const message = String(error.stderr || error.message).trim();
+  console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;
 }

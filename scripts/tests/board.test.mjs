@@ -80,9 +80,17 @@ const query = process.argv.find(arg => arg.startsWith('query=')).slice(6);
 if (fs.existsSync('fail') || (fs.existsSync('fail-viewer') && query.startsWith('query{viewer'))) process.exit(1);
 let data;
 if (query.startsWith('mutation')) {
+  // mutation-fails: GitHub refuses every write.
+  if (fs.existsSync('mutation-fails')) process.exit(1);
   fs.appendFileSync('mutations', query + '\\n');
   const option = process.argv.find(arg => arg.startsWith('option='));
   if (option) fs.writeFileSync('stored', option.slice(7));
+  // Per field, so a call that sets several fields can be read back field by field.
+  const fieldId = process.argv.find(arg => arg.startsWith('field='));
+  if (option && fieldId) {
+    const values = fs.existsSync('stored-values.json') ? JSON.parse(fs.readFileSync('stored-values.json')) : {};
+    fs.writeFileSync('stored-values.json', JSON.stringify({ ...values, [fieldId.slice(6)]: option.slice(7) }));
+  }
   if (query.includes('addCloseIssueReferences') && !fs.existsSync('link-noop')) {
     // link-delay: the connection shows only after that many reads, like GitHub's delayed consistency.
     const delay = fs.existsSync('link-delay') ? Number(fs.readFileSync('link-delay', 'utf8')) : 0;
@@ -111,8 +119,14 @@ if (query.startsWith('mutation')) {
     data = { addProjectV2ItemById: { item: { id: 'PI1' } } };
   } else data = {};
 } else if (query.startsWith('query{viewer')) data = { viewer: { login: 'worker' } };
-else if (query.includes('value:fieldValueByName')) data = { repository: { issue: { issueFieldValues: { nodes: [] },
-  projectItems: { nodes: [{ project: { id: 'P1' }, value: { name: fs.readFileSync(fs.existsSync('lost') ? 'lost' : 'stored', 'utf8') } }] } } } };
+else if (query.includes('fieldValues(first:100)')) {
+  const names = { F1: 'Status', F2: 'Priority', F3: 'Size' };
+  const values = JSON.parse(fs.readFileSync('stored-values.json'));
+  // lost: the API accepted the writes but every field reads back as this value.
+  const lost = fs.existsSync('lost') && fs.readFileSync('lost', 'utf8');
+  data = { repository: { issue: { issueFieldValues: { nodes: [] },
+    projectItems: { nodes: [{ project: { id: 'P1' }, fieldValues: { nodes: Object.entries(values).map(([id, name]) => ({ name: lost || name, field: { name: names[id] } })) } }] } } } };
+}
 else if (query.includes('reviewThreads(first:100,after')) {
   const pages = JSON.parse(fs.readFileSync('pr.json')).threadPages ?? [[]];
   const cursor = process.argv.find(arg => arg.startsWith('after='));
@@ -168,6 +182,11 @@ else {
   data = { repository: { issue } };
 }
 process.stdout.write(JSON.stringify({ data }));`);
+  // `gh pr merge …` runs this script: it records the call; merge-fails is gh refusing, merge-noop a merge that never shows.
+  writeFileSync(join(checkout, 'pr'), `const fs = require('node:fs');
+fs.appendFileSync('merges', process.argv.slice(2).join(' ') + '\\n');
+if (fs.existsSync('merge-fails')) { process.stderr.write('gh: Head branch was modified\\n'); process.exit(1); }
+if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));`);
   const env = {};
   return {
     checkout, env,
@@ -485,12 +504,15 @@ test('In progress requires a startable issue assigned to the authenticated user 
     assert.notEqual(result.status, 0, result.stdout + result.stderr);
     assert.equal(existsSync(mutations), false, 'Rejected starts must not mutate or add a Project item');
   }
+  // Not assigned: one ERROR line, not the check's verdict block in front of it.
+  writeIssue(issue());
+  assert.match(run('status', '1', 'In progress').stdout, /^ERROR - [^\n]*\n$/);
   writeIssue(assigned());
   for (const failure of ['fail', 'fail-viewer']) {
     writeFileSync(join(checkout, failure), '');
     const result = run('status', '1', 'In progress');
     assert.notEqual(result.status, 0);
-    if (failure === 'fail-viewer') assert.match(result.stdout, /STARTABLE/);
+    if (failure === 'fail-viewer') assert.match(result.stdout, /^ERROR - /);
     assert.equal(existsSync(mutations), false, 'API failure must not mutate status');
     rmSync(join(checkout, failure));
   }
@@ -904,8 +926,74 @@ test('reviews waits only for traces on the current head and never reads failures
 test('field accepts Unicode and punctuation in names and options', t => {
   const { run, writeIssue } = fixture(t);
   writeIssue(issue());
-  assert.equal(run('field', '1', 'Größe', 'P0: urgent').status, 1, 'Validation lets the name through to the field lookup');
-  assert.equal(run('field', '1', 'Size', '-x').status, 2, 'An option-like value is still rejected');
+  const result = run('field', '1', 'Größe', 'P0: urgent');
+  assert.match(result.stdout, /^ERROR - .*Größe/, 'Validation lets the name through to the field lookup: ' + result.stderr);
+  assert.equal(run('field', '1', 'Size', '-x').stdout, '', 'An option-like value is still rejected as usage');
+  assert.equal(run('field', '1', 'Size', '-x').status, 2);
+});
+
+test('field sets several fields in one call: every pair is validated first, then all are written and read back', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue());
+  const mutations = join(checkout, 'mutations');
+  let result = run('field', '1', 'Size', 'xs', 'Priority', 'low');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 2);
+  assert.deepEqual(JSON.parse(readFileSync(join(checkout, 'stored-values.json'), 'utf8')), { F3: 'XS', F2: 'Low' });
+
+  rmSync(mutations);
+  for (const args of [['Size', 'XS', 'Priority', 'Urgent'], ['Size', 'XS', 'Colour', 'Red'], ['Size', 'XS', 'Priority'], ['Size', 'XS', 'size', 'S']]) {
+    result = run('field', '1', ...args);
+    assert.match(result.stdout, /^ERROR - /m, result.stdout + result.stderr);
+    assert.equal(result.stderr, '', 'No stack trace');
+    assert.equal(result.status, 2);
+    assert.equal(existsSync(mutations), false, 'One invalid pair writes nothing: ' + args.join(' '));
+  }
+  // The valid choices are named, for an unknown option and for an unknown field alike.
+  assert.match(run('field', '1', 'Size', 'XS', 'Priority', 'Urgent').stdout, /High.*Low/);
+  assert.match(run('field', '1', 'Size', 'XS', 'Colour', 'Red').stdout, /Priority.*Size/);
+
+  writeFileSync(join(checkout, 'lost'), 'S');
+  const lost = run('field', '1', 'Size', 'XS', 'Priority', 'Low');
+  assert.notEqual(lost.status, 0, 'A read-back that differs for any field is a failure');
+  assert.match(lost.stdout, /^ERROR - [^\n]*\n$/, 'A failed call shows no write as confirmed and stays one line');
+});
+
+test('field, status and priority report failures as one ERROR line, and issue failures name the repository', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue(issue());
+  for (const args of [['field', '1', 'Colour', 'Red'], ['priority', '1', 'Urgent'], ['status', '1', 'Done']]) {
+    const result = run(...args);
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stdout, /^ERROR - /);
+    assert.equal(result.stderr, '', 'No stack trace');
+  }
+  // A passing guard (the readiness check prints) waits until every pair is valid, so the failure stays one line.
+  writeIssue({ ...issue(), assignees: { nodes: [{ login: 'worker' }] } });
+  const late = run('field', '1', 'Status', 'In progress', 'Colour', 'Red');
+  assert.equal(late.status, 2);
+  assert.match(late.stdout, /^ERROR - [^\n]*\n$/);
+  assert.equal(existsSync(join(checkout, 'mutations')), false);
+  // Assigned but blocked: the refusal is the one ERROR line too, and nothing is written.
+  writeIssue({ ...issue(), assignees: { nodes: [{ login: 'worker' }] }, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } });
+  const held = run('status', '1', 'In progress');
+  assert.equal(held.status, 2);
+  assert.match(held.stdout, /^ERROR - [^\n]*\n$/);
+  assert.equal(existsSync(join(checkout, 'mutations')), false);
+  writeIssue({ ...issue(), assignees: { nodes: [{ login: 'worker' }] } });
+  // A write that fails after the guards passed leaves the check's output unprinted too.
+  writeFileSync(join(checkout, 'mutation-fails'), '');
+  const refused = run('status', '1', 'In progress');
+  assert.equal(refused.status, 2);
+  assert.match(refused.stdout, /^ERROR - [^\n]*\n$/);
+  assert.doesNotMatch(refused.stdout, /Assign yourself/, "The start guards passed; the write failed");
+  rmSync(join(checkout, 'mutation-fails'));
+  writeIssue(issue());
+  // GitHub refuses an unknown issue number: the message says which repository was meant.
+  writeFileSync(join(checkout, 'fail'), '');
+  for (const args of [['check', '1'], ['priority', '1', 'High']]) {
+    assert.match(run(...args).stdout, /test\/example#1/, args[0]);
+  }
 });
 
 test('link connects the issue natively to the PR, repeats safely and trusts only the read-back', t => {
@@ -1335,4 +1423,64 @@ test('board check shows the age of a claim and whether a linked PR is open', t =
   assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #5 \(first 1 of 150\)$/m, 'A cut list says so');
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');
   assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');
+});
+
+test('merge merges the checked head by its full id only when no review is running, and proves the merge', t => {
+  const { checkout, run } = fixture(t);
+  const merges = join(checkout, 'merges');
+  const oid = 'abcdef1' + '0'.repeat(33);
+  const commit = handoffPr().commits.nodes[0].commit;
+  const withHead = (headRefOid, changes) => handoffPr({ headRefOid, commits: { nodes: [{ commit: { ...commit, oid: headRefOid } }] }, ...changes });
+  const write = (pr, comments = []) => {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr));
+    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
+  };
+  const codexRunning = { id: 1, user: { login: 'chatgpt-codex-connector[bot]', type: 'Bot' }, html_url: 'u', created_at: pushedAt(), updated_at: pushedAt(),
+    body: `| Code Review | ⏳ **Running** <relative-time datetime="${pushedAt()}"></relative-time> | \`abcdef1\` |` };
+  const failedCi = { ...commit, oid, statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } };
+  const refused = [
+    ['a reviewer that is still running', withHead(oid), [codexRunning], 3],
+    ['an open review request', withHead(oid, { reviewRequests: { totalCount: 1, nodes: [{ requestedReviewer: { login: 'reviewer' } }] },
+      requestEvents: { totalCount: 1, nodes: [{ createdAt: pushedAt(), requestedReviewer: { login: 'reviewer' } }] } }), [], 3],
+    ['red CI', withHead(oid, { commits: { nodes: [{ commit: failedCi }] } }), [], 1],
+    ['a Draft', withHead(oid, { isDraft: true }), [], 1],
+    ['a merged PR', withHead(oid, { state: 'MERGED' }), [], 1],
+    ['an unresolved thread', withHead(oid, { threadPages: [[false]] }), [], 1],
+    ['conflicts', withHead(oid, { mergeStateStatus: 'DIRTY' }), [], 1],
+    ['an undetermined merge state', withHead(oid, { mergeStateStatus: 'UNKNOWN' }), [], 3],
+    ['a standing change request', withHead(oid, { latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'reviewer' } }] } }), [], 1],
+    ['a short head id, which gh --match-head-commit refuses', handoffPr(), [], 2],
+  ];
+  for (const [label, pr, comments, status] of refused) {
+    write(pr, comments);
+    const result = run('merge', '7');
+    assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
+    assert.equal(existsSync(merges), false, `${label}: gh pr merge is never called`);
+  }
+  // The refusal names the reviewer that is still running.
+  write(withHead(oid), [codexRunning]);
+  assert.match(run('merge', '7').stdout, /waiting: chatgpt-codex-connector running since/);
+  write(withHead(oid));
+  writeFileSync(join(checkout, 'fail'), '');
+  assert.equal(run('merge', '7').status, 2, 'An API read failure is unknown, never a merge');
+  rmSync(join(checkout, 'fail'));
+  assert.equal(existsSync(merges), false);
+  assert.equal(run('merge', '7', '--stall', '0').status, 2, 'A bad option is rejected');
+  assert.equal(run('merge', '7', '8').status, 2, 'A stray argument is rejected');
+
+  const merged = run('merge', '7');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.equal(readFileSync(merges, 'utf8'), `merge 7 --repo test/example --merge --match-head-commit ${oid}\n`, 'gh gets the full head id');
+  assert.match(merged.stdout, new RegExp(`^MERGED #7 head ${oid} merge commit f{40}$`, 'm'));
+
+  for (const flag of ['merge-fails', 'merge-noop']) {
+    rmSync(merges);
+    write(withHead(oid));
+    writeFileSync(join(checkout, flag), '');
+    const result = run('merge', '7');
+    assert.equal(result.status, 2, `${flag}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /^ERROR$/m);
+    assert.doesNotMatch(result.stdout, /^MERGED/m, 'Only a read-back showing the merge counts');
+    rmSync(join(checkout, flag));
+  }
 });

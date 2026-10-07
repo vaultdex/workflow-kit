@@ -94,39 +94,45 @@ trust; new definitions need personal review and trust. See
 
 ### Git hooks
 
-A project's versioned Git hooks in `.githooks/` run only after each clone sets
-`core.hooksPath`; Git never does this on checkout. Run per clone, for example from the
-project's setup script:
+A project's Git hooks in `.githooks/` run only after each clone sets `core.hooksPath`; Git never
+does this on checkout. Run per clone, for example from the project's setup script, on a
+branch you trust (the default branch), and again after every change to a hook:
 
 ```sh
 node .vendor/workflow-kit/scripts/install-git-hooks.mjs          # --check only reports
 ```
 
-It sets the relative `.githooks`, so every worktree runs the hooks of its own branch.
-Absolute paths into this repository's worktrees and matching `config.worktree`
-overrides become that relative path; Git resolves relative paths per worktree, so any
-other relative value counts as foreign. It changes a config file only when every
-`core.hooksPath` entry there (including `include` files) points to this
-repository's `.githooks` and is written in that file itself. Because Git evaluates
-`includeIf` per worktree and branch, it changes nothing when any `includeIf` target,
-whatever its condition, sets a foreign path. Anything else, such as a foreign path in
-local, global or system config, stays and is reported: integrate `.githooks` there
-yourself. Without `.githooks/` it does nothing.
+It copies `.githooks/` of the current checkout, plus the kit's `post-checkout`, into
+`workflow-kit-hooks/` in the clone's Git directory and sets `core.hooksPath` to that absolute
+path, shared by all worktrees of the clone. Git then runs the copy, never the working
+tree: a branch that changes or adds a file in `.githooks/` does not get that code run on
+checkout or push. Only an explicit rerun replaces the copy (and drops hooks that no longer
+exist); hooks no longer follow the branch you are on, so a hook change reaches a clone
+only through that rerun, for example by rerunning the project's bootstrap. Symlinks in
+`.githooks/` are not copied. A `post-checkout` of the project's own is used instead of the
+kit's and reported; integrate `scripts/git-hooks/post-checkout` there by hand.
 
-The installer also writes `.githooks/post-checkout` (from `scripts/git-hooks/post-checkout`) when it is
-missing, unless the project already has a different one, which stays; commit it with
-`git add --chmod=+x .githooks/post-checkout`. After a branch checkout (third argument `1`) the hook runs
+The earlier settings, the relative `.githooks` and absolute paths into this
+repository's worktrees with matching `config.worktree` overrides, become the new path.
+Git resolves relative paths per worktree, so any other relative value counts as foreign.
+It changes a config file only when every `core.hooksPath` entry there (including
+`include` files) points to this repository's hooks and is written in that file itself.
+Because Git evaluates `includeIf` per worktree and branch, it changes nothing when any
+`includeIf` target, whatever its condition, sets a foreign path. Anything else, such as a
+foreign path in local, global or system config, stays and is reported: integrate
+`.githooks` there yourself. Without `.githooks/` it does nothing.
+
+After a branch checkout (third argument `1`) the kit's `post-checkout` runs
 `git submodule update --init --checkout .vendor/workflow-kit`, so the kit follows the gitlink of the
 new branch instead of showing `M .vendor/workflow-kit`. It touches only the kit, not other submodules
 or `submodule.recurse`, disables Git's own prompts like the SessionStart hook (ssh may still ask on the terminal) and runs none of the kit clone's own hooks. Like any checkout it applies the user's Git configuration, including filters.
-A rerun of the installer repairs a missing executable bit and reports a hook tracked without it
-(`git update-index --chmod=+x`). A kit with local changes, ignored or untracked files, or commits no remote has
+A kit with local changes, ignored or untracked files, or commits no remote has
 (a clean, published kit behind or ahead of the old pin still follows) is not touched: the hook prints a hint
 and the checkout continues; any failure only prints the command. Without a kit gitlink, as in this repository,
-it does nothing. The hook is versioned with each branch (Git resolves `.githooks` in the new worktree after
-the switch), so a branch created before the hook was committed has none and does not sync until it merges
-the default branch. Known limit: where the kit has `core.filemode=false`, a purely local mode change is invisible to
-Git and the update may reset it. A hook copy with CRLF line endings differs from the kit's and is kept, not blessed.
+it does nothing. Known limit: where the kit has `core.filemode=false`, a purely local mode change is invisible to
+Git and the update may reset it.
+Migrating from the earlier design (a committed `.githooks/post-checkout`): delete that file, then rerun
+the installer, so the kit's current one is copied.
 
 ## Board commands
 
@@ -135,7 +141,10 @@ Git and the update may reset it. A hook copy with CRLF line endings differs from
 - `next`, `check ISSUE [--session ID]` (shows the age and open PR of a claim and one line per native sub-issue; information only), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
-- `field ISSUE NAME VALUE`: any single-select field, read back after writing.
+- `field ISSUE NAME VALUE [NAME VALUE ...]`: any single-select fields, all read back together after writing.
+  Every pair is checked against the field definitions before the first write: one invalid pair writes
+  nothing and names the valid options. `field`, `status` and `priority` report failures as one
+  `ERROR - reason` line (exit 2, nothing else printed), not a stack trace. `check` and issue read errors name `OWNER/REPO#N`.
 - `status ISSUE "Automated review" PR [OTHER_ISSUE...]` (or `field ISSUE Status
   "Automated review" PR [OTHER_ISSUE...]`): verify the declared open PR's reference
   and comment backlink on every delivered issue before writing status. Post and
@@ -195,6 +204,16 @@ Git and the update may reset it. A hook copy with CRLF line endings differs from
   span or glued to letters is no reference). Session ownership, final
   proof and the content of the findings remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
+- `merge PR [--stall MINUTES] [--grace MINUTES]`: the only way for an agent with merge
+  authority to merge ([review loop](docs/CONTRIBUTING.md#review-loop) step 7). It applies the review gates of
+  `handoff` (open non-draft PR, CI green, every reviewer with a trace on the head finished or
+  stalled, no `blocker:` line, no open thread, determined merge state) and prints the same
+  lines; a running reviewer ends `WAITING` (exit 3) and names it, a red check or blocker
+  `FAILED` (exit 1), and nothing is merged. Otherwise it runs `gh pr merge --merge
+  --match-head-commit <full head id>` once (a push after the check makes gh refuse) and counts
+  only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; gh
+  refusal or a read-back that differs: `ERROR`, exit 2). It does not read the issue, claims or the
+  [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
   `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3): for that long after
@@ -225,6 +244,8 @@ reviewer:
 
 ```md
 ## Übergabe
+
+<Ergebnis in einem Satz in einfacher Sprache>
 
 Head: abcdef1
 
