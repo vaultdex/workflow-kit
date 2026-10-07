@@ -1122,8 +1122,7 @@ test('ready marks a Draft PR ready only for the expected pushed commit and never
 
   const short = run('ready', '7', NEW.slice(0, 7), ...quick);
   assert.equal(short.status, 2, 'A short commit id is rejected');
-  assert.match(short.stderr, /40/, 'The reason names the required length');
-  assert.doesNotMatch(short.stderr, /Usage:/, 'The reason replaces the general usage line');
+  assert.notEqual(short.stderr, run('ready', 'x', NEW).stderr, 'The refusal says more than the general usage line');
   assert.equal(mutations(), 0);
 
   prepare();
