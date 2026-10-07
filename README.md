@@ -209,6 +209,16 @@ Git and the update may reset it. A hook copy with CRLF line endings differs from
   span or glued to letters is no reference). Session ownership, final
   proof and the content of the findings remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
+- `merge PR [--stall MINUTES] [--grace MINUTES]`: the only way for an agent with merge
+  authority to merge ([review loop](docs/CONTRIBUTING.md#review-loop) step 7). It applies the review gates of
+  `handoff` (open non-draft PR, CI green, every reviewer with a trace on the head finished or
+  stalled, no `blocker:` line, no open thread, determined merge state) and prints the same
+  lines; a running reviewer ends `WAITING` (exit 3) and names it, a red check or blocker
+  `FAILED` (exit 1), and nothing is merged. Otherwise it runs `gh pr merge --merge
+  --match-head-commit <full head id>` once (a push after the check makes gh refuse) and counts
+  only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; gh
+  refusal or a read-back that differs: `ERROR`, exit 2). It does not read the issue, claims or the
+  [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` every minute, prints `WAITING` lines on change and
   ends with `DONE`, `FAILED` (as soon as a check fails) or `ERROR`. Both take
   `--stall MINUTES` (default 20) and `--grace MINUTES` (default 3): for that long after
@@ -239,6 +249,8 @@ reviewer:
 
 ```md
 ## Übergabe
+
+<Ergebnis in einem Satz in einfacher Sprache>
 
 Head: abcdef1
 
