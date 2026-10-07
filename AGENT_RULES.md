@@ -14,8 +14,8 @@ details only for the current step.
   own, or bypass branch protection, required checks or spending limits. One exception:
   `--force-with-lease` on your own upper layer of a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests),
   never on another layer and never plain `--force`.
-- Remove only worktrees you created yourself. Remove others (e.g. under `.claude/worktrees/`
-  or `F:/Worktrees/`) only on a human's explicit instruction, and use `--force` on them only
+- Remove only worktrees you created yourself. Remove others (e.g. under `.claude/worktrees/`)
+  only on a human's explicit instruction, and use `--force` on them only
   when `git status` is clean and nothing is unpushed.
 - Never expose secrets or commit personal configuration.
 - A question a human must decide is never skipped, answered by you or worked around.
