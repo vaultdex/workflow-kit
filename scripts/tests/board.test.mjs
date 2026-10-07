@@ -6,7 +6,9 @@ import { join, sep } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\nHead: abcdef1\n\n- Retro: keine Befunde',
+// body_html is what GitHub renders for the body (the handoff check reads that, like the open acceptance of the issue).
+const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\nHead: abcdef1\n\n### Retro\n\n- Keine Funde',
+  body_html: '<h2 dir="auto">Übergabe</h2>\n<p dir="auto">Head: abcdef1</p>\n<h3 dir="auto">Retro</h3>\n<ul dir="auto">\n<li>Keine Funde</li>\n</ul>',
   html_url: 'h', created_at: '2999-01-01T00:00:00Z', updated_at: '2999-01-01T00:00:00Z', ...changes });
 
 /** Isolated checkout with paginated GitHub responses and a record of every mutation. */
@@ -30,6 +32,12 @@ if (!path.startsWith('graphql')) {
   // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
   const parts = path.split('?')[0].split('/');
   const backlink = 'backlink-' + parts[4] + '.json';
+  if (parts[3] === 'issues' && parts[4] === 'comments' && parts.length === 6) {
+    // One comment by id, as rendered by GitHub.
+    const found = JSON.parse(fs.readFileSync('issues-comments.json')).find(comment => String(comment.id) === parts[5]);
+    process.stdout.write(JSON.stringify({ body_html: found?.body_html }));
+    process.exit(0);
+  }
   if (parts[3] === 'issues' && parts.length === 5 && process.argv.includes('PATCH')) {
     // A body write; body-overwritten is what another session writes right after it.
     const issue = JSON.parse(fs.readFileSync(backlink));
@@ -1214,6 +1222,49 @@ test('handoff needs the driver handoff comment that names the current head', t =
   const result = run('handoff', '1', '7');
   assert.equal(result.status, 0, 'The authenticated user matches regardless of case: ' + result.stdout + result.stderr);
   assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Human review');
+});
+
+// GitHub's rendering of the handoff comment's retro section (shape of its Markdown API output).
+const link = '<a class="issue-link js-issue-link" href="https://github.com/test/example/issues/12">#12</a>';
+const pullLink = '<a class="issue-link js-issue-link" data-hovercard-type="pull_request" href="https://github.com/test/example/pull/12">#12</a>';
+const commit = '<a class="commit-link" href="https://github.com/test/example/commit/38e48bd"><tt>38e48bd</tt></a>';
+const retro = (...lines) => '<h2 dir="auto">Übergabe</h2>\n<p dir="auto">Head: abcdef1</p>\n<h3 dir="auto">Retro</h3>\n<ul dir="auto">\n'
+  + lines.map(line => `<li>${line}</li>`).join('\n') + '\n</ul>';
+
+test('handoff needs a retro section whose every line ends with its resolution', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  const handoff = body_html => {
+    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment({ body_html })]));
+    return run('handoff', '1', '7');
+  };
+  const rejected = (html, named, label) => {
+    const result = handoff(html);
+    assert.equal(result.status, 1, label + result.stdout + result.stderr);
+    for (const line of named) assert.ok(result.stdout.includes(': ' + line), label + result.stdout);
+    assert.equal(existsSync(join(checkout, 'mutations')), false, label + 'Rejected handoff never mutates status');
+  };
+
+  rejected(retro('Kit-Init dauert: ' + link, 'Rate-Limit: ohne Erledigung', 'Memory veraltet: persönlich gemeldet'), ['Rate-Limit: ohne Erledigung'], 'one line without resolution: ');
+  rejected(retro('Zeile mit ' + link + ' mittendrin'), ['Zeile mit #12 mittendrin'], 'reference not at the end: ');
+  rejected(retro('Zeile mit <code>#12</code>'), ['Zeile mit #12'], 'reference in code: ');
+  rejected(retro('Keine Funde', 'Zusätzlicher Fund: ' + link), ['Keine Funde'], 'Keine Funde is allowed only alone: ');
+  rejected(retro('Fund: ' + pullLink), ['Fund: #12'], 'a pull request is no follow-up issue: ');
+  rejected('<h2 dir="auto">Übergabe</h2>\n<ul dir="auto">\n<li>Retro: keine Befunde</li>\n</ul>', [], 'no retro section: ');
+  rejected('<h2 dir="auto">Übergabe</h2>\n<h3 dir="auto">Retro</h3>\n<p dir="auto">Nichts gefunden.</p>', [], 'section without lines: ');
+
+  for (const [html, label] of [
+    [retro('Keine Funde'), 'Keine Funde alone'],
+    [retro('Kit-Init: ' + link, 'Reibung: behoben in ' + commit, 'Memory: persönlich gemeldet', 'Einzelfall: kein Handlungsbedarf: nur einmal aufgetreten'), 'every resolution'],
+    [retro(`\n<p dir="auto">Fund: ${link}</p>\n`, `\n<p dir="auto">Reibung: behoben in ${commit}</p>\n`), 'loose list: GitHub wraps each line in a paragraph'],
+    [retro('Fund: ' + link) + '\n<h3 dir="auto">Reviews</h3>\n<ul>\n<li>Befunde: keine</li>\n</ul>', 'lines after the next heading are not retro lines'],
+  ]) {
+    const result = handoff(html);
+    assert.equal(result.status, 0, label + ': ' + result.stdout + result.stderr);
+  }
+  assert.equal(handoff(undefined).status, 2, 'An unreadable rendered comment is unknown, never a handoff');
 });
 
 test('handoff blocks on open Sonar issues behind a passed quality gate and never reads an unreadable count as clean', t => {

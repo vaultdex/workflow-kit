@@ -852,11 +852,32 @@ function handoffIssue(issue, viewer) {
 /**
  * The driver's handoff comment: a "## Übergabe" heading and a "Head: <SHA>" line in a PR comment by the authenticated
  * user. The comment names the head it is about, so a new head asks for a new comment however (and whenever) the push
- * happened, which no timestamp reliably tells. Its content (retro result, findings list) is for the human reviewer and
- * is not judged here.
+ * happened, which no timestamp reliably tells. Of its content only the retro section is judged, see `retroReasons`;
+ * with several matching comments the newest counts.
  */
-const hasHandoffComment = (comments, viewer, headRefOid) => comments.some(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
+const findHandoffComment = (comments, viewer, headRefOid) => comments.findLast(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
   && /^## Übergabe\s*$/m.test(comment.body ?? '') && new RegExp(`^Head:\\s*${headRefOid.slice(0, 7)}`, 'im').test(comment.body ?? ''));
+
+/**
+ * Why the retro section of the handoff comment, as GitHub renders it, does not pass: a heading "Retro" with one list
+ * line per finding, each ending with its resolution (an issue link, "behoben in <SHA>", "persönlich gemeldet" or
+ * "kein Handlungsbedarf: <Grund>"), or the single line "Keine Funde". Whether a finding is justified is not judged.
+ * GitHub's rendering decides what a heading, a list line and an issue reference are, so no Markdown is parsed here.
+ */
+// ponytail: relies on GitHub's markup (h1-h6, li, issue-link); replace when GitHub changes it.
+function retroReasons(bodyHtml) {
+  assert.equal(typeof bodyHtml, 'string', 'The rendered handoff comment is unreadable');
+  const text = html => html.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+  const section = bodyHtml.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && text(part.match(/^<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/)?.[1] ?? '') === 'Retro');
+  const lines = [...(section ?? '').matchAll(/<li[^>]*>([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>])/g)].map(([, line]) => [line, text(line)]);
+  if (!lines.length) return ['the handoff comment needs a "Retro" section with one list line per finding, each ending with its resolution, or the single line "Keine Funde" (README: Handoff comment)'];
+  if (lines.length === 1 && /^keine funde\.?$/i.test(lines[0][1])) return [];
+  // The last element must be an issue link (GitHub renders a pull request reference the same way, but with /pull/N); a loose list wraps the line in <p>.
+  const endsWithIssue = html => { const anchor = html.match(/(<a [^>]*>)[^<]*<\/a>\s*(?:<\/p>\s*)?$/)?.[1] ?? ''; return anchor.includes('class="issue-link') && /href="[^"]*\/issues\/\d+"/.test(anchor); };
+  return lines.filter(([html, line]) => !(endsWithIssue(html) || /\bbehoben in [0-9a-f]{7,40}$/i.test(line)
+    || /persönlich gemeldet$/i.test(line) || /\bkein Handlungsbedarf: \S/i.test(line)))
+    .map(([, line]) => `retro line without a resolution (end it with an issue link, "behoben in <SHA>", "persönlich gemeldet" or "kein Handlungsbedarf: <Grund>"): ${line}`);
+}
 
 /**
  * The PR gate handoff and merge share: an open non-draft PR whose CI and every traced review have finished, without
@@ -899,8 +920,14 @@ function finishedPr(prNumber, action, expectedHead, extra = () => []) {
 
 /** Read all PR gates and native links, optionally requiring the previously checked head. */
 function handoffPr(issueId, viewer, expectedHead) {
-  const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => hasHandoffComment(comments, viewer, pr.headRefOid) ? [] :
-    [`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line, the retro result and the findings list (README: Handoff comment)`]);
+  const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => {
+    const comment = findHandoffComment(comments, viewer, pr.headRefOid);
+    if (!comment) return [`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading, a "Head: ${pr.headRefOid.slice(0, 7)}" line and the "Retro" section (README: Handoff comment)`];
+    // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
+    const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
+    return retroReasons(rendered.body_html);
+  });
   if (!result) return;
   if (!connectedIssues(result.pr).has(issueId)) {
     console.log(`FAILED\nblocker: PR #${value} is not natively linked to issue #${number}`);
