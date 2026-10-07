@@ -415,36 +415,29 @@ Renovate pull requests from this repository that change `.vendor/*`. It starts o
 definition that holds the write token. That is safe only because the job never runs code of the
 branch (see below), and it must stay so. The job runs
 `scripts/update-ponytail.mjs` and `scripts/update-impeccable.mjs` as needed, then the CI
-generators, pushes the result to the Renovate branch and dispatches the repository CI on the
-new head (pushes with `GITHUB_TOKEN` start no workflows). The job holds `contents: write`
-and `actions: write` (the checkout action fetches with it and drops it; no step that runs a script sees it except the push and dispatch steps), runs only for
+generators, pushes the result to the Renovate branch and approves the repository CI run for the
+new head: a push with `GITHUB_TOKEN` makes GitHub create the `pull_request` run but hold it as
+`action_required`, and the required check `Workflow Kit checks` stays "expected" until it has run
+(a `workflow_dispatch` run beside it is not accepted). The job holds `contents: write`
+and `actions: write` (the checkout action fetches with it and drops it; no step that runs a script sees it except the push and approval steps), runs only for
 `renovate[bot]` pull requests whose commits are all by bots, and checks out the commit of
 Renovate's authenticated event, not the branch name. Whatever the branch changed under
 `scripts/` never runs: main's scripts replace it, and only the branch's adaptation patch is
 kept as input. Whoever wrote its commits, the branch may not change any workflow, script,
 `.node-version` or `renovate.json` against main, apart from the three files the updaters
 generate (the Ponytail adaptation patch and the Impeccable `VERSION` and `SHA256SUMS`). The job
-fails instead of running, because it dispatches the branch's CI workflow with the write token;
-it dispatches only while the branch still is the commit it pushed, then waits up to a minute for
-the dispatched run, requires it on exactly that commit and fails on any run started since the
-dispatch for another commit, finished or not (it cancels one that still runs). Commit author names prove nothing,
-so the bot-author rule only leaves branches with other people's commits alone. If the CI
-dispatch fails after the push, the job fails and `repository.yml` is started for the branch by
-hand. `renovate.json` lists the bot's commit address in
+fails instead of running, because the approved CI run executes the branch's workflow definition
+(read-only token, no secrets). The job approves only the `pull_request` run of the commit it
+pushed (the list is asked for that commit), waits up to two minutes for it and fails when none
+appears. Commit author names prove nothing,
+so the bot-author rule only leaves branches with other people's commits alone. If the approval
+fails, approve the held run on the pull request ("Approve and run") or restart it:
+`gh run rerun <id>`. `renovate.json` lists the bot's commit address in
 `gitIgnoredAuthors`, so Renovate keeps updating the branch. Submodules are not fetched at
 checkout: the job first requires the submodule URLs in the branch's `.gitmodules` to equal
 main's and fails otherwise, so a branch cannot point the generators at another repository.
 `update-ponytail.mjs` keeps its conflict files in `.workflow-kit/ponytail-resolve/` and
 refuses to read, write or delete there when any part of that path is a link.
-
-Known limit, accepted ([#104](https://github.com/vaultdex/workflow-kit/issues/104)): the CI dispatch
-runs the Renovate branch's workflow definition, because `workflow_dispatch` takes a branch or tag,
-not a commit. Between the push and the dispatch another repository writer could move the branch;
-the job checks the branch just before and cancels a run it started for another commit, but cannot
-undo what such a run already did. A writer can run any workflow definition on a branch of their
-own with the same permissions, so this race gives them nothing more. Dispatching `main`'s
-workflow instead is no way out: its check runs would hang on `main`'s head, not the PR's. If the
-threat model changes, report the CI result as a commit status from the job itself.
 
 When upstream edits lines our Ponytail adaptations rewrite, the job fails and names the files.
 Run `node scripts/update-ponytail.mjs` on the Renovate branch: it writes the conflicting
