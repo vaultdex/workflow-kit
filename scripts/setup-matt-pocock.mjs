@@ -15,6 +15,11 @@ const gitTool = externalTool('git', root, kit, process.cwd());
 const git = (...args) => execFileSync(gitTool.file, args, { cwd: root, env: gitTool.env, encoding: 'utf8' });
 const text = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
 
+// Documented deviation from upstream (docs/matt-pocock.md): agents run the retro before every
+// handoff, which upstream's `disable-model-invocation` makes the Skill tool refuse (#212).
+const adapt = (skill, path, content) => skill === 'retro' && path === 'SKILL.md'
+  ? content.replace(/^disable-model-invocation: true\n/m, '') : content;
+
 function cleanSource() {
   assert.equal(git('-C', source, 'status', '--porcelain', '--untracked-files=all').trim(), '',
     'Matt Pocock source has local changes; preserve/review them before updating');
@@ -82,7 +87,7 @@ try {
     for (const { mode, path } of entries) {
       const target = join(stage, basename(skill), path.slice(skill.length + 1));
       mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, text(join(source, path)));
+      writeFileSync(target, adapt(basename(skill), path.slice(skill.length + 1), text(join(source, path))));
       chmodSync(target, mode === '100755' ? 0o755 : 0o644);
     }
   }
