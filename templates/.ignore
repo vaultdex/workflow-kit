@@ -1,0 +1,9 @@
+# Search tools (ripgrep) skip these paths; git ignores this file.
+# Generated provider copies of the skills: .agents/skills stays searchable.
+/.agent/skills/
+/.claude/skills/
+/.github/skills/
+/.opencode/skills/
+/.pi/skills/
+# Vendored sources: search them by naming the path.
+/.vendor/
