@@ -827,7 +827,7 @@ function unresolvedThreads(prNumber = number) {
     after = reviewThreads.pageInfo.endCursor;
   }
 }
-const rest = path => JSON.parse(execFileSync(gh.file, ['api', path], { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
+const rest = path => JSON.parse(execFileSync(gh.file, ['api', path], { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, stdio: 'pipe' }));
 /** Every page, so an early bot summary on a long PR is never cut off. */
 function restAll(path, expected) {
   const items = [];
@@ -1581,9 +1581,10 @@ const mergeGate = () => finishedPr(number, 'merge', undefined, () => {
  */
 function updateBranch(head, base) {
   try {
-    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/update-branch`, '-X', 'PUT', '-f', `expected_head_sha=${head}`], { encoding: 'utf8', env: gh.env });
+    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/update-branch`, '-X', 'PUT', '-f', `expected_head_sha=${head}`], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
   } catch (error) {
-    if (!/\b403\b/.test(`${error.stderr}${error.stdout}`)) throw error;
+    // stdio 'pipe': without it execFileSync copies gh's raw refusal to stderr, and a caller that reads the last line sees that, not the instruction (#332).
+    if (!/\b403\b|stacked PR's branch/.test(`${error.stderr}${error.stdout}`)) throw error;
     console.log(['FAILED', `blocker: GitHub refuses the branch update with 403 (typical for a PR with stacked children): run \`git merge origin/${base}\` in the PR's worktree, push once, then run \`board.mjs merge ${number}\` again`].join('\n'));
     process.exitCode = 1;
     return;
@@ -1613,7 +1614,7 @@ function deleteHeadBranch(pr) {
   assert.ok(Array.isArray(dependents), 'The open PRs on the branch are unreadable');
   if (dependents.length) return `branch kept: ${branch} is the base of open PR ${dependents.map(({ number: dependent }) => `#${dependent}`).join(', ')}`;
   try {
-    execFileSync(gh.file, ['api', `repos/${project.repository}/git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, '-X', 'DELETE'], { encoding: 'utf8', env: gh.env });
+    execFileSync(gh.file, ['api', `repos/${project.repository}/git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, '-X', 'DELETE'], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
   } catch (error) {
     // A branch that is already gone (the repository deletes merged branches itself) is no failure.
     if (!/\b(404|422)\b|Reference does not exist|Not Found/.test(`${error.stderr}${error.stdout}`)) throw error;
@@ -1650,7 +1651,7 @@ async function merge() {
   let asynchronous = false;
   try {
     execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
-      { encoding: 'utf8', env: gh.env });
+      { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
   } catch (error) {
     // A PR with stacked children (#321) is refused, but accepted by merge-async: same merge, same head, the answer is 202 and the merge follows in the background.
     // GitHub's GraphQL text is "part of a stack and must be merged using the asynchronous merge REST API"; a REST merge answers HTTP 403.
