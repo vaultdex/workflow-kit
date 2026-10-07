@@ -38,10 +38,14 @@ beziehungsweise 50 Punkten bis zum Reset (`rate limited until …`) und fragen d
 einer kurzen Drosselung („secondary rate limit“) warten sie 1, 2, dann 4 Minuten statt bis zum
 Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab. Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
 
-**Review-Bots im Quota.** Ist ein Reviewer wegen Quota nicht verfügbar, gilt der
-bestehende Schritt „confirmed unavailable“ im [Review loop](CONTRIBUTING.md#review-loop):
-Reviewer, Ursache und Beleg in der PR festhalten und die Einschränkung im
-Übergabekommentar nennen.
+**Review-Bots im Quota.** Ein Reviewer, auf den das Projekt nicht angewiesen ist
+(CodeRabbit auf dem Free-Plan), steht als `"optionalReviewers"` in
+`.github/workflow-project.json` ([SETUP](../SETUP.md#3-board-and-labels)). Für ihn gibt es
+kein erneutes Anfordern, kein Warten und kein Ersatz-Review; `board.mjs` wartet nie auf
+seine Spuren. Die Übergabe nennt ihn nur, wenn er etwas gefunden hat. Ist ein Pflicht-Reviewer
+wegen Quota nicht verfügbar, gilt der Schritt „confirmed unavailable“ im
+[Review loop](CONTRIBUTING.md#review-loop): Reviewer, Ursache und Beleg in der PR
+festhalten und die Einschränkung im Übergabekommentar nennen.
 
 **Eigene Scratch-Verzeichnisse.** Hilfsdateien (Kommentartexte, Skripte, Logs) liegen
 je Issue in einem eigenen Verzeichnis, zum Beispiel im Session-Scratchpad oder neben
