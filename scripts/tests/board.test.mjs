@@ -64,6 +64,16 @@ if (!path.startsWith('graphql')) {
     process.stdout.write(JSON.stringify(items.slice((page - 1) * 100, page * 100)));
     process.exit(0);
   }
+  if (parts[3] === 'compare') {
+    // compare.json: { behind: commits the base gained, own: files of the PR, base: files of the base }; by default the base has not moved.
+    const moved = fs.existsSync('compare.json') ? JSON.parse(fs.readFileSync('compare.json')) : { behind: 0, own: [], base: [] };
+    const page = Number(new URLSearchParams(path.split('?')[1]).get('page') ?? 1);
+    // The PR's base branch name holds a slash, so the first side tells the direction: BASE...HEAD lists the PR's files.
+    const forward = parts.slice(4).join('/').startsWith('release/0.1.1...');
+    const files = (forward ? moved.own : moved.base).slice((page - 1) * 100, page * 100).map(filename => ({ filename }));
+    process.stdout.write(JSON.stringify({ behind_by: forward ? moved.behind : 0, files }));
+    process.exit(0);
+  }
   if (parts[3] === 'activity') {
     // The branch's push log; by default the head was set long ago.
     const head = JSON.parse(fs.readFileSync('pr.json')).headRefOid;
@@ -633,7 +643,7 @@ test('reviews waits only for traces on the current head and never reads failures
     workflowRun: run === undefined ? null : { databaseId: run, workflow: { id: workflowId } } });
   const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, requestEventTotal, threadPages,
     suites = [suite('COMPLETED', 1, pushed)], suiteTotal = suites.length } = {}) => ({
-    number: 7, state: 'OPEN', isDraft: true, headRefOid: 'abcdef1234', mergeStateStatus: 'CLEAN', reviewDecision: null,
+    number: 7, state: 'OPEN', isDraft: true, baseRefName: 'release/0.1.1', headRefOid: 'abcdef1234', mergeStateStatus: 'CLEAN', reviewDecision: null,
     latestOpinionatedReviews: { totalCount: 0, nodes: [] },
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
       checkSuites: { totalCount: suiteTotal, nodes: suites }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },
@@ -1335,4 +1345,41 @@ test('board check shows the age of a claim and whether a linked PR is open', t =
   assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #5 \(first 1 of 150\)$/m, 'A cut list says so');
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');
   assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');
+});
+
+test('reviews reports a moved base with the files both sides changed and never blocks on it', t => {
+  const { checkout, run } = fixture(t);
+  const look = (moved, changes) => {
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr(changes)));
+    if (moved === 'unreadable') writeFileSync(join(checkout, 'compare.json'), 'unreadable');
+    else if (moved) writeFileSync(join(checkout, 'compare.json'), JSON.stringify(moved));
+    else rmSync(join(checkout, 'compare.json'), { force: true });
+    return run('reviews', '7');
+  };
+  const quiet = look(undefined);
+  assert.equal(quiet.status, 0, quiet.stdout + quiet.stderr);
+  assert.doesNotMatch(quiet.stdout, /base moved/, 'A base that did not move says nothing');
+  assert.doesNotMatch(look({ behind: 0, own: ['a'], base: ['a'] }).stdout, /base moved/);
+
+  const moved = look({ behind: 3, own: ['a.mjs', 'b.mjs'], base: ['b.mjs', 'c.mjs'] });
+  assert.equal(moved.status, 0, 'A moved base never changes the verdict');
+  assert.match(moved.stdout, /base moved: 3 commits since merge-base/);
+  assert.match(moved.stdout, /changed on both sides: b\.mjs$/m);
+  assert.match(look({ behind: 1, own: ['a.mjs'], base: ['c.mjs'] }).stdout, /no file is changed on both sides/);
+
+  // Past the first page of 100 files, and more shared files than are listed.
+  const many = Array.from({ length: 150 }, (_, index) => `file-${index}`);
+  assert.match(look({ behind: 1, own: many, base: ['file-149'] }).stdout, /changed on both sides: file-149$/m);
+  assert.match(look({ behind: 1, own: many.slice(0, 12), base: many.slice(0, 12) }).stdout, /, and 2 more$/m);
+
+  // A red head reports the movement too: that is when the next push is weighed.
+  const red = handoffPr().commits.nodes[0].commit;
+  const failed = look({ behind: 2, own: ['a'], base: ['a'] }, { commits: { nodes: [{ commit: { ...red, statusCheckRollup: { contexts: { totalCount: 1, nodes: [
+    { __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } } }] } });
+  assert.equal(failed.status, 1);
+  assert.match(failed.stdout, /base moved: 2 commits/);
+
+  const unreadable = look('unreadable');
+  assert.equal(unreadable.status, 0, 'An unreadable comparison keeps the verdict');
+  assert.match(unreadable.stdout, /note: base movement unreadable/);
 });
