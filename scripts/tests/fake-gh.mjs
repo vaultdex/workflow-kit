@@ -178,11 +178,14 @@ function api(argv, input, stdout, stderr, exit) {
   };
   // limited: GitHub refuses the next query, like its RATE_LIMIT error, and takes the file away: the quota is back after one wait.
   // "free" in the file: the refusal is stale, its own headers show 4000 points left and a reset three seconds away.
-  if (fs.existsSync('limited')) {
-    const stale = fs.readFileSync('limited', 'utf8') === 'free';
-    fs.unlinkSync('limited');
+  if (fs.existsSync('limited') || fs.existsSync('limited-200')) {
+    const limitedFile = fs.existsSync('limited') ? 'limited' : 'limited-200';
+    const stale = fs.readFileSync(limitedFile, 'utf8') === 'free';
+    fs.unlinkSync(limitedFile);
     answer(JSON.stringify({ errors: [{ type: 'RATE_LIMIT', code: 'graphql_rate_limit', message: 'API rate limit already exceeded for user ID 1.' }] }),
       stale ? [4000, Math.ceil((Date.now() + 3000) / 1000)] : [0, Math.floor(Date.now() / 1000) + 1]);
+    if (!stale) fs.writeFileSync('quota-left', '4000'); // the retry after reset carries a fresh positive quota header
+    if (limitedFile === 'limited-200') return;
     stderr('gh: API rate limit already exceeded for user ID 1.\n');
     exit(1);
   }
@@ -298,12 +301,15 @@ function api(argv, input, stdout, stderr, exit) {
     data = { repository: { issue: { issueFieldValues: { nodes: [] },
       projectItems: { nodes: [{ project: { id: 'P1' }, fieldValues: { nodes: Object.entries(values).map(([id, name]) => ({ name: lost || name, field: { name: names[id] } })) } }] } } } };
   }
-  else if (query.includes('reviewThreads(first:100,after')) {
+  else if (query.includes('reviewThreads(first:100')) {
     const pages = JSON.parse(fs.readFileSync('pr.json')).threadPages ?? [[]];
     const cursor = argv.find(arg => arg.startsWith('after='));
     const index = cursor ? Number(cursor.slice(6)) : 0;
-    data = { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
-      nodes: pages[index].map(isResolved => ({ isResolved, comments: { nodes: [{ url: 'thread-' + index }] } })) } } } };
+    const reviewThreads = { pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
+      nodes: pages[index].map(isResolved => ({ isResolved, comments: { nodes: [{ url: 'thread-' + index }] } })) };
+    data = query.includes('readyEvents')
+      ? { repository: { pullRequest: { ...JSON.parse(fs.readFileSync('pr.json')), reviewThreads } } }
+      : { repository: { pullRequest: { reviewThreads } } };
   }
   else if (query.includes('closingIssuesReferences')) {
     if (fs.existsSync('fail-links')) exit(1);

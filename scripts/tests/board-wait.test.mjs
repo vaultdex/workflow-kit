@@ -69,25 +69,26 @@ function restFixture(t) {
       for (const file of ['issues-comments', 'issues-reactions', 'pulls-comments', 'comments-reactions', 'pulls-reviews']) writeFileSync(join(checkout, `${file}.json`), '[]');
     },
     restReads: () => readFileSync(join(checkout, 'rest-reads'), 'utf8').trim().split('\n').length,
-    // The GraphQL reads of the PR and of its review threads since the last call.
+    // One full GraphQL query carries both PR state and its first page of review threads.
     graphqlReads: () => {
       const sent = queries();
-      return { pr: sent.filter(query => query.includes('readyEvents')).length, threads: sent.filter(query => query.includes('reviewThreads')).length, all: sent.length };
+      return { pr: sent.filter(query => query.includes('readyEvents')).length,
+        threads: sent.filter(query => query.includes('reviewThreads') && !query.includes('readyEvents')).length, all: sent.length };
     },
   };
 }
 
-test('wait reads GraphQL once while REST shows no change, and once more per change', t => {
+test('wait reads PR and threads in one GraphQL query per change REST reports', t => {
   const { checkout, run, check, pr, show, restReads, graphqlReads } = restFixture(t);
   show(pr({ contexts: [check('IN_PROGRESS')] })); // CI never finishes
   assert.equal(run('wait', '7', '--interval', '0', '--max-minutes', '0.02').status, 4, 'Precondition: the wait is still waiting');
   assert.ok(restReads() >= 3, 'Precondition: several rounds ran');
-  assert.deepEqual(graphqlReads(), { pr: 1, threads: 1, all: 2 }, 'Many rounds without a change: one read of the PR (and of its threads)');
+  assert.deepEqual(graphqlReads(), { pr: 1, threads: 0, all: 1 }, 'Many rounds without a change: one query carries PR and threads');
 
   // The third look at REST shows a new update time, the later ones keep it.
   writeFileSync(join(checkout, 'pr-rest-reads.json'), JSON.stringify([{}, {}, { updatedAt: 'later' }]));
   assert.equal(run('wait', '7', '--interval', '0', '--max-minutes', '0.02').status, 4);
-  assert.deepEqual(graphqlReads(), { pr: 2, threads: 2, all: 4 }, 'The change costs exactly one more read of the PR (and of its threads)');
+  assert.deepEqual(graphqlReads(), { pr: 2, threads: 0, all: 2 }, 'The change costs exactly one more query');
 });
 
 test('wait confirms every end with a full read', t => {
@@ -96,7 +97,7 @@ test('wait confirms every end with a full read', t => {
   show(readyHead([check('COMPLETED')]));
   const result = run('wait', '7', '--interval', '0', '--max-minutes', '0.2', '--grace', String(5 + 2 / 60));
   assert.equal(result.status, 0, 'The grace ends the wait');
-  assert.deepEqual(graphqlReads(), { pr: 2, threads: 2, all: 4 }, 'The first read, and the full read that confirms the end');
+  assert.deepEqual(graphqlReads(), { pr: 2, threads: 0, all: 2 }, 'The first read, and the full read that confirms the end');
 });
 
 test('wait keeps reading REST while the GraphQL quota is used up, and finishes after the reset', t => {
@@ -109,13 +110,22 @@ test('wait keeps reading REST while the GraphQL quota is used up, and finishes a
   assert.ok(restReads() >= 2, 'REST was read in the round of the pause');
   assert.ok(graphqlReads().pr >= 1, 'and the full read followed');
 
-  // The reset is 3 seconds away and --max-minutes ends the wait sooner: still waiting, after rounds over REST, not at once.
-  writeFileSync(join(checkout, 'quota-left'), '0');
+  // A GraphQL quota refusal with a reset beyond --max-minutes still reads REST until its deadline.
+  writeFileSync(join(checkout, 'limited'), '');
   writeFileSync(join(checkout, 'rest-reads'), '');
   const outlasted = run('wait', '7', '--interval', '0.1', '--max-minutes', '0.01');
   assert.equal(outlasted.status, 4, outlasted.stdout + outlasted.stderr);
   assert.ok(restReads() >= 3, 'wait kept looking until its own limit');
   assert.match(outlasted.stdout, /\(GitHub quota pause\)$/m, 'and names the reset');
+});
+
+test('wait treats HTTP 200 GraphQL quota errors as a pause and keeps reading REST', t => {
+  const { checkout, run, check, pr, show, restReads } = restFixture(t);
+  show(pr({ contexts: [check('COMPLETED')] }));
+  writeFileSync(join(checkout, 'limited-200'), '');
+  const result = run('wait', '7', '--interval', '0.2', '--max-minutes', '0.2');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(restReads() >= 2, 'REST was read during the quota pause');
 });
 
 test('wait --merged reads REST only, and --interval is bounded', t => {

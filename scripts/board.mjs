@@ -70,9 +70,14 @@ function graphql(query, variables = {}, tolerate) {
   for (let sleeps = 0; ; sleeps++) {
     if (command in sleepers && quota?.remaining < sleepers[command] && Date.parse(quota.resetAt) > Date.now()) sleepUntilReset(quota.resetAt);
     try {
-      const { headers, body } = splitResponse(execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
-      const { data } = JSON.parse(body);
+      const response = execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 });
+      const { headers, body } = splitResponse(response);
+      const { data, errors } = JSON.parse(body);
       quota = quotaOf(headers) ?? quota;
+      if (errors?.length) {
+        const message = errors.map(({ type, message }) => `${type ?? ''} ${message ?? ''}`).join('\n').trim();
+        if (!(tolerate?.test(message) && data)) throw Object.assign(new Error(message), { stdout: response, stderr: message });
+      }
       // A mutation reports no cost; GitHub charges it one point.
       spent += data?.rateLimit?.cost ?? (query.startsWith('mutation') ? 1 : 0);
       return data;
@@ -810,6 +815,7 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
   latestOpinionatedReviews(first:100){totalCount nodes{state author{login}}}
+  reviewThreads(first:100){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:1){nodes{url}}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
       ...on CheckRun{name status conclusion title detailsUrl checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
@@ -820,13 +826,14 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
 // ponytail: checks, check suites, review requests and opinionated reviews stop at 100 with ERROR, never a wrong verdict; paginate when a project gets there.
 
 /** Links of unresolved review threads across every page, including findings on earlier heads. */
-function unresolvedThreads(prNumber = number) {
+function unresolvedThreads(prNumber = number, firstPage) {
   const links = [];
   for (let after; ;) {
-    const { reviewThreads } = graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
+    const reviewThreads = firstPage ?? graphql(`query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){
       pullRequest(number:$number){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
         nodes{isResolved comments(first:1){nodes{url}}}}}}}`,
-    { owner, name, number: prNumber, ...(after && { after }) }).repository.pullRequest;
+    { owner, name, number: prNumber, ...(after && { after }) }).repository.pullRequest.reviewThreads;
+    firstPage = undefined;
     links.push(...reviewThreads.nodes.filter(thread => !thread.isResolved).map(thread => thread.comments.nodes[0]?.url ?? 'unreadable thread'));
     if (!reviewThreads.pageInfo.hasNextPage) return links;
     assert.ok(reviewThreads.pageInfo.endCursor && reviewThreads.pageInfo.endCursor !== after, 'Thread pagination did not advance');
@@ -991,7 +998,7 @@ function baseMovement(pr) {
 const filesText = files => files.slice(0, 10).join(', ') + (files.length > 10 ? `, and ${files.length - 10} more` : '');
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw. `threadsOf` reads the unresolved threads (wait reuses the last answer). */
-function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption(), threadsOf = unresolvedThreads) {
+function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption(), threadsOf = current => unresolvedThreads(current.number, current.reviewThreads)) {
   isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
@@ -1233,7 +1240,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const review of reviewList.filter(review => review.commit_id === pr.headRefOid)) lines.push(`review ${login(review.user)} ${review.state} ${review.html_url}`);
   for (const comment of comments.filter(comment => after(comment.updated_at))) lines.push(`comment ${login(comment.user)} ${comment.html_url}`);
   for (const comment of inline.filter(comment => after(comment.updated_at))) lines.push(`inline ${login(comment.user)} ${comment.html_url}`);
-  const threads = threadsOf(pr.number);
+  const threads = threadsOf(pr);
   lines.push(`unresolved threads: ${threads.length}`, ...threads.map(link => `thread ${link}`));
   // Mergeable is not merge-ready: a standing change request, a ruleset or conflicts still block the human.
   lines.push(`merge: ${pr.mergeStateStatus}, review decision: ${pr.reviewDecision ?? 'none'}`);
@@ -1775,7 +1782,7 @@ const quotaLine = () => quota && `quota: ${quota.remaining} left, ${spent} point
  */
 function lookAtHead(pr, threads) {
   const expected = headOption()?.toLowerCase();
-  if (!expected || pr.state !== 'OPEN' || pr.headRefOid === expected) return reviews(stallOption(), Date.now(), number, pr, undefined, threads);
+  if (!expected || pr.state !== 'OPEN' || pr.headRefOid === expected) return reviews(stallOption(), Date.now(), number, pr, undefined, threads ?? (current => unresolvedThreads(current.number, current.reviewThreads)));
   return { done: false, lines: [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`,
     `waiting: PR still shows head ${pr.headRefOid.slice(0, 7)}, expected ${expected.slice(0, 7)}`] };
 }
@@ -1852,7 +1859,8 @@ async function poll(look) {
   // Exit 4: not finished, call the command again (a driver's tool call must end before its 10-minute limit).
   const stillWaiting = resetAt => {
     process.exitCode = 4;
-    console.log(['WAITING', shown, `still waiting: call ${command} again${resetAt ? ` after ${resetAt} (GitHub quota pause)` : ''}`, quotaLine()].filter(Boolean).join('\n'));
+    const quotaReset = resetAt ?? (command === 'wait' && quota?.remaining < sleepers.wait ? quota.resetAt : undefined);
+    console.log(['WAITING', shown, `still waiting: call ${command} again${quotaReset ? ` after ${quotaReset} (GitHub quota pause)` : ''}`, quotaLine()].filter(Boolean).join('\n'));
   };
   try {
     for (;;) {
