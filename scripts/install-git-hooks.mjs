@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { externalTool, projectRoot } from './checkout-root.mjs';
 
-// Explicit setup: points Git at the project's versioned .githooks, per clone. Automatic hooks never run this file.
-// The relative path lets every worktree run the hooks of its own branch. --check only reports.
+// Explicit setup: points Git at the project's versioned .githooks, per clone, and adds its post-checkout kit sync.
+// Automatic hooks never run this file. The relative path lets every worktree run the hooks of its own branch. --check only reports.
 const root = projectRoot();
 const check = process.argv.includes('--check');
 const git = externalTool('git', root);
@@ -27,6 +27,25 @@ const report = message => console.log(`core.hooksPath: ${message}`);
 if (!statSync(join(root, '.githooks'), { throwIfNoEntry: false })?.isDirectory()) {
   report('no .githooks directory, nothing to do');
   process.exit(0);
+}
+
+// The project versions its own post-checkout (kit sync). A file that differs byte for byte (a CRLF copy cannot run
+// on POSIX) is the project's: kept and reported.
+const hookSource = readFileSync(new URL('./git-hooks/post-checkout', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+const hookFile = join(root, '.githooks', 'post-checkout');
+const existingHook = lstatSync(hookFile, { throwIfNoEntry: false });
+if (!existingHook) {
+  if (!check) writeFileSync(hookFile, hookSource, { flag: 'wx', mode: 0o755 });
+  console.log(`post-checkout: ${check ? 'would create' : 'created'} .githooks/post-checkout (kit sync after branch checkout); commit it with: git add --chmod=+x .githooks/post-checkout`);
+} else if (existingHook.isFile() && readFileSync(hookFile, 'utf8') === hookSource) {
+  // Git skips a hook without the executable bit; Windows has none to check, there only the index mode counts.
+  const runnable = process.platform === 'win32' || (existingHook.mode & 0o111) !== 0;
+  if (!runnable && !check) chmodSync(hookFile, 0o755);
+  console.log(`post-checkout: .githooks/post-checkout is current${runnable ? '' : check ? ' (would make it executable)' : ' (made executable)'}`);
+  if (out('ls-files', '-s', '--', '.githooks/post-checkout').startsWith('100644'))
+    console.log('post-checkout: tracked without executable bit, so Git skips it elsewhere; run: git update-index --chmod=+x .githooks/post-checkout');
+} else {
+  console.log('post-checkout: kept existing .githooks/post-checkout; integrate scripts/git-hooks/post-checkout there by hand');
 }
 
 // Every worktree's .githooks counts as ours, so an absolute path into another worktree is migrated too.
