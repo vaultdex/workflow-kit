@@ -489,16 +489,18 @@ function check(issue = readIssue(), claims, currentPrNumber) {
  * ponytail: search cannot filter by Project status, so it reads every open issue (100 per page); UNKNOWN (still computing) waits for the next sweep.
  */
 function sweep() {
-  let plan, resets = 0;
+  let plan, resets = 0, read = 0;
   for (let after; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
-      pageInfo{hasNextPage endCursor} nodes{...on Issue{id number
+      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{id number
       projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
-      closedByPullRequestsReferences(first:10){nodes{number url mergeStateStatus repository{nameWithOwner}}}}}}}`,
+      closedByPullRequestsReferences(first:10){totalCount nodes{number url mergeStateStatus repository{nameWithOwner}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open`, ...(after && { after }) });
     for (const issue of search.nodes) {
       if (projectItem(issue)?.status?.name !== 'Human review') continue;
-      const pr = issue.closedByPullRequestsReferences.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
+      const linked = issue.closedByPullRequestsReferences;
+      assert.ok(linked.totalCount <= linked.nodes.length, `#${issue.number} has more linked PRs than sweep reads; it would be reported clean`);
+      const pr = linked.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
       if (!pr) continue;
       plan ??= resolveOption('Status', 'Automated review');
       // The comment first: a failed comment must not leave an issue out of Human review that nobody was told about.
@@ -508,7 +510,11 @@ function sweep() {
       console.log(`#${issue.number} reset to Automated review: PR #${pr.number} has merge conflicts`);
       resets++;
     }
-    if (!search.pageInfo.hasNextPage) break;
+    read += search.nodes.length;
+    if (!search.pageInfo.hasNextPage) {
+      assert.ok(read >= search.issueCount, `Search returned ${read} of ${search.issueCount} open issues; the sweep would be incomplete`);
+      break;
+    }
     assert.ok(search.pageInfo.endCursor && search.pageInfo.endCursor !== after, 'Search pagination did not advance');
     after = search.pageInfo.endCursor;
   }

@@ -31,5 +31,15 @@ test('sweep sends a Human-review issue with a conflicting PR back to Automated r
   assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'Automated review');
   assert.deepEqual(targets(), ['issue=I2', 'item=PI2'], 'Only issue 2 got its comment (first) and its status');
 
+  // A list that is cut off (more linked PRs than read, more open issues than the search returns) never ends as "clean".
+  const cut = { ...row(8, 'Human review', [pr('CLEAN')]) };
+  cut.closedByPullRequestsReferences.totalCount = 11;
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([cut]));
+  assert.notEqual(run('sweep').status, 0, 'a truncated PR list is not clean');
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([row(1, 'Human review', [pr('CLEAN')])]));
+  writeFileSync(join(checkout, 'truncate'), '');
+  assert.notEqual(run('sweep').status, 0, 'a capped search is not clean');
+  rmSync(join(checkout, 'truncate'));
+
   assert.equal(run('sweep', 'extra').status, 2, 'A word after sweep is refused before any write');
 });
