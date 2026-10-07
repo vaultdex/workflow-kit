@@ -124,7 +124,9 @@ Modellwahl stehen hier nicht.
    - Tests: lokal nur die betroffenen (`--test-name-pattern` oder eine Testdatei), die
      ganze Suite läuft in der CI. Die Testdateien zu den geänderten Dateien nennt
      `node scripts/affected-tests.mjs` (im Kit; ein Projekt ergänzt eigene Befehle in `.github/affected-tests.json`, [README](../README.md#project-test-map)); mit `--run` startet er sie auch. Führt die Projekt-CI sie für diesen Head nicht aus,
-     läuft sie einmal vor der Übergabe im Hintergrund mit Logdatei. Das Kit fährt sie in
+     läuft sie einmal vor der Übergabe im Hintergrund mit Logdatei; der Driver wartet auf deren
+     Benachrichtigung oder beendet den Lauf, bevor er berichtet (ein verwaister Lauf hält die
+     Prüf-Warteschlange für alle). Das Kit fährt sie in
      seiner CI, Kit-Driver testen lokal nur gezielt.
    - Dateien: mit Edit und Write oder mit einem Node-Skript aus einer Datei ändern;
      Heredoc, Python und sed verlieren Backslashes.
