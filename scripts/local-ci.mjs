@@ -27,13 +27,44 @@ export const select = (checks, files) => checks.filter(check => files.some(file 
 export function loadConfig(read) {
   const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
-  const { checks, setup = [], push = [], slots = 1 } = JSON.parse(read(project.localChecks));
+  const { checks, setup = [], push = [], slots = 1, riskPaths } = JSON.parse(read(project.localChecks));
   assert.ok(Number.isInteger(slots) && slots >= 1, 'localChecks: "slots" muss eine ganze Zahl ab 1 sein');
+  assert.ok(riskPaths === undefined || riskPaths.every?.(path => typeof path === 'string'), 'localChecks: "riskPaths" muss eine Liste von Pfaden sein');
   for (const check of checks) {
     assert.ok(check.context && check.paths?.every?.(path => typeof path === 'string') && check.run?.length && check.timeoutMinutes > 0,
       `localChecks: "${check.context}" braucht context, paths, run und timeoutMinutes`);
   }
-  return { repository: project.repository, checks, setup, push, slots };
+  return { repository: project.repository, checks, setup, push, slots, riskPaths };
+}
+
+/** Die Einstellung `localCiAfterApps` vom Ziel-Branch: ohne sie (oder ohne lesbare Datei, das meldet dann der Lauf selbst) null, der PR startet wie bisher. */
+const waitSettings = (ctx, branch) => {
+  try {
+    return branchConfig(ctx, branch, undefined, read => {
+      const { localCiAfterApps, awaitApps = [] } = JSON.parse(read('.github/workflow-project.json'));
+      return localCiAfterApps ? { apps: awaitApps } : null;
+    });
+  } catch { return null; }
+};
+
+/** Warum der Head noch nicht dran ist (Text für den Status), oder null: die `apps` sind für ihn fertig und SonarCloud meldet 0 offene Befunde. */
+export async function waitReason(ctx, pr, { apps }) {
+  const runs = ctx.api('GET', `commits/${pr.head.sha}/check-runs?per_page=100`).check_runs;
+  const waiting = apps.filter(app => !runs.some(run => run.app?.slug === app && run.status === 'completed'));
+  if (waiting.length) return `wartet auf ${waiting.join(', ')}`;
+  const sonar = runs.find(run => run.app?.slug === 'sonarqubecloud' && run.status === 'completed' && run.conclusion !== 'skipped');
+  if (!sonar) return null;
+  const { origin, searchParams } = new URL(sonar.details_url ?? 'invalid:');
+  if (!['https://sonarcloud.io', 'https://sonarqube.us'].includes(origin)) throw new Error('der Sonar-Check verlinkt keine Analyse');
+  let open;
+  if (ctx.sonarToken) { // Ein grünes Gate heißt nicht 0 Befunde; die anonyme API meldet bei privaten Projekten 0, darum nur mit Token
+    const search = new URLSearchParams({ componentKeys: searchParams.get('id'), pullRequest: pr.number, resolved: 'false', ps: 1 });
+    const response = await fetch(`${origin}/api/issues/search?${search}`, { headers: { Authorization: `Bearer ${ctx.sonarToken}` } });
+    if (!response.ok) throw new Error(`Sonar-API antwortet ${response.status}`);
+    open = (await response.json()).total;
+  } else open = Number(/\[(\d+) New issues?\]/.exec(sonar.output?.summary)?.[1] ?? NaN); // die Zusammenfassung des Checks nennt die Zahl
+  if (!Number.isSafeInteger(open)) throw new Error('SONAR_TOKEN fehlt und die Sonar-Zusammenfassung nennt keine Zahl');
+  return open ? `${open} Sonar-Befunde offen` : null;
 }
 
 /** Die Platzzahl von main: ohne `localChecks` dort gilt 1 (die Prüflisten der PRs kommen vom jeweiligen Ziel-Branch), ein ungültiger Wert bleibt ein Fehler. */
@@ -170,9 +201,13 @@ export async function checkPullRequest(ctx, pr) {
       else if (!state.aborted) aggregate('failure', error.message); // sonst schließt finally den Status; der neue Head folgt
       return { ok, next: newHead() };
     }
-    const selected = select(config.checks, files);
+    const matched = select(config.checks, files);
+    // `slow`-Prüfungen laufen nur, wenn der Diff `riskPaths` trifft; ohne `riskPaths` laufen sie immer.
+    const risky = !config.riskPaths || files.some(file => matches(config.riskPaths, file));
+    const selected = matched.filter(check => !check.slow || risky);
+    for (const check of matched) if (!selected.includes(check)) report(check.context, 'success', 'übersprungen: risikoarm');
     if (!selected.length) {
-      aggregate('success', `Keine Prüfung betrifft die ${files.length} geänderten Dateien`);
+      aggregate('success', matched.length ? `${matched.length} langsame Prüfungen übersprungen: risikoarm` : `Keine Prüfung betrifft die ${files.length} geänderten Dateien`);
       return { ok: true, next: null };
     }
     for (const check of selected) report(check.context, 'pending', `Läuft auf ${host}`);
@@ -276,7 +311,7 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
   if (ctx.headsFile) try { known = JSON.parse(readFileSync(ctx.headsFile, 'utf8')); } catch (error) {
     if (error.code !== 'ENOENT') throw error; // erster Start: die erste Beobachtung ist die Ausgangslage; eine kaputte oder fremde Datei (auch `null`) bricht den Start sichtbar ab
   }
-  const heads = new Map(Object.entries(known)), saved = new Map(heads), done = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
+  const heads = new Map(Object.entries(known)), saved = new Map(heads), done = new Map(), waiting = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
   const waitUntil = async free => { while (busy.size > slots - free) await Promise.race([...busy.values()].map(({ task }) => task)); };
   const slotFree = () => waitUntil(1), idle = () => waitUntil(slots);
   const start = pr => {
@@ -289,7 +324,7 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
   for (let round = 0; round < rounds; round++) {
     try {
       await pushed(ctx, heads, saved, idle).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
-      const bases = new Map(); // aktueller SHA je Ziel-Branch, einmal pro Runde
+      const bases = new Map(), settings = new Map(); // aktueller SHA und Einstellung `localCiAfterApps` je Ziel-Branch, einmal pro Runde
       for (const pr of ctx.api('GET', 'pulls?state=open&per_page=100').filter(pr => !pr.draft && pr.head.repo?.full_name === ctx.repository)) {
         try { if (!bases.has(pr.base.ref)) bases.set(pr.base.ref, ctx.api('GET', `git/ref/heads/${pr.base.ref}`).object.sha); } catch (error) {
           console.error(`#${pr.number}: Basis ${pr.base.ref} nicht lesbar, übersprungen (${error.message.split('\n')[0]})`); // 404 oder Rate-Limit hält die übrigen PRs nicht auf
@@ -298,6 +333,16 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
         const base = bases.get(pr.base.ref), key = `${pr.head.sha} ${base}`;
         // läuft der PR noch (`follow` holt einen neuen Head selbst), startet er nicht ein zweites Mal auf einem anderen Platz
         if ([...busy.values()].some(({ number }) => number === pr.number) || done.get(pr.number) === key || finished(ctx, pr.head.sha, base)) continue;
+        let reason = null; // Einstellung `localCiAfterApps`: bis Sonar für den Head fertig ist und 0 Befunde offen sind, nimmt der Läufer den PR nicht
+        try {
+          if (!settings.has(pr.base.ref)) settings.set(pr.base.ref, waitSettings(ctx, pr.base.ref));
+          reason = settings.get(pr.base.ref) && await waitReason(ctx, pr, settings.get(pr.base.ref));
+        } catch (error) { reason = `Wartebedingung nicht lesbar: ${error.message.split('\n')[0]}`; }
+        if (reason) { // ein Status je Head und Grund, kein Aufruf je Runde
+          if (waiting.get(pr.number) !== `${pr.head.sha} ${reason}`) ctx.api('POST', `statuses/${pr.head.sha}`, { state: 'pending', context: AGGREGATE, description: reason.slice(0, 140) });
+          waiting.set(pr.number, `${pr.head.sha} ${reason}`);
+          continue;
+        }
         done.set(pr.number, key); // ponytail: ein Läuferfehler wiederholt Head und Basis nicht; ein neuer Push, eine neue Basis oder `local-ci.mjs PR` prüft erneut
         await slotFree();
         start(pr);
@@ -323,7 +368,7 @@ async function main() {
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
   const ctx = {
-    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), headsFile: join(dir, 'heads.json'), pollMs: 60_000,
+    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), headsFile: join(dir, 'heads.json'), pollMs: 60_000, sonarToken: process.env.SONAR_TOKEN,
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
     api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };

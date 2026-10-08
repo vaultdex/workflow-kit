@@ -460,6 +460,15 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   worktree folder, as Vaultdex' `gradle-container.mjs` does for its Gradle volume. `push` commands still run one at a time in the
   project checkout, where the slots fetch too: when one is due, the runner lets the running checks finish and starts no new PR until it is done.
 
+- `"localCiAfterApps": true` in `.github/workflow-project.json` (read from the PR's base branch): `--watch` does not take a PR
+  until every app in `awaitApps` has a finished check run on its head and SonarCloud counts 0 open issues for the PR
+  (`api/issues/search?…&resolved=false` with `SONAR_TOKEN`; without a token, the "N New issues" count in the check's summary).
+  The project key comes from the Sonar check's link (as in `board.mjs`), so no `sonar-project.properties` is needed.
+  Meanwhile `local-ci` is `pending` with the reason ("wartet auf sonarqubecloud", "3 Sonar-Befunde offen"), posted once per head
+  and reason. Without the setting nothing changes. `local-ci.mjs PR` by hand does not wait.
+- `riskPaths` (list, same rules as `paths`, next to `checks` in the `localChecks` file) and `"slow": true` on a check: a slow check
+  selected by its `paths` runs only when a changed file matches `riskPaths`; otherwise it reports `success` with
+  "übersprungen: risikoarm" and does not start. Without `riskPaths` slow checks always run (nothing changes).
 - `paths` use GitHub's rules for `*`, `**` and `!` only (no `?` or `[…]`): in order, a later match wins, `!` takes a file
   back out, `*` stays within a folder, `**` goes below it. A check runs when one changed file of the PR matches.
 - Per PR the script builds the merge state itself in its own worktree (`<main checkout>-local-ci/work`; not under `.git`,
