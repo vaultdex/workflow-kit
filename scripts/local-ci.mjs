@@ -27,14 +27,14 @@ export const select = (checks, files) => checks.filter(check => files.some(file 
 export function loadConfig(read) {
   const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
-  const { checks, setup = [], push = [], slots = 1, riskPaths } = JSON.parse(read(project.localChecks));
+  const { checks, setup = [], push = [], kitPush = [], slots = 1, riskPaths } = JSON.parse(read(project.localChecks));
   assert.ok(Number.isInteger(slots) && slots >= 1, 'localChecks: "slots" muss eine ganze Zahl ab 1 sein');
   assert.ok(riskPaths === undefined || riskPaths.every?.(path => typeof path === 'string'), 'localChecks: "riskPaths" muss eine Liste von Pfaden sein');
   for (const check of checks) {
     assert.ok(check.context && check.paths?.every?.(path => typeof path === 'string') && check.run?.length && check.timeoutMinutes > 0,
       `localChecks: "${check.context}" braucht context, paths, run und timeoutMinutes`);
   }
-  return { repository: project.repository, checks, setup, push, slots, riskPaths };
+  return { repository: project.repository, checks, setup, push, kitPush, slots, riskPaths };
 }
 
 /** Die Einstellung `localCiAfterApps` vom Ziel-Branch: ohne sie (oder ohne die Datei dort, das meldet dann der Lauf selbst) null, der PR startet wie bisher. Ein Fetch- oder Lesefehler wirft: Er gilt nicht als ausgeschaltete Einstellung. */
@@ -133,6 +133,13 @@ const firstError = log => {
 /** Basis-Stempel im Gesamtstatus `local-ci`: gegen welchen Stand von origin/<base> der Head geprüft wurde. */
 const baseMark = sha => `Basis ${sha.slice(0, 12)}`;
 
+/** Setzt den Worktree `work` des Projekt-Checkouts auf `sha` (neu angelegt, falls nötig) und räumt ihn leer, auch Ignoriertes (node_modules) und verschachtelte Repos: der Ordner ist genau dieser Stand, das Setup stellt Abhängigkeiten wieder her. */
+function worktreeAt({ git, root }, work, sha) {
+  if (existsSync(join(work, '.git'))) git(work, 'checkout', '--quiet', '--detach', '--force', sha);
+  else { mkdirSync(dirname(work), { recursive: true }); git(root, 'worktree', 'prune'); git(root, 'worktree', 'add', '--quiet', '--detach', work, sha); }
+  git(work, 'clean', '-ffdxq');
+}
+
 /**
  * Baut den Merge-Stand selbst (GitHubs refs/pull/N/merge bleibt nach einem Merge in den Ziel-Branch auf der alten Basis stehen):
  * frischer Fetch von origin/<base> und dem PR-Head, dann Head in die Basis im eigenen Worktree. `HEAD^1` ist die Basis wie in der Actions-CI.
@@ -148,9 +155,7 @@ async function checkout(ctx, pr) {
     head = git(root, 'rev-parse', 'FETCH_HEAD');
   } catch { throw fail(`origin/${branch} oder refs/pull/${pr.number}/head ist nicht abrufbar`); }
   if (head !== pr.head.sha) throw Object.assign(fail('Der Head des PRs hat sich bewegt'), { moved: true }); // kein Fehler des PRs: der nächste Poll sieht den neuen Head
-  if (existsSync(join(work, '.git'))) git(work, 'checkout', '--quiet', '--detach', '--force', base);
-  else { mkdirSync(dirname(work), { recursive: true }); git(root, 'worktree', 'prune'); git(root, 'worktree', 'add', '--quiet', '--detach', work, base); }
-  git(work, 'clean', '-ffdxq'); // auch Ignoriertes (node_modules) und verschachtelte Repos: der Ordner ist genau der PR-Stand, das Setup stellt Abhängigkeiten wieder her
+  worktreeAt(ctx, work, base);
   try {
     // ohne Hooks und Signatur, feste Identität unabhängig von der Git-Konfiguration des Rechners
     git(work, '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=local-ci', '-c', 'user.email=local-ci@localhost', 'merge', '--no-ff', '--quiet', '-m', `Merge PR ${pr.number} in ${branch}`, head);
@@ -258,9 +263,16 @@ const finished = (ctx, sha, base) => {
   return status?.state === 'success' || (status?.state === 'failure' && !!status.description?.startsWith(baseMark(base)));
 };
 
+/** Das Kit-Repository aus .gitmodules von origin/main (lokale Referenz ohne Fetch, wie in kit-pin.mjs); ohne Kit-Submodul undefined. */
+const kitRepository = ({ git, root }) => {
+  try { return /github\.com[/:](.+?)(?:\.git)?$/.exec(git(root, 'config', '--blob', 'refs/remotes/origin/main:.gitmodules', '--get', 'submodule..vendor/workflow-kit.url'))?.[1]; } catch { return undefined; }
+};
+
 /**
- * `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat; die erste Beobachtung löst nichts aus.
- * `saved` sind die Heads, deren push-Aufgabe erledigt ist (Datei `ctx.headsFile`): nach einem Neustart zählt der Vergleich damit,
+ * `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat, und `kitPush`, wenn sich main des Kits bewegt hat
+ * (dann auf main des Projekts); die erste Beobachtung löst nichts aus. Die Befehle laufen nach `setup` in einem eigenen Worktree auf
+ * dem neuen Stand (`AFTER_SHA`, bei `kitPush` origin/main), nie im alten Stand des Läufer-Checkouts.
+ * `saved` sind die Heads, deren Aufgabe erledigt ist (Datei `ctx.headsFile`): nach einem Neustart zählt der Vergleich damit,
  * nicht die erste Beobachtung. Ein Head wird erst nach der Aufgabe gespeichert, eine abgebrochene läuft beim nächsten Start nochmal.
  */
 async function pushed(ctx, heads, saved, idle) {
@@ -270,29 +282,40 @@ async function pushed(ctx, heads, saved, idle) {
     writeFileSync(`${ctx.headsFile}.tmp`, JSON.stringify(Object.fromEntries(saved)));
     renameSync(`${ctx.headsFile}.tmp`, ctx.headsFile);
   };
+  const seen = (key, sha, event) => {
+    if (heads.has(key) && heads.get(key) !== sha) moved.push({ ...event, key, before: heads.get(key), after: sha });
+    if (!heads.has(key)) saved.set(key, sha);
+    heads.set(key, sha);
+  };
   for (const prefix of ['main', 'release/']) {
     for (const { ref, object } of ctx.api('GET', `git/matching-refs/heads/${prefix}`)) {
       const branch = ref.slice('refs/heads/'.length);
-      if (branch !== 'main' && !branch.startsWith('release/')) continue;
-      if (heads.has(branch) && heads.get(branch) !== object.sha) moved.push({ branch, before: heads.get(branch), after: object.sha });
-      if (!heads.has(branch)) saved.set(branch, object.sha);
-      heads.set(branch, object.sha);
+      if (branch === 'main' || branch.startsWith('release/')) seen(branch, object.sha, { branch });
     }
   }
+  const kit = kitRepository(ctx);
+  if (kit) try { seen('kit:main', ctx.api('GET', 'git/ref/heads/main', {}, kit).object.sha, { branch: 'main', kit: true }); } catch (error) { console.error(`push kit: ${error.message.split('\n')[0]}`); } // ein Fehler beim Kit hält die Projekt-Branches nicht auf
   save();
   if (moved.length) await idle(); // die Befehle laufen im Projekt-Checkout: kein Platz holt dort gleichzeitig (Fetch) ab, wie bisher
-  for (const { branch, before, after } of moved) {
-    let commands;
-    try { commands = branchConfig(ctx, branch).push; } catch (error) { console.error(`push ${branch}: übersprungen, ${error.message}`); continue; }
-    const env = { ...process.env, BRANCH: branch, BEFORE_SHA: before, AFTER_SHA: after, EVENT: 'push' };
-    mkdirSync(ctx.logs, { recursive: true });
-    const log = join(ctx.logs, `push-${branch.replace(/[^\w.-]+/g, '-')}.log`);
-    writeFileSync(log, '');
-    for (const command of commands) {
-      const { code } = await shell(command, { cwd: ctx.root, env, log, timeoutMs: 30 * 60_000, state: {}, bash: ctx.bash });
-      if (code) { console.error(`push ${branch}: "${command}" endete mit ${code} (${log})`); break; }
+  for (const { key, branch, before, after, kit } of moved) {
+    const work = `${ctx.work}-push`;
+    let config, commands;
+    try {
+      config = branchConfig(ctx, branch); // frischer Fetch von origin/<branch>
+      commands = kit ? config.kitPush : config.push;
+      if (commands.length) worktreeAt(ctx, work, kit ? ctx.git(ctx.root, 'rev-parse', `refs/remotes/origin/${branch}`) : after);
+    } catch (error) { console.error(`push ${key}: übersprungen, ${error.message}`); continue; }
+    if (commands.length) {
+      const env = { ...process.env, BRANCH: branch, BEFORE_SHA: before, AFTER_SHA: after, EVENT: kit ? 'kit' : 'push' };
+      mkdirSync(ctx.logs, { recursive: true });
+      const log = join(ctx.logs, `push-${key.replace(/[^\w.-]+/g, '-')}.log`);
+      writeFileSync(log, '');
+      for (const command of [...config.setup, ...commands]) {
+        const { code } = await shell(command, { cwd: work, env, log, timeoutMs: 30 * 60_000, state: {}, bash: ctx.bash });
+        if (code) { console.error(`push ${key}: "${command}" endete mit ${code} (${log})`); break; }
+      }
     }
-    saved.set(branch, after);
+    saved.set(key, after);
     save();
   }
 }
@@ -301,8 +324,8 @@ async function pushed(ctx, heads, saved, idle) {
  * Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head, oder neuer Basis nach rotem Endstand, genau einmal.
  * Bis zu `ctx.slots` PRs laufen gleichzeitig (Standard 1: einer nach dem anderen im Ordner `work`), jeder auf einem Platz mit eigenem
  * Arbeitsordner `work-1`, `work-2`, …; ein PR belegt nie zwei Plätze. `checkout()` hat kein `await`: die Git-Aufrufe im gemeinsamen
- * Projekt-Checkout (Fetch, FETCH_HEAD, Worktree anlegen) laufen so nie ineinander. Die `push`-Befehle laufen im selben Checkout und
- * warten deshalb, bis alle Plätze frei sind; neue PRs starten erst danach.
+ * Projekt-Checkout (Fetch, FETCH_HEAD, Worktree anlegen) laufen so nie ineinander. Die `push`-Befehle legen ihren Worktree im selben
+ * Checkout an und warten deshalb, bis alle Plätze frei sind; neue PRs starten erst danach.
  */
 export async function watch(ctx, { rounds = Infinity } = {}) {
   let known = {};
@@ -372,7 +395,7 @@ async function main() {
   const ctx = {
     bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), headsFile: join(dir, 'heads.json'), pollMs: 60_000, sonarToken: process.env.SONAR_TOKEN,
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
-    api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
+    api: (method, path, fields = {}, repo = repository) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repo}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
   lock(join(dir, 'lock'));
   if (mode === '--watch') {

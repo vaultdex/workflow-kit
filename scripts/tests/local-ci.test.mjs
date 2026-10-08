@@ -65,7 +65,8 @@ function fixture(t, config, prConfig) {
   const posts = [];
   const pr = { number: 1, state: 'open', draft: false, head: { sha: head, ref: 'feature', repo: { full_name: 'o/r' } }, base: { ref: 'main' } };
   const server = { pulls: [pr], current: pr, refs: [] };
-  const api = (method, path, fields) => {
+  const api = (method, path, fields, repo) => {
+    if (repo === 'o/kit') return { object: { sha: server.kit } }; // main des Kits
     if (method === 'POST') { posts.push({ ...fields, sha: path.split('/')[1] }); return {}; }
     if (path.startsWith('pulls?')) return server.pulls;
     if (path.startsWith('pulls/')) return path === `pulls/${server.current.number}` ? server.current : server.pulls.find(({ number }) => path === `pulls/${number}`) ?? server.current;
@@ -85,7 +86,15 @@ function fixture(t, config, prConfig) {
     git(root, 'commit', '-qam', 'checks');
     git(root, 'push', '-q', 'origin', 'main');
   };
-  return { ctx, pr, posts, server, base, root, dir, publish, summary: () => posts.map(({ context, state }) => `${context}: ${state}`) };
+  /** Ein neuer Commit auf main von origin mit der Datei `file` (wie ein Merge dort); liefert seinen SHA. */
+  const advance = file => {
+    writeFileSync(join(root, file), 'neu');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', file);
+    git(root, 'push', '-q', 'origin', 'main');
+    return git(root, 'rev-parse', 'HEAD');
+  };
+  return { ctx, pr, posts, server, base, root, dir, publish, advance, summary: () => posts.map(({ context, state }) => `${context}: ${state}`) };
 }
 
 test('wählt nach den geänderten Dateien, meldet pending vor dem Ergebnis und gibt die Umgebung der Actions-CI weiter', async t => {
@@ -197,33 +206,53 @@ test('ein neuer Head bricht die laufende Prüfung ab, schließt ihre Status und 
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'local-ci: error', 'Backend: error'], 'nichts wird grün gemeldet, nichts bleibt pending');
 });
 
-test('watch prüft einen neuen Head genau einmal, überspringt Drafts und Forks und führt push aus, wenn sich main bewegt', async t => {
-  const f = fixture(t, { push: ['echo "$BRANCH $BEFORE_SHA $AFTER_SHA $EVENT" > pushed.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }] });
+test('watch prüft einen neuen Head genau einmal, überspringt Drafts und Forks und führt push aus, wenn sich main bewegt: auf dem neuen Stand, nicht im Läufer-Checkout', async t => {
+  // neu.txt gibt es nur auf dem neuen Stand von main; der Läufer-Checkout (root) steht auf dem alten und hat sie nicht
+  const f = fixture(t, { push: ['echo "$BRANCH $BEFORE_SHA $AFTER_SHA $EVENT $(cat neu.txt)" > ../pushed.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }] });
   f.server.pulls = [{ ...f.pr, number: 2, draft: true }, { ...f.pr, number: 3, head: { ...f.pr.head, repo: { full_name: 'x/r' } } }, f.pr];
-  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: 'a'.repeat(40) } }];
+  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: f.base } }];
+  const after = f.advance('neu.txt');
+  f.ctx.git(f.root, 'reset', '-q', '--hard', f.base);
   const ctx = { ...f.ctx, pollMs: 1 };
-  const moving = () => { f.server.refs = [{ ref: 'refs/heads/main', object: { sha: 'b'.repeat(40) } }, { ref: 'refs/heads/mainly', object: { sha: 'c'.repeat(40) } }]; };
+  const moving = () => { f.server.refs = [{ ref: 'refs/heads/main', object: { sha: after } }, { ref: 'refs/heads/mainly', object: { sha: 'c'.repeat(40) } }]; };
   const api = ctx.api;
   ctx.api = (method, path, fields) => { if (path.startsWith('pulls?') && f.posts.length) moving(); return api(method, path, fields); };
   await watch(ctx, { rounds: 3 });
   assert.equal(f.posts.filter(post => post.context === 'local-ci' && post.state === 'pending').length, 1);
   assert.equal(f.posts.at(-1).state, 'success', JSON.stringify(f.posts));
-  assert.equal(readFileSync(join(f.root, 'pushed.txt'), 'utf8').trim(), `main ${'a'.repeat(40)} ${'b'.repeat(40)} push`);
+  assert.equal(readFileSync(join(f.dir, 'pushed.txt'), 'utf8').trim(), `main ${f.base} ${after} push neu`);
+});
+
+test('watch führt kitPush auf main des Projekts aus, wenn sich main des Kits bewegt; die erste Beobachtung löst nichts aus', async t => {
+  const f = fixture(t, { kitPush: ['echo "$BRANCH $EVENT $BEFORE_SHA $AFTER_SHA $(git rev-parse HEAD)" >> ../kit.txt'], checks: [] });
+  writeFileSync(join(f.root, '.gitmodules'), '[submodule ".vendor/workflow-kit"]\n\tpath = .vendor/workflow-kit\n\turl = https://github.com/o/kit.git\n');
+  f.ctx.git(f.root, 'add', '-A');
+  f.ctx.git(f.root, 'commit', '-qm', 'kit');
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
+  const main = f.ctx.git(f.root, 'rev-parse', 'HEAD'), ctx = { ...f.ctx, pollMs: 1, headsFile: join(f.dir, 'heads.json') };
+  f.server.pulls = [];
+  f.server.kit = 'a'.repeat(40);
+  await watch(ctx, { rounds: 1 });
+  assert.ok(!existsSync(join(f.dir, 'kit.txt')), 'erste Beobachtung: nur Ausgangslage');
+  f.server.kit = 'b'.repeat(40);
+  await watch(ctx, { rounds: 1 });
+  assert.equal(readFileSync(join(f.dir, 'kit.txt'), 'utf8').trim(), `main kit ${'a'.repeat(40)} ${'b'.repeat(40)} ${main}`);
 });
 
 test('watch holt nach einem Neustart die push-Aufgabe nach, wenn sich main dazwischen bewegt hat; ohne Datei löst der erste Start nichts aus', async t => {
-  const f = fixture(t, { push: ['echo "$BEFORE_SHA $AFTER_SHA" >> pushed.txt'], checks: [] });
+  const f = fixture(t, { push: ['echo "$BEFORE_SHA $AFTER_SHA" >> ../pushed.txt'], checks: [] });
   const ctx = { ...f.ctx, pollMs: 1, headsFile: join(f.root, '..', 'heads.json') };
-  const main = sha => { f.server.refs = [{ ref: 'refs/heads/main', object: { sha: sha.repeat(40) } }]; };
+  const [a, b, c] = [f.base, f.advance('b.txt'), f.advance('c.txt')];
+  const main = sha => { f.server.refs = [{ ref: 'refs/heads/main', object: { sha } }]; };
   f.server.pulls = [];
-  main('a');
+  main(a);
   await watch(ctx, { rounds: 1 });
-  assert.ok(!existsSync(join(f.root, 'pushed.txt')), 'erster Start ohne Datei: nur Ausgangslage');
-  main('b'); // der Läufer ist aus
+  assert.ok(!existsSync(join(f.dir, 'pushed.txt')), 'erster Start ohne Datei: nur Ausgangslage');
+  main(b); // der Läufer ist aus
   await watch(ctx, { rounds: 1 });
-  main('c');
+  main(c);
   await watch(ctx, { rounds: 1 });
-  assert.equal(readFileSync(join(f.root, 'pushed.txt'), 'utf8'), `${'a'.repeat(40)} ${'b'.repeat(40)}\n${'b'.repeat(40)} ${'c'.repeat(40)}\n`);
+  assert.equal(readFileSync(join(f.dir, 'pushed.txt'), 'utf8'), `${a} ${b}\n${b} ${c}\n`);
 });
 
 /** Drei offene PRs mit demselben Head; jede Prüfung legt eine Datei neben ihrem Arbeitsordner an und wartet bei `barrier` auf die der anderen. */
@@ -259,12 +288,13 @@ test('ohne slots läuft ein PR nach dem anderen im Ordner work, wie bisher', asy
 });
 
 test('mit slots 2 wartet ein fälliger push, bis die laufenden Prüfungen fertig sind: kein Fetch der Plätze im Projekt-Checkout währenddessen', async t => {
-  const f = fixture(t, { push: ['test -e ../work-1.fertig && echo ok > pushed.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1', 'touch "$PWD.fertig"'], timeoutMinutes: 1 }] });
-  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: 'a'.repeat(40) } }];
+  const f = fixture(t, { push: ['test -e ../work-1.fertig && echo ok > ../pushed.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1', 'touch "$PWD.fertig"'], timeoutMinutes: 1 }] });
+  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: f.base } }];
+  const after = f.advance('b.txt');
   const ctx = { ...f.ctx, slots: 2, pollMs: 1 }, api = ctx.api;
-  ctx.api = (method, path, fields) => { if (path.startsWith('pulls?') && f.posts.length) f.server.refs = [{ ref: 'refs/heads/main', object: { sha: 'b'.repeat(40) } }]; return api(method, path, fields); };
+  ctx.api = (method, path, fields) => { if (path.startsWith('pulls?') && f.posts.length) f.server.refs = [{ ref: 'refs/heads/main', object: { sha: after } }]; return api(method, path, fields); };
   await watch(ctx, { rounds: 3 });
-  assert.equal(readFileSync(join(f.root, 'pushed.txt'), 'utf8').trim(), 'ok');
+  assert.equal(readFileSync(join(f.dir, 'pushed.txt'), 'utf8').trim(), 'ok');
 });
 
 test('ein PR belegt nie zwei Plätze: ein neuer Head während des Laufs wird von follow geprüft, nicht zusätzlich gestartet', async t => {

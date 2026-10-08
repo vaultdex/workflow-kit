@@ -457,8 +457,8 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   (restart to change). A PR runs on one slot only; a new head replaces its run as before. With `slots` missing or 1 nothing changes
   (one PR after the other in `<main checkout>-local-ci/work`). With more, each slot has its own worktree `work-1`, `work-2`, … (unused
   folders such as the old `work` stay; remove them with `git worktree remove`). Commands sharing a resource must key it by the
-  worktree folder, as Vaultdex' `gradle-container.mjs` does for its Gradle volume. `push` commands still run one at a time in the
-  project checkout, where the slots fetch too: when one is due, the runner lets the running checks finish and starts no new PR until it is done.
+  worktree folder, as Vaultdex' `gradle-container.mjs` does for its Gradle volume. `push` commands still run one at a time and set up
+  their worktree in the project checkout, where the slots fetch too: when one is due, the runner lets the running checks finish and starts no new PR until it is done.
 
 - `"localCiAfterApps": true` in `.github/workflow-project.json` (read from the PR's base branch): `--watch` does not take a PR
   until every app in `awaitApps` has a finished check run on its head and SonarCloud counts 0 open issues for the PR
@@ -489,9 +489,14 @@ which is untrusted, and not from its own checkout either (only the `repository` 
 - Stopping the runner by hand (Ctrl+C) leaves the statuses of the running head `pending`; the next `local-ci.mjs PR`, or `--watch` after a restart, runs that head again.
 - Without `.github/workflow-project.json` (or its `localChecks` file) on the base branch, the PR gets a red `local-ci`
   status that says so, and the runner goes on with the next PR.
-- `push` runs in the project checkout whenever `main` or a `release/*` branch moved while `--watch` runs (its list comes from
+- `push` runs whenever `main` or a `release/*` branch moved while `--watch` runs (its list comes from
   `origin/<that branch>`; a branch without the config is skipped), with
   `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
+  The commands run, after `setup`, in a worktree of their own (`<main checkout>-local-ci/work-push`) on `AFTER_SHA`, never in the
+  runner's own checkout, which may be old: a file that only exists on the new state is there.
+- `kitPush` (list, next to `push`, read from `origin/main`) runs the same way when `main` of the kit moved, on `origin/main` of the
+  project, with `BRANCH=main` and `EVENT=kit` (`BEFORE_SHA`/`AFTER_SHA` are the kit's). The kit repository comes from `.gitmodules`
+  of `origin/main` (`.vendor/workflow-kit`), its head is read once per round like the project branches. Meant for `kit-pin.mjs`.
   The runner stores each branch head in `heads.json` next to its work folders once that branch's `push` is done, so a branch that
   moved while the runner was off is caught up at the next `--watch` start; without the file the first look is the baseline.
 - With `localChecks` configured, `board.mjs reviews`, `wait`, `handoff` and `merge` require the head's `local-ci` commit
