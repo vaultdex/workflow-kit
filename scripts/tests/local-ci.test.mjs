@@ -122,9 +122,10 @@ test('die Prüfliste kommt vom Ziel-Branch auf origin, weder aus dem PR noch aus
   assert.deepEqual(['ziel', 'pr', 'lokal'].map(name => existsSync(join(f.ctx.work, name))), [true, false, false]);
 });
 
-test('bewegt sich der Ziel-Branch, prüft watch den offenen PR ohne neuen Push gegen die neue Basis (und deren Prüfliste); danach ist er fertig', async t => {
+/** Ein Lauf des PRs, dann bewegt sich main (neue Prüfliste "Neu"); `watch` läuft drei Runden. */
+async function afterBaseMoves(t, firstRun) {
   const check = (context, run) => ({ context, paths: ['backend/**'], run: [run], timeoutMinutes: 1 });
-  const f = fixture(t, { checks: [check('Alt', 'touch alt')] });
+  const f = fixture(t, { checks: [check('Alt', firstRun)] });
   const ctx = { ...f.ctx, pollMs: 1 }, api = ctx.api;
   let moved = false;
   ctx.api = (method, path, fields) => {
@@ -132,11 +133,21 @@ test('bewegt sich der Ziel-Branch, prüft watch den offenen PR ohne neuen Push g
     return api(method, path, fields);
   };
   await watch(ctx, { rounds: 3 });
-  const aggregates = f.posts.filter(post => post.context === 'local-ci');
-  assert.deepEqual(aggregates.map(post => post.state), ['pending', 'success', 'pending', 'success'], 'zwei Läufe, in Runde 3 nichts mehr');
-  const [before, after] = aggregates.filter(post => post.state === 'success').map(post => post.description);
+  return { f, aggregates: f.posts.filter(post => post.context === 'local-ci') };
+}
+
+test('ein grünes local-ci bleibt grün, wenn sich der Ziel-Branch bewegt: kein neuer Lauf', async t => {
+  const { f, aggregates } = await afterBaseMoves(t, 'touch alt');
+  assert.deepEqual(aggregates.map(post => post.state), ['pending', 'success']);
+  assert.deepEqual(['alt', 'neu'].map(name => existsSync(join(f.ctx.work, name))), [true, false]);
+});
+
+test('ein rotes local-ci wird bei neuer Basis ohne neuen Push gegen die neue Basis (und deren Prüfliste) neu geprüft; danach ist es fertig', async t => {
+  const { f, aggregates } = await afterBaseMoves(t, 'exit 1');
+  assert.deepEqual(aggregates.map(post => post.state), ['pending', 'failure', 'pending', 'success'], 'zwei Läufe, in Runde 3 nichts mehr');
+  const [before, after] = aggregates.filter(post => post.state !== 'pending').map(post => post.description);
   assert.ok(before.startsWith(`Basis ${f.base.slice(0, 12)}:`) && after.startsWith(`Basis ${f.ctx.git(f.root, 'rev-parse', 'main').slice(0, 12)}:`), `${before} | ${after}`);
-  assert.deepEqual(['alt', 'neu'].map(name => existsSync(join(f.ctx.work, name))), [false, true], 'der Arbeitsordner ist der Stand gegen die neue Basis');
+  assert.ok(existsSync(join(f.ctx.work, 'neu')), 'der Arbeitsordner ist der Stand gegen die neue Basis');
 });
 
 test('ein Konflikt mit dem Ziel-Branch ergibt ein rotes local-ci mit der Basis, ohne eine Prüfung zu starten', async t => {

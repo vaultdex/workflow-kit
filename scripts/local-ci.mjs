@@ -213,10 +213,10 @@ export async function follow(ctx, pr) {
   }
 }
 
-/** Fertig ist ein Head nur, wenn sein Endstand gegen die Basis lief, die origin/<base> jetzt noch hat. */
+/** Grün bleibt grün, auch wenn sich die Basis bewegt (wie bei GitHub Actions; sonst liefe der Läufer bei jedem Merge für alle PRs voll). Rot gilt nur für die Basis, gegen die es lief. */
 const finished = (ctx, sha, base) => {
   const status = ctx.api('GET', `commits/${sha}/statuses?per_page=100`).find(status => status.context === AGGREGATE);
-  return ['success', 'failure'].includes(status?.state) && !!status.description?.startsWith(baseMark(base));
+  return status?.state === 'success' || (status?.state === 'failure' && !!status.description?.startsWith(baseMark(base)));
 };
 
 /** `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat; die erste Beobachtung löst nichts aus. */
@@ -244,7 +244,7 @@ async function pushed(ctx, heads) {
   }
 }
 
-/** Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head oder neuer Basis genau einmal, einen nach dem anderen. */
+/** Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head, oder neuer Basis nach rotem Endstand, genau einmal, einen nach dem anderen. */
 export async function watch(ctx, { rounds = Infinity } = {}) {
   const heads = new Map(), done = new Map();
   for (let round = 0; round < rounds; round++) {

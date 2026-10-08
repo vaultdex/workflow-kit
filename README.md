@@ -460,8 +460,9 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   Actions. GitHub's `refs/pull/N/merge` is not used: it stays on the old base after a merge into the target branch. A merge conflict gives a red
   `local-ci` with "Konflikt mit <base>". The commands get `BASE_SHA`, `BASE_REF`, `HEAD_REF` and
   `EVENT=pull_request` and run one after the other until one fails; `timeoutMinutes` limits all commands of a check.
-- The final `local-ci` status starts with `Basis <first 12 characters of the base SHA>`. `--watch` counts a head as done only while that is still the
-  tip of `origin/<base>`, so when the base moves, open PRs are checked again against the new base without a new push.
+- The final `local-ci` status starts with `Basis <first 12 characters of the base SHA>`. A green status stays valid when the base moves (as in
+  Actions; otherwise every merge would re-run all open PRs). A red one counts as done only while that base is still the tip of `origin/<base>`:
+  when the base moves, `--watch` checks such a PR again against the new base without a new push.
 - Status flow: `local-ci` (all checks of the head) and every selected check go `pending` at once, then `success` or
   `failure` with duration and host or the first error line. A check no changed file selects gets **no** status;
   `local-ci` then says so, which is what `board.mjs` needs to stop waiting for the "first CI check".
