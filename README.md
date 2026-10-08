@@ -467,8 +467,8 @@ which is untrusted, and not from its own checkout either (only the `repository` 
 - `push` runs in the project checkout whenever `main` or a `release/*` branch moved while `--watch` runs (its list comes from
   `origin/<that branch>`; a branch without the config is skipped), with
   `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
-- `board.mjs reviews`, `wait`, `handoff` and `merge` read these statuses like check runs: `pending` waits, `failure` and
-  `error` are red.
+- With `localChecks` configured, `board.mjs reviews`, `wait`, `handoff` and `merge` require the head's `local-ci` commit
+  status: missing or `pending` waits, `failure` and `error` are red, and only `success` passes.
 
 ## Project test map
 

@@ -175,6 +175,19 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   assert.equal(reviews(pr({ contexts: [local('SUCCESS', 'local-ci'), local('FAILURE')] })), 1, 'A failed local status is red');
   assert.equal(reviews(pr({ contexts: [local('ERROR', 'local-ci')] })), 1, 'An aborted local status is red');
   assert.equal(reviews(pr({ contexts: [local('SUCCESS', 'local-ci'), local('SUCCESS')] })), 0, 'Local statuses alone are CI');
+  const sonar = { ...check('COMPLETED'), name: 'SonarCloud Code Analysis', summary: '[0 New issues]',
+    detailsUrl: 'https://sonarcloud.io/dashboard?id=test_example&pullRequest=7', checkSuite: { app: { slug: 'sonarqubecloud' } } };
+  const sonarOnly = look(pr({ contexts: [sonar] }));
+  assert.equal(sonarOnly.status, 0, sonarOnly.stdout + sonarOnly.stderr);
+  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), localChecks: '.github/local-checks.json', optionalReviewers: ['maintainer'] }));
+  const missingLocalCi = look(pr({ contexts: [sonar] }));
+  assert.equal(missingLocalCi.status, 3, missingLocalCi.stdout + missingLocalCi.stderr);
+  assert.match(missingLocalCi.stdout, /^waiting: check local-ci$/m, 'Configured local CI needs its aggregate on this head');
+  assert.equal(reviews(pr({ contexts: [sonar, { ...check('COMPLETED'), name: 'local-ci' }] })), 3, 'A same-named check run is no local commit status');
+  assert.equal(reviews(pr({ contexts: [sonar, local('PENDING', 'local-ci')] })), 3, 'A pending aggregate waits');
+  assert.equal(reviews(pr({ contexts: [sonar, local('FAILURE', 'local-ci')] })), 1, 'A red aggregate fails even if its creator is optional');
+  assert.equal(reviews(pr({ contexts: [sonar, local('SUCCESS', 'local-ci')] })), 0, 'A successful aggregate completes the review');
+  writeFileSync(config, plain);
   assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
