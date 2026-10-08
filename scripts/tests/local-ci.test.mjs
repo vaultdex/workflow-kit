@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { checkPullRequest, gitBash, lock, matches, select, watch } from '../local-ci.mjs';
+import { checkPullRequest, gitBash, loadConfig, lock, matches, select, watch } from '../local-ci.mjs';
 import { isolatedGit, temporary } from './fixtures.mjs';
 
 test('Pfad-Filter wie bei GitHub: der Reihe nach, "!" nimmt zurück, "*" bleibt im Ordner, "**" geht darunter', () => {
@@ -66,14 +66,14 @@ function fixture(t, config, prConfig) {
   const pr = { number: 1, state: 'open', draft: false, head: { sha: head, ref: 'feature', repo: { full_name: 'o/r' } }, base: { ref: 'main' } };
   const server = { pulls: [pr], current: pr, refs: [] };
   const api = (method, path, fields) => {
-    if (method === 'POST') { posts.push(fields); return {}; }
+    if (method === 'POST') { posts.push({ ...fields, sha: path.split('/')[1] }); return {}; }
     if (path.startsWith('pulls?')) return server.pulls;
-    if (path.startsWith('pulls/')) return server.current;
+    if (path.startsWith('pulls/')) return path === `pulls/${server.current.number}` ? server.current : server.pulls.find(({ number }) => path === `pulls/${number}`) ?? server.current;
     if (path.startsWith('git/matching-refs/')) return server.refs.filter(({ ref }) => ref.startsWith(`refs/heads/${path.split('heads/')[1]}`));
     if (path.startsWith('git/ref/heads/')) { // Ziel-Branch auf origin; ein Branch, den es dort nicht gibt, bekommt einen Platzhalter
       try { return { object: { sha: git(origin, 'rev-parse', `refs/heads/${path.slice('git/ref/heads/'.length)}`) } }; } catch { return { object: { sha: '0'.repeat(40) } }; }
     }
-    if (path.startsWith('commits/')) return posts.filter(post => post.context === 'local-ci').reverse(); // neuester zuerst wie bei GitHub
+    if (path.startsWith('commits/')) return posts.filter(post => post.context === 'local-ci' && post.sha === path.split('/')[1]).reverse(); // neuester zuerst wie bei GitHub
     return [];
   };
   const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, git, api };
@@ -202,4 +202,74 @@ test('watch prüft einen neuen Head genau einmal, überspringt Drafts und Forks 
   assert.equal(f.posts.filter(post => post.context === 'local-ci' && post.state === 'pending').length, 1);
   assert.equal(f.posts.at(-1).state, 'success', JSON.stringify(f.posts));
   assert.equal(readFileSync(join(f.root, 'pushed.txt'), 'utf8').trim(), `main ${'a'.repeat(40)} ${'b'.repeat(40)} push`);
+});
+
+/** Drei offene PRs mit demselben Head; jede Prüfung legt eine Datei neben ihrem Arbeitsordner an und wartet bei `barrier` auf die der anderen. */
+function threePullRequests(t, barrier) {
+  const run = ['touch "$PWD.gestartet"', ...barrier ? ['for i in $(seq 100); do test -e ../work-1.gestartet && test -e ../work-2.gestartet && exit 0; sleep 0.1; done; exit 1'] : []];
+  const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run, timeoutMinutes: 1 }] });
+  const others = [2, 3].map(number => { // eigener Head je PR, sonst gälte der grüne Status des ersten für alle
+    f.ctx.git(f.root, 'checkout', '-q', '-b', `feature${number}`, 'feature');
+    writeFileSync(join(f.root, `backend/y${number}.txt`), 'y');
+    f.ctx.git(f.root, 'add', '-A');
+    f.ctx.git(f.root, 'commit', '-qm', `PR ${number}`);
+    f.ctx.git(f.root, 'push', '-q', 'origin', `feature${number}:refs/pull/${number}/head`);
+    return { ...f.pr, number, head: { ...f.pr.head, ref: `feature${number}`, sha: f.ctx.git(f.root, 'rev-parse', 'HEAD') } };
+  });
+  f.ctx.git(f.root, 'checkout', '-q', 'main');
+  f.server.pulls = [f.pr, ...others];
+  return { ...f, aggregates: () => f.posts.filter(post => post.context === 'local-ci').map(post => post.state) };
+}
+
+test('mit slots 2 belegen zwei PRs zwei Plätze mit eigenem Ordner, der dritte wartet auf einen freien', async t => {
+  const f = threePullRequests(t, true);
+  await watch({ ...f.ctx, slots: 2, pollMs: 1 }, { rounds: 1 });
+  // Beide Prüfungen warten auf die Startdatei der anderen: das gelingt nur, wenn sie zugleich laufen. Der dritte startet erst, wenn einer fertig ist.
+  assert.deepEqual(f.aggregates(), ['pending', 'pending', 'success', 'pending', 'success', 'success']);
+  assert.deepEqual(['work-1', 'work-2', 'work-3', 'work'].map(name => existsSync(join(f.dir, `${name}.gestartet`))), [true, true, false, false]);
+});
+
+test('ohne slots läuft ein PR nach dem anderen im Ordner work, wie bisher', async t => {
+  const f = threePullRequests(t, false);
+  await watch({ ...f.ctx, pollMs: 1 }, { rounds: 1 });
+  assert.deepEqual(f.aggregates(), ['pending', 'success', 'pending', 'success', 'pending', 'success']);
+  assert.deepEqual(['work', 'work-1'].map(name => existsSync(join(f.dir, `${name}.gestartet`))), [true, false]);
+});
+
+test('mit slots 2 wartet ein fälliger push, bis die laufenden Prüfungen fertig sind: kein Fetch der Plätze im Projekt-Checkout währenddessen', async t => {
+  const f = fixture(t, { push: ['test -e ../work-1.fertig && echo ok > pushed.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1', 'touch "$PWD.fertig"'], timeoutMinutes: 1 }] });
+  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: 'a'.repeat(40) } }];
+  const ctx = { ...f.ctx, slots: 2, pollMs: 1 }, api = ctx.api;
+  ctx.api = (method, path, fields) => { if (path.startsWith('pulls?') && f.posts.length) f.server.refs = [{ ref: 'refs/heads/main', object: { sha: 'b'.repeat(40) } }]; return api(method, path, fields); };
+  await watch(ctx, { rounds: 3 });
+  assert.equal(readFileSync(join(f.root, 'pushed.txt'), 'utf8').trim(), 'ok');
+});
+
+test('ein PR belegt nie zwei Plätze: ein neuer Head während des Laufs wird von follow geprüft, nicht zusätzlich gestartet', async t => {
+  const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1'], timeoutMinutes: 1 }] });
+  f.ctx.git(f.root, 'checkout', '-q', 'feature');
+  writeFileSync(join(f.root, 'backend/z.txt'), 'z');
+  f.ctx.git(f.root, 'add', '-A');
+  f.ctx.git(f.root, 'commit', '-qm', 'neuer Head');
+  const pushed = { ...f.pr, head: { ...f.pr.head, sha: f.ctx.git(f.root, 'rev-parse', 'HEAD') } };
+  f.ctx.git(f.root, 'checkout', '-q', 'main');
+  const ctx = { ...f.ctx, slots: 2, pollMs: 1 }, api = ctx.api;
+  let pushing = false; // der Push kommt, wenn der erste Lauf schon läuft
+  ctx.api = (method, path, fields) => {
+    if (path.startsWith('pulls?') && f.posts.length && !pushing) {
+      pushing = true;
+      f.ctx.git(f.root, 'push', '-q', 'origin', 'feature:refs/pull/1/head');
+      f.server.pulls = [f.server.current = pushed];
+    }
+    return api(method, path, fields);
+  };
+  await watch(ctx, { rounds: 3 });
+  assert.deepEqual(f.summary().filter(line => line.startsWith('local-ci')), ['local-ci: pending', 'local-ci: error', 'local-ci: pending', 'local-ci: success']);
+});
+
+test('slots muss eine ganze Zahl ab 1 sein, fehlt es, gilt 1', () => {
+  const read = slots => path => path.endsWith('workflow-project.json') ? '{"localChecks":"c.json"}' : JSON.stringify({ checks: [], ...slots === undefined ? {} : { slots } });
+  assert.equal(loadConfig(read()).slots, 1);
+  assert.equal(loadConfig(read(2)).slots, 2);
+  for (const bad of [0, 1.5, '2']) assert.throws(() => loadConfig(read(bad)), /slots/);
 });

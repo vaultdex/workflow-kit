@@ -432,7 +432,7 @@ PRs whose code you trust: the checks execute it.
 
 ```sh
 node .vendor/workflow-kit/scripts/local-ci.mjs [--cwd PROJECT_DIR] 123    # check PR 123 once (exit 0 green, 1 red)
-node .vendor/workflow-kit/scripts/local-ci.mjs [--cwd PROJECT_DIR] --watch # every minute: new heads of open non-draft PRs of this repository, one after the other
+node .vendor/workflow-kit/scripts/local-ci.mjs [--cwd PROJECT_DIR] --watch # every minute: new heads of open non-draft PRs of this repository, one after the other (`slots` at a time)
 ```
 
 A lock file allows one runner per machine and project. A push during a check stops its commands (process tree) and
@@ -448,9 +448,17 @@ which is untrusted, and not from its own checkout either (only the `repository` 
 {
   "setup": ["node scripts/bootstrap.mjs"],
   "checks": [{ "context": "Backend domain", "paths": ["backend/domain/**", "!**/*.md"], "run": ["./gradlew :domain:test"], "timeoutMinutes": 30 }],
-  "push": ["node scripts/board.mjs sweep"]
+  "push": ["node scripts/board.mjs sweep"],
+  "slots": 2
 }
 ```
+
+- `slots` (whole number from 1, default 1): `--watch` checks that many PRs at once, read once at start from `origin/main`
+  (restart to change). A PR runs on one slot only; a new head replaces its run as before. With `slots` missing or 1 nothing changes
+  (one PR after the other in `<main checkout>-local-ci/work`). With more, each slot has its own worktree `work-1`, `work-2`, … (unused
+  folders such as the old `work` stay; remove them with `git worktree remove`). Commands sharing a resource must key it by the
+  worktree folder, as Vaultdex' `gradle-container.mjs` does for its Gradle volume. `push` commands still run one at a time in the
+  project checkout, where the slots fetch too: when one is due, the runner lets the running checks finish and starts no new PR until it is done.
 
 - `paths` use GitHub's rules for `*`, `**` and `!` only (no `?` or `[…]`): in order, a later match wins, `!` takes a file
   back out, `*` stays within a folder, `**` goes below it. A check runs when one changed file of the PR matches.
