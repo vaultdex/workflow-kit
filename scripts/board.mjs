@@ -109,12 +109,14 @@ function graphql(query, variables = {}, tolerate) {
 // base of a stack through the native closing links (manual ones included). They are read by loadDeliveries, only where a stack is judged.
 const predecessorFields = 'id number state stateReason repository{nameWithOwner}';
 const deliveryFields = `closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
-// "baseBranch": {"field": "Zielrelease", "pattern": "release/{value}"} names the branch an issue starts from (#385); `check` reads the field with the issue.
+// "baseBranch": {"field": "Zielrelease", "pattern": "release/{value}", "values": {"main": "main"}} names the branch an issue starts from (#385);
+// `check` reads the field with the issue. The optional `values` give a fixed branch for those field values instead of the pattern (#403).
 const baseSetting = () => {
   const setting = project.baseBranch;
   if (setting === undefined) return;
-  assert.ok(typeof setting?.field === 'string' && setting.field.trim() && typeof setting.pattern === 'string' && setting.pattern.includes('{value}'),
-    'baseBranch must be {"field": "<Project field>", "pattern": "<branch name containing {value}>"}');
+  assert.ok(typeof setting?.field === 'string' && setting.field.trim() && typeof setting.pattern === 'string' && setting.pattern.includes('{value}')
+    && (setting.values === undefined || Object.values(setting.values ?? {}).every(branch => typeof branch === 'string' && branch.trim())),
+    'baseBranch must be {"field": "<Project field>", "pattern": "<branch name containing {value}>", "values": {"<field value>": "<branch>"} (optional)}');
   return setting;
 };
 const baseField = (setting = baseSetting()) => setting ? ` base:fieldValueByName(name:${JSON.stringify(setting.field)}){...on ProjectV2ItemFieldSingleSelectValue{name} ...on ProjectV2ItemFieldTextValue{text}}` : '';
@@ -503,7 +505,7 @@ function baseLines(issue, stacked) {
   const found = projectItem(issue)?.base;
   const value = (found?.name ?? found?.text ?? '').trim();
   if (!value) return [`note: the Project field ${setting.field} is empty; no base branch to name`];
-  const branch = setting.pattern.replace('{value}', () => value), remote = `origin/${branch}`;
+  const branch = Object.hasOwn(setting.values ?? {}, value) ? setting.values[value] : setting.pattern.replace('{value}', () => value), remote = `origin/${branch}`;
   const git = externalTool('git', process.cwd(), projectDirectory);
   // Git's exit code: 0 yes, 1 the expected "no", anything else is git failing (no checkout, no git) and says nothing about the base.
   const exit = (...args) => { try { execFileSync(git.file, ['-C', projectDirectory, ...args], { env: git.env, stdio: 'ignore' }); return 0; } catch (error) { return error.status ?? -1; } };

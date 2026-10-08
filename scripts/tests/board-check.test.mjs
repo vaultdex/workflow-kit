@@ -530,6 +530,14 @@ test('baseBranch names the base from a Project field and warns, without a verdic
   assert.ok(!baseLines().some(line => line.includes('HEAD is not on')), 'An issue with a branch is not told to branch again');
   rmSync(join(checkout, 'branches.json'));
 
+  writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ ...setting, baseBranch: { ...setting.baseBranch, values: { main: 'main' } } }));
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  writeIssue(withField({ name: 'main' }));
+  assert.deepEqual(baseLines(), ['base: main (Zielrelease)'], 'A fixed value names its own branch instead of the pattern, and HEAD is checked against it');
+  writeIssue(withField({ name: '0.1.1' }));
+  assert.deepEqual(baseLines()[0], 'base: release/0.1.1 (Zielrelease)', 'Any other value keeps the pattern');
+  writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify(setting));
+
   writeIssue(withField({ name: '9.9.9' }));
   assert.deepEqual(baseLines(), ['base: release/9.9.9 (Zielrelease)', 'note: origin/release/9.9.9 is not known in this checkout']);
   writeIssue(withField({ text: '0.1.1 LTS' }));
