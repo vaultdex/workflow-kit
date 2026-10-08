@@ -288,8 +288,8 @@ and then work in that directory, their relative paths (changed files given to `a
   PR for the current head. A partial PR (`Refs #N`, no closing link) beside exactly one other open PR that closes the issue
   needs no native link: `handoff` runs only the PR gate and leaves the issue status unchanged (`status … "Automated review"` posts
   only the backlink comment), `merge PR` is its gate; two open closing PRs stay unknown.
-  A lower layer of a stack (another open PR has its branch as base) with conflicts passes with `note: stacked: conflicts resolve in the top PR`
-  (`merge TOP --stack`); `sweep` and `next` leave it in Human review too. The top layer stays blocked by conflicts.
+  Conflicts in any layer of a stack block, a lower layer too (it locks the whole stack, #412): the blocker names the order (merge the base into
+  the lowest layer, then each layer into the next one up) and `stack-sync TOP`.
   It prints a `note:` (never a refusal) for each open task-list item
   (`- [ ]`) of the issue body without an issue reference (`#N` or `OWNER/REPO#N`) and for a missing or
   malformed `Retro` section of the handoff comment. Both are read as GitHub renders them: checked-off
@@ -301,7 +301,9 @@ and then work in that directory, their relative paths (changed files given to `a
   One run lists every missing point together (assignment, handoff comment, self-review section, native link, blockers
   and threads; a refused issue state, an unreadable read or running reviews are reported alone or first), so one fix round
   suffices. An undetermined merge state (`UNKNOWN`) is read again up to 3 times, `--interval SECONDS` apart (default 3,
-  1 point per read; `merge` too) before `handoff` reports it as waiting.
+  1 point per read; `merge` too) before `handoff` reports it as waiting. A head that is `UNKNOWN` 10 minutes after its push
+  and has no check and no `pull_request` or `workflow_dispatch` run is a blocker (`wait`, `handoff`, `merge`): in a native stack it names
+  the likely cause (a conflict in a lower layer) and `stack-sync`, otherwise "push an empty commit". Nothing is dispatched automatically.
   Session ownership, final
   proof and whether a finding is justified remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
@@ -325,7 +327,7 @@ and then work in that directory, their relative paths (changed files given to `a
   refusal or a read-back that differs: `ERROR`, exit 2). A layer of a [stack](docs/CONTRIBUTING.md#stacked-pull-requests)
   with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. `merge TOP --stack` merges
   the whole stack in one run instead: TOP is the top layer, and before anything else every open layer must hold its own gate (a
-  handoff comment for its head, no open thread, no change request, no conflicts (a layer below the top only gets `note: PR #N stacked: conflicts resolve in the top PR`), the layer above contains its head, the issues it delivers in Human review, the
+  handoff comment for its head, no open thread, no change request, no conflicts (a conflict in a lower layer locks the whole stack), the layer above contains its head, the issues it delivers in Human review, the
   `Selbstprüfung` section); `FAILED` names the layer and the reason, and nothing is merged. CI and reviewers count for the top head
   only (it contains every layer), so the stack costs one CI round. The top alone goes to `merge-async` (never a plain `gh pr merge`, which
   would land it in the layer below): GitHub merges every layer below with it, bottom first, and shows each as merged, without retarget.
@@ -337,6 +339,9 @@ and then work in that directory, their relative paths (changed files given to `a
   the branch is not of this repository, is the default branch or is the base of another open PR (a stack: GitHub would close
   that PR); it prints `branch kept: …` with the reason. A failed or already done delete is a `note:` or `branch gone:` line,
   never an error of the merge. Without `--stack` it does not read the issue, claims or the [handoff comment](#handoff-comment).
+- `stack-sync TOP`: for the native stack of the top PR TOP, merges from the bottom layer up the base into each layer (`git merge`, no
+  rebase, no force-push) and pushes it, in a temporary worktree of this checkout. A real conflict stops it with `blocker:`, the layer and the
+  files; the merge stays open in the printed worktree. Run it after a lower layer got conflicts or the base moved.
 - `wait PR`: repeats `reviews` (first after 60 s, then at longer intervals up to 5 minutes, again from 60 s
   when what it awaits changes; twice as long below 1000 quota points; `--interval SECONDS` sets a fixed pause instead), prints `WAITING` lines on change and
   reads GraphQL only when REST shows a change since the last full read (head, update time, merge state, check runs, check suites,

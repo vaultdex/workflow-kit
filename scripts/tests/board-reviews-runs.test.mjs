@@ -202,3 +202,19 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   assert.equal(run('reviews', '7').status, 2);
   assert.equal(run('wait', '7').status, 2, 'wait reports a read failure instead of waiting silently');
 });
+
+test('reviews names the cause of a head without pull_request runs and an UNKNOWN merge state (#412)', t => {
+  const { checkout, minutesAgo, check, pr, look } = reviewsFixture(t);
+  const stuck = { ...pr({ contexts: [], suites: [] }), mergeStateStatus: 'UNKNOWN' };
+  const pushedAgo = minutes => writeFileSync(join(checkout, 'activity.json'), JSON.stringify([{ after: 'abcdef1234', timestamp: minutesAgo(minutes) }]));
+  const stuckAt = minutes => (pushedAgo(minutes), look(stuck));
+  assert.equal(stuckAt(2).status, 3, 'A fresh push may still get its run');
+  const outside = stuckAt(30);
+  assert.equal(outside.status, 1, 'Pushed long ago, no run, UNKNOWN: a blocker, not a silent wait');
+  assert.match(outside.stdout, /blocker: .*push an empty commit/, 'Outside a stack: the hint');
+  writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{ number: 1 }]));
+  assert.match(stuckAt(30).stdout, /blocker: .*lower layer locks the native stack.*stack-sync/, 'In a stack: the cause and the command');
+  writeFileSync(join(checkout, 'runs.json'), JSON.stringify([{ event: 'pull_request' }]));
+  assert.equal(stuckAt(30).status, 3, 'A head with a run keeps waiting');
+  assert.equal(look({ ...pr({ contexts: [check('IN_PROGRESS')] }), mergeStateStatus: 'UNKNOWN' }).status, 3, 'Running CI keeps waiting');
+});

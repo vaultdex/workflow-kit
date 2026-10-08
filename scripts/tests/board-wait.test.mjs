@@ -14,7 +14,9 @@ test('wait ends at once on merge conflicts of a non-draft PR and ignores every o
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(noCi('DIRTY').status, 1, 'A later read failure keeps the known conflict verdict');
   rmSync(join(checkout, 'fail-rest'));
+  writeFileSync(join(checkout, 'activity.json'), JSON.stringify([{ after: 'abcdef1234', timestamp: minutesAgo(1) }]));
   for (const state of ['UNKNOWN', 'BEHIND']) assert.equal(noCi(state).status, 3, `${state} keeps waiting`);
+  rmSync(join(checkout, 'activity.json'));
   // The incident: a Draft whose checks were all skipped read as done. `wait` itself must end FAILED.
   look({ ...pr({ contexts: [check('COMPLETED', 'SKIPPED')], suites: [suite('COMPLETED', 1, 5, 'SKIPPED')] }), isDraft: true });
   const draft = run('wait', '7', '--max-minutes', '0.1');
