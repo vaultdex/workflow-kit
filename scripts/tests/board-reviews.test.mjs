@@ -37,7 +37,6 @@ test('reviews waits only for traces on the current head and never reads failures
   // Commit dates come from client clocks: one ahead of GitHub must not cut the grace short.
   const committed = minutes => ({ commits: { nodes: [{ commit: { ...pr().commits.nodes[0].commit, committedDate: minutesAgo(minutes) } }] } });
   assert.equal(reviews(readied(0.5, committed(-10))), 3, 'A commit date in the future does not cut the grace short');
-  assert.equal(reviews(readied(0.5, { isDraft: true })), 0, 'A Draft starts no grace');
   // A PR opened ready gets its first CI suite from the "opened" event, after its creation.
   assert.equal(reviews({ ...pr({ pushed: 0.2 }), isDraft: false, createdAt: minutesAgo(0.5) }), 3, 'A PR opened ready counts from its creation');
   // Correction pushes: heads pushed after the first Ready; the head that set Ready does not count, a repeated head counts once.
@@ -130,8 +129,8 @@ test('reviews reads CI checks, check suites and the traces of reviewers on the h
   // Draft then Ready: the first run's suite is cancelled before it reports a check run, the second run's suite carries them.
   const cancelled = suite('COMPLETED', 0, 1, 'CANCELLED', 10);
   assert.equal(reviews(pr({ suites: [cancelled] })), 1, 'A single empty cancelled suite is a failure');
-  assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 0, 'A newer successful suite of the same workflow replaces it');
-  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1, 'SUCCESS', 11), cancelled] })), 0, 'The order of the suites does not matter');
+  assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'SUCCESS', 11)] }), {}, '--grace', '0'), 0, 'A newer successful suite of the same workflow replaces it');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1, 'SUCCESS', 11), cancelled] }), {}, '--grace', '0'), 0, 'The order of the suites does not matter');
   assert.equal(reviews(pr({ suites: [cancelled, suite('QUEUED', 0, 1, null, 11)] })), 3, 'A newer suite that has not reported yet waits');
   // The replacing suite answers for the workflow even with runs: the green rollup shows only the jobs reported so far.
   assert.equal(reviews(pr({ suites: [cancelled, suite('IN_PROGRESS', 1, 1, null, 11)] })), 3, 'A replacing suite with runs that is still running waits');

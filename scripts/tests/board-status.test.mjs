@@ -9,7 +9,7 @@ test('Automated review names open acceptance boxes of the issue and still sets t
   const prepare = bodyHTML => {
     rmSync(join(checkout, 'mutations'), { force: true });
     writeIssue({ ...issue('In progress'), bodyHTML });
-    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [['I1']],
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: false, linkPages: [['I1']],
       url: 'https://github.com/test/example/pull/7', body: 'Refs #1' })));
     writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 1 }));
     writeFileSync(join(checkout, 'backlink-comments-1.json'), JSON.stringify([{ id: 1, body: 'https://github.com/test/example/pull/7', html_url: 'u' }]));
@@ -36,7 +36,7 @@ test('Automated review sets the missing native link and backlink itself and refu
   const writes = pattern => (readFileSync(join(checkout, 'mutations'), 'utf8').match(pattern) ?? []).length;
   const prepare = () => {
     for (const file of ['mutations', 'link-noop', 'comment-writes']) rmSync(join(checkout, file), { force: true });
-    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [[]],
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: false, linkPages: [[]],
       url: 'https://github.com/test/example/pull/7', body: 'Refs #1' })));
     writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0 }));
     writeFileSync(join(checkout, 'backlink-comments-1.json'), '[]');
@@ -108,7 +108,7 @@ test('Automated review requires the declared open PR and every issue backlink be
   const { checkout, run, writeIssue } = fixture(t);
   writeIssue(issue('In progress'));
   const mutations = join(checkout, 'mutations');
-  const pr = { number: 7, state: 'OPEN', url: 'https://github.com/test/example/pull/7', body: 'Refs #1. Related: #99.', baseRefName: 'release/0.1.0' };
+  const pr = { number: 7, state: 'OPEN', isDraft: false, url: 'https://github.com/test/example/pull/7', body: 'Refs #1. Related: #99.', baseRefName: 'release/0.1.0' };
   const writePR = changes => writeFileSync(join(checkout, 'pr.json'), JSON.stringify({ ...pr, ...changes }));
   let commentId = 0;
   const comment = body => ({ id: ++commentId, body, html_url: `https://github.com/test/example/issues/1#issuecomment-${commentId}` });
@@ -144,7 +144,7 @@ test('Automated review requires the declared open PR and every issue backlink be
   writeBacklink(1, [comment(`[PR #7](${pr.url}).`)]);
   for (const changes of [
     { state: 'CLOSED' }, { state: 'MERGED' }, { number: 8 },
-    { body: 'Refs #10' }, { body: 'Refs other/example#1' }, { body: '' },
+    { body: 'Refs #10' }, { body: 'Refs other/example#1' }, { body: '' }, { isDraft: true },
   ]) {
     writePR(changes);
     reject('status', '1', 'Automated review', '7');

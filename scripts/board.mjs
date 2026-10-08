@@ -1031,8 +1031,9 @@ function verifyBacklinks() {
     'Automated review requires PR [OTHER_ISSUE...]; post and read back every issue backlink first.');
   const prNumber = Number(prRef);
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-    pullRequest(number:$number){number url state body}}}`, { owner, name, number: prNumber }).repository;
+    pullRequest(number:$number){number url state isDraft body}}}`, { owner, name, number: prNumber }).repository;
   assert.ok(pr?.number === prNumber && pr.state === 'OPEN' && typeof pr.body === 'string', 'The declared PR is not open/readable');
+  assert.ok(pr.isDraft === false, `PR #${prNumber} is still Draft (its CI skips checks); run board.mjs ready ${prNumber} --local first`);
   const url = new URL(pr.url);
   assert.equal(url.pathname, `/${project.repository}/pull/${prNumber}`, 'PR belongs to another repository');
   const scope = new Set([`${project.repository}#${number}`, ...extraIssues.map(ref =>
@@ -1251,8 +1252,13 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   } catch (error) {
     lines.push(`note: base movement unreadable (${error.message})`);
   }
-  // Conflicts start no workflow, so the wait would never end; the fix is merging the base now. A draft is still
-  // being worked on, and UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
+  // A Draft skips the guarded CI jobs, so its green checks prove nothing: never DONE, whatever the checks say.
+  if (pr.isDraft) {
+    failed = true;
+    lines.push(`blocker: PR is still Draft; run board.mjs ready ${pr.number} --local`);
+  }
+  // Conflicts start no workflow, so the wait would never end; the fix is merging the base now.
+  // UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
   if (pr.mergeStateStatus === 'DIRTY' && !pr.isDraft) {
     failed = true;
     lines.push('blocker: merge conflicts');
@@ -1288,7 +1294,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const readyFlows = new Set(runs.filter(check => check.conclusion !== 'SKIPPED' && sinceReady(check)).map(flowOf));
   const readyJobs = new Set(runs.filter(sinceReady).map(jobKey));
   const draftSkipped = new Set();
-  for (const check of runs.filter(check => !pr.isDraft && Number.isFinite(readyEvent) && check.conclusion === 'SKIPPED' && check.checkSuite.workflowRun && !sinceReady(check)
+  for (const check of runs.filter(check => Number.isFinite(readyEvent) && check.conclusion === 'SKIPPED' && check.checkSuite.workflowRun && !sinceReady(check)
     && !(startedAt(check) < convertEvent))) {
     const { event } = check.checkSuite.workflowRun;
     assert.equal(typeof event, 'string', `The event of skipped check ${check.name} is unreadable`);
@@ -1379,7 +1385,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   ].some(user => isBot(user) && login(user) !== 'github-actions' && !isOptional(user.login))
     || current.some(check => !isOptionalCheck(check) && check.checkSuite?.app?.slug !== 'github-actions' && limitNotice.test(`${check.title ?? ''} ${check.description ?? ''}`));
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
-  if (!pr.isDraft && graceMinutes > 0 && !answeredBot) {
+  if (graceMinutes > 0 && !answeredBot) {
     const graceFrom = Math.max(readyAt, pushed, headSetAt(pr, pushes()));
     if (now - graceFrom < graceMinutes * 60_000) {
       waiting.push({ text: `reviewers may still start until ${new Date(graceFrom + graceMinutes * 60_000).toISOString()}`, since: Infinity });
@@ -1404,7 +1410,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
       lines.push(`dismissed stale change request by ${login(review.author)}: all threads are resolved`);
     } else lines.push(`blocker: changes requested by ${login(review.author)}`);
   }
-  if (pr.mergeStateStatus === 'DIRTY') lines.push('blocker: merge conflicts'); // a non-draft PR returned above
+  if (pr.mergeStateStatus === 'DIRTY') lines.push('blocker: merge conflicts'); // a Draft returned above
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));

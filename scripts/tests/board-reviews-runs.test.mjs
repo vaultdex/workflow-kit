@@ -73,7 +73,7 @@ test('reviews tells the newest run of a job from cancelled, skipped and Draft ru
   assert.equal(reviews(readyHead([draftRun(1, 'SUCCESS', { event: 'push' }), draftRun(2)]), oldTraces), 3, 'An executed push run of the same job from before Ready does not hide the Draft skip');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: null, minutes: 2 })]), oldTraces), 0, 'A skip after Ready needs no readable event');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: 'push' })]), oldTraces), 0, 'Only pull_request runs carry a Draft guard');
-  assert.equal(reviews({ ...readyHead([draftRun(1)]), isDraft: true }, oldTraces), 0, 'A Draft head has nothing to wait for yet');
+  assert.equal(reviews({ ...readyHead([draftRun(1)]), isDraft: true }, oldTraces), 1, 'A Draft head is never DONE');
   assert.equal(reviews({ ...readyHead([draftRun(1)]), readyEvents: { nodes: [] } }, oldTraces), 0, 'A PR that was never Draft has no Draft runs');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { time: 'unreadable' })]), oldTraces), 2, 'An unreadable run time is an error, never proof');
   assert.equal(reviews(readyHead([draftRun(1, 'SKIPPED', { event: null })]), oldTraces), 2, 'An unreadable run event is an error, never proof');
@@ -109,7 +109,7 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   assert.equal(reviews(pr(), { comments: [summary(both)], reactions: [reaction('+1', 0)] }), 0, 'A final reaction ends every kind');
   assert.equal(reviews(pr(), { comments: [summary(both, 'previous')] }), 0, 'Rows for another commit are not traces on this head');
   const appSuite = { ...suite('QUEUED', 0, 1), app: { slug: 'sonarqubecloud' } };
-  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] })), 0, 'Idle suites of other apps are no trace');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), appSuite] }), {}, '--grace', '0'), 0, 'Idle suites of other apps are no trace');
   const blocked = look({ ...pr(), mergeStateStatus: 'BLOCKED', reviewDecision: 'CHANGES_REQUESTED',
     latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'coderabbitai' } }] } });
   assert.equal(blocked.status, 0, 'Blockers are for the handoff; the wait itself is over');
@@ -158,7 +158,7 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['coderabbitai'] }));
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), rabbitSuite] })), 3, 'Precondition: an awaited app that is not optional waits');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), awaitApps: ['coderabbitai'], optionalReviewers: ['app/CodeRabbitAI'] }));
-  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), rabbitSuite] })), 0, 'An optional reviewer is never awaited, even when listed in awaitApps (gh spelling app/NAME)');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1), rabbitSuite] }), {}, '--grace', '0'), 0, 'An optional reviewer is never awaited, even when listed in awaitApps (gh spelling app/NAME)');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: 'coderabbitai' }));
   assert.equal(reviews(pr()), 2, 'A malformed list is an error, never silently ignored');
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: null }));

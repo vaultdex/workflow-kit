@@ -105,9 +105,9 @@ export function reviewsFixture(t) {
   const suite = (status = 'COMPLETED', runs = 1, minutes = 1, conclusion = status === 'COMPLETED' ? 'SUCCESS' : null, run, workflowId = 'W-Frontend', slug = 'github-actions') => ({
     createdAt: minutesAgo(minutes), status, conclusion, app: { slug }, checkRuns: { totalCount: runs },
     workflowRun: run === undefined ? null : { databaseId: run, workflow: { id: workflowId } } });
-  const pr = ({ pushed = 1, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, requestEventTotal, threadPages,
+  const pr = ({ pushed = 5, contexts = [check('COMPLETED')], total = contexts.length, requests = [], requestedAgo, requestEventTotal, threadPages,
     suites = [suite('COMPLETED', 1, pushed)], suiteTotal = suites.length } = {}) => ({
-    number: 7, state: 'OPEN', isDraft: true, baseRefName: 'release/0.1.1', headRefOid: 'abcdef1234', mergeStateStatus: 'CLEAN', reviewDecision: null,
+    number: 7, state: 'OPEN', isDraft: false, baseRefName: 'release/0.1.1', headRefOid: 'abcdef1234', mergeStateStatus: 'CLEAN', reviewDecision: null,
     latestOpinionatedReviews: { totalCount: 0, nodes: [] },
     commits: { nodes: [{ commit: { oid: 'abcdef1234', committedDate: minutesAgo(pushed + 5),
       checkSuites: { totalCount: suiteTotal, nodes: suites }, statusCheckRollup: { contexts: { totalCount: total, nodes: contexts } } } }] },

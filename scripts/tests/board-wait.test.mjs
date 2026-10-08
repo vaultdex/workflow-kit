@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { reviewsFixture, test } from './board-fixture.mjs';
 
 test('wait ends at once on merge conflicts of a non-draft PR and ignores every other merge state', t => {
-  const { checkout, minutesAgo, pr, look, reviews } = reviewsFixture(t);
+  const { checkout, run, minutesAgo, check, suite, pr, look, reviews } = reviewsFixture(t);
   // Conflicts start no workflow: without any check, a non-draft PR would wait for "first CI check" forever.
   const noCi = mergeStateStatus => look({ ...pr({ contexts: [] }), isDraft: false, mergeStateStatus });
   const conflicted = noCi('DIRTY');
@@ -15,7 +15,11 @@ test('wait ends at once on merge conflicts of a non-draft PR and ignores every o
   assert.equal(noCi('DIRTY').status, 1, 'A later read failure keeps the known conflict verdict');
   rmSync(join(checkout, 'fail-rest'));
   for (const state of ['UNKNOWN', 'BEHIND']) assert.equal(noCi(state).status, 3, `${state} keeps waiting`);
-  assert.equal(look({ ...pr({ contexts: [] }), mergeStateStatus: 'DIRTY' }).status, 3, 'A draft with conflicts keeps waiting');
+  // The incident: a Draft whose checks were all skipped read as done. `wait` itself must end FAILED.
+  look({ ...pr({ contexts: [check('COMPLETED', 'SKIPPED')], suites: [suite('COMPLETED', 1, 5, 'SKIPPED')] }), isDraft: true });
+  const draft = run('wait', '7', '--max-minutes', '0.1');
+  assert.equal(draft.status, 1, 'A Draft with only skipped checks is never DONE');
+  assert.match(draft.stdout, /^blocker: PR is still Draft; run board\.mjs ready 7 --local$/m);
   const readied = { ...pr({ pushed: 5 }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] } };
   assert.equal(reviews({ ...readied, mergeStateStatus: 'BEHIND' }), 0, 'BEHIND is no conflict');
 });
