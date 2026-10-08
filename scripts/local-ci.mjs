@@ -27,12 +27,13 @@ export const select = (checks, files) => checks.filter(check => files.some(file 
 export function loadConfig(read) {
   const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
-  const { checks, setup = [], push = [] } = JSON.parse(read(project.localChecks));
+  const { checks, setup = [], push = [], slots = 1 } = JSON.parse(read(project.localChecks));
+  assert.ok(Number.isInteger(slots) && slots >= 1, 'localChecks: "slots" muss eine ganze Zahl ab 1 sein');
   for (const check of checks) {
     assert.ok(check.context && check.paths?.every?.(path => typeof path === 'string') && check.run?.length && check.timeoutMinutes > 0,
       `localChecks: "${check.context}" braucht context, paths, run und timeoutMinutes`);
   }
-  return { repository: project.repository, checks, setup, push };
+  return { repository: project.repository, checks, setup, push, slots };
 }
 
 /** Die Konfiguration von origin/<branch> nach frischem Fetch: nie aus dem eigenen Checkout und nie aus dem PR, dem man nicht traut. */
@@ -245,9 +246,22 @@ async function pushed(ctx, heads) {
   }
 }
 
-/** Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head, oder neuer Basis nach rotem Endstand, genau einmal, einen nach dem anderen. */
+/**
+ * Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head, oder neuer Basis nach rotem Endstand, genau einmal.
+ * Bis zu `ctx.slots` PRs laufen gleichzeitig (Standard 1: einer nach dem anderen im Ordner `work`), jeder auf einem Platz mit eigenem
+ * Arbeitsordner `work-1`, `work-2`, …; ein PR belegt nie zwei Plätze. `checkout()` hat kein `await`: die Git-Aufrufe im gemeinsamen
+ * Projekt-Checkout (Fetch, FETCH_HEAD, Worktree anlegen) laufen so nie ineinander.
+ */
 export async function watch(ctx, { rounds = Infinity } = {}) {
-  const heads = new Map(), done = new Map();
+  const heads = new Map(), done = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
+  const slotFree = async () => { while (busy.size >= slots) await Promise.race([...busy.values()].map(({ task }) => task)); };
+  const start = pr => {
+    const slot = [...Array(slots).keys()].find(index => !busy.has(index));
+    const task = follow({ ...ctx, work: slots > 1 ? `${ctx.work}-${slot + 1}` : ctx.work }, pr)
+      .catch(error => console.error(`#${pr.number}: ${error.message}`)) // ein Läuferfehler hält die anderen Plätze nicht auf
+      .finally(() => busy.delete(slot));
+    busy.set(slot, { number: pr.number, task });
+  };
   for (let round = 0; round < rounds; round++) {
     try {
       await pushed(ctx, heads).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
@@ -258,13 +272,17 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
           continue;
         }
         const base = bases.get(pr.base.ref), key = `${pr.head.sha} ${base}`;
-        if (done.get(pr.number) === key || finished(ctx, pr.head.sha, base)) continue;
+        // läuft der PR noch (`follow` holt einen neuen Head selbst), startet er nicht ein zweites Mal auf einem anderen Platz
+        if ([...busy.values()].some(({ number }) => number === pr.number) || done.get(pr.number) === key || finished(ctx, pr.head.sha, base)) continue;
         done.set(pr.number, key); // ponytail: ein Läuferfehler wiederholt Head und Basis nicht; ein neuer Push, eine neue Basis oder `local-ci.mjs PR` prüft erneut
-        await follow(ctx, pr);
+        await slotFree();
+        start(pr);
       }
     } catch (error) { console.error(error.message); }
+    await slotFree(); // alle Plätze belegt: nicht neu abfragen, bis einer frei ist (bei einem Platz wie bisher: erst nach dem Lauf)
     if (round + 1 < rounds) await pause(ctx.pollMs);
   }
+  await Promise.all([...busy.values()].map(({ task }) => task)); // nur bei endlichen `rounds`
 }
 
 async function main() {
@@ -280,8 +298,9 @@ async function main() {
   // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
+  const slots = mode === '--watch' ? loadConfig(path => readFileSync(join(root, path), 'utf8')).slots : 1; // einmal beim Start aus dem eigenen Checkout; ein neuer Wert gilt nach Neustart
   const ctx = {
-    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000,
+    bash, repository, root, slots, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000,
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
     api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
