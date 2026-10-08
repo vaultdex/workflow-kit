@@ -174,7 +174,8 @@ and then work in that directory, their relative paths (changed files given to `a
   predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);
   `next` lists such issues apart, with the base PR; shows the age and open PR of a claim and one line per
   native sub-issue; information only; with `"baseBranch": {"field": "Zielrelease", "pattern": "release/{value}"}` it
-  also prints `base: release/0.1.1 (Zielrelease)` from that Project field (`check` only, not `next`) and a `note:` when
+  also prints `base: release/0.1.1 (Zielrelease)` from that Project field (`check` only, not `next`; an optional
+  `"values": {"main": "main"}` names a fixed branch for such field values instead of the pattern) and a `note:` when
   the value is no branch name, `origin/<base>` is unknown locally or git cannot answer, or `HEAD` does not descend from
   `origin/<base>` (that last one only for an issue with no branch yet and no stack); no fetch, never a verdict), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
