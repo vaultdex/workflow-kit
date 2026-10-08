@@ -309,13 +309,15 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
       const silent = async (dir, why) => assert.equal(await trial(dir), '', why);
 
       const manifest = JSON.stringify({ name: 'x', devDependencies: { a: '1' } }, null, 2);
-      assert.match(await reported(await project(manifest), 'a worktree without node_modules is reported'), /AGENTS\.md/, 'without a project field the text stays generic');
-      assert.match(await reported(await project(manifest, 'node scripts/bootstrap.mjs'), 'the setup field is honored'), /node scripts\/bootstrap\.mjs/);
+      await reported(await project(manifest), 'a worktree without node_modules is reported');
+      assert.match(await reported(await project(manifest, 'pnpm run setup:all'), 'the setup field is honored'), /pnpm run setup:all/);
 
       const installed = await project(manifest);
       mkdirSync(join(installed, 'node_modules'));
       await silent(installed, 'a worktree with node_modules is left alone');
       await silent(await project(JSON.stringify({ name: 'x', dependencies: {} })), 'a manifest without dependencies is left alone');
+      await silent(await project(JSON.stringify({ peerDependencies: { a: '1' } })), 'only the dependencies npm installs by default count, the same in every shell');
+      await silent(await project('{ not json'), 'a broken package.json is not reported');
       await silent(await project(), 'a project without package.json is left alone');
       await silent(temp, 'a directory outside any repository is left alone');
     });
