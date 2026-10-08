@@ -45,6 +45,9 @@ with the line `Handover: ID` (from the earlier session or the human handing over
 that session. The newest claim or handover decides, the later comment wins on equal times. If it names
 another session than `--session` (or no session), `check` reports BLOCKED with agent, session, time and comment link.
 Without `--session`, or when the newest claim is an old one that lacks the field (no known session), `check` only shows a note.
+A claim without activity (issue, Project status, open PR) for `staleHours` (project file, default 6) has expired: with `--session`, `check` notes it
+instead of BLOCKED, also for the open PR and branch below; the new claim says `Takeover of stale claim OLD_SESSION` and the assignees stay. A new start
+is BLOCKED with `finish #N first` while the own session has an issue in In progress or Automated review (stacking on that work is allowed).
 Whatever the claims say, `check` also reports BLOCKED while an open PR closes the issue (a Draft too) or a branch `<agent>/<issue number>-…`
 exists, unless the newest claim is of `--session` (the own session resumes its own PR and branch); without `--session` nothing proves it. Both come
 with the one issue query. Two sessions that check within seconds, before either has a claim or a branch, are not caught. Unreadable

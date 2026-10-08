@@ -68,3 +68,21 @@ test('next reads the PRs of predecessors in one lookup, for the candidates for a
   assert.equal(run('next').status, 0);
   assert.ok(queries().every(query => !query.includes('nodes(ids:')), 'Without a candidate there is no lookup');
 });
+
+
+test('next lists the own unfinished work, then abandoned and conflicting work, before the Ready issues', t => {
+  const { checkout, run } = fixture(t);
+  const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
+  const work = (number, status, hours, mergeStateStatus = 'CLEAN') => ({ ...issue(status), number, issueFieldValues: { nodes: [] }, updatedAt: hoursAgo(hours),
+    assignees: { nodes: [{ login: 'worker' }] }, projectItems: { nodes: [{ project: { id: 'P1' }, updatedAt: hoursAgo(hours), status: { name: status } }] },
+    closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: number + 100, state: 'OPEN', updatedAt: hoursAgo(hours), mergeStateStatus, repository: { nameWithOwner: 'test/example' } }] } });
+  writeFileSync(join(checkout, 'backlink-comments-15.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' }, body: 'Agent: claude, Session: S1',
+    html_url: 'https://example.test/c15', created_at: '2026-10-06T10:00:00Z' }]));
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([{ ...issue('Ready'), number: 10, issueFieldValues: { nodes: [] } }, work(11, 'Automated review', 8), work(12, 'Human review', 1, 'DIRTY'),
+    work(13, 'Human review', 1), work(14, 'In progress', 1), work(15, 'Automated review', 1)]));
+
+  const result = run('next', '--session', 'S1');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(result.stdout.split('\n\n').map(part => part.match(/^#\d+/gm)), [['#15'], ['#11', '#12'], ['#10']]);
+  assert.deepEqual(run('next').stdout.split('\n\n').map(part => part.match(/^#\d+/gm)), [['#11', '#12'], ['#10']], 'without a session there is no own work');
+});

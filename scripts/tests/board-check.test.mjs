@@ -477,14 +477,14 @@ test('board check asks for a short list of sub-issues and reads a longer one aga
 
   writeIssue(spec(30));
   assert.equal(run('check', '1', '--session', 'S1').stdout.match(/^#\d+ {2}/gm).length, 30);
-  const [short, ...more] = queries();
+  const [short, ...more] = queries().filter(query => !query.includes('search('));
   assert.deepEqual(more, [], 'A list that fits the first page is read once');
   assert.ok(short.includes('subIssues(first:30)'));
 
   writeIssue(spec(30, 31));
   const cut = run('check', '1', '--session', 'S1');
   assert.match(cut.stdout, /^note: 30 of 31 sub-issues listed$/m, 'A list that is still cut says so');
-  const [first, second, ...rest] = queries();
+  const [first, second, ...rest] = queries().filter(query => !query.includes('search('));
   assert.deepEqual(rest, []);
   assert.ok(first.includes('subIssues(first:30)') && second.includes('subIssues(first:100)'), 'The second read asks for 100');
 });
@@ -509,7 +509,7 @@ test('baseBranch names the base from a Project field and warns, without a verdic
 
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify(setting));
   assert.deepEqual(baseLines(), ['base: release/0.1.1 (Zielrelease)'], 'HEAD descends from the base: only the base is named');
-  const [asked, ...more] = queries();
+  const [asked, ...more] = queries().filter(query => !query.includes('search('));
   assert.deepEqual(more, [], 'The field comes with the one issue query, not with one of its own');
   assert.ok(asked.includes('fieldValueByName(name:"Zielrelease")'));
 
@@ -559,4 +559,61 @@ test('--cwd names the project of a command, not the working directory', t => {
   assert.match(there.stdout, /^test\/other-project#1 /);
   assert.equal(there.status, 0, there.stdout + there.stderr);
   assert.equal(run('--cwd').status, 2, 'A missing directory is a usage error, not the working directory');
+});
+
+
+// Vaultdex #1458, #1484: drivers left issues in Automated review and started new ones.
+test('check of a new issue is BLOCKED with "finish #N first" while the own session has an unfinished issue, unless it stacks on that work', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const own = (status, assignee = 'worker') => ({ ...issue(status), number: 5, assignees: { nodes: [{ login: assignee }] } });
+  const search = row => writeFileSync(join(checkout, 'search.json'), JSON.stringify([row]));
+  writeFileSync(join(checkout, 'backlink-comments-5.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' }, body: 'Agent: claude, Session: S1',
+    html_url: 'https://example.test/c5', created_at: '2026-10-06T10:00:00Z' }]));
+  writeIssue(issue());
+
+  search(own('Automated review'));
+  const blocked = run('check', '1', '--session', 'S1');
+  assert.equal(blocked.status, 1, blocked.stdout);
+  assert.match(blocked.stdout, /^- finish #5 first/m);
+  const other = run('check', '1', '--session', 'S2');
+  assert.equal(other.status, 0, `the claim of another session is not mine: ${other.stdout}`);
+  search(own('Human review'));
+  assert.equal(run('check', '1', '--session', 'S1').status, 0, 'handed off work is finished');
+  search(own('Automated review', 'someone'));
+  assert.equal(run('check', '1', '--session', 'S1').status, 0, 'an issue assigned to someone else is not mine');
+
+  const pr = { number: 8, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/8-base', headRefOid: 'ba5e0001' };
+  const stack = number => writeIssue(issue('Ready', [predecessor('OPEN', null, [pr], { number, repository: { nameWithOwner: 'test/example' } })]));
+  search(own('Automated review'));
+  stack(5);
+  assert.equal(run('check', '1', '--session', 'S1').status, 4, 'stacking on the own work continues it');
+  stack(2);
+  assert.equal(run('check', '1', '--session', 'S1').status, 1, 'stacking on other work is a new start');
+});
+
+
+test('check lets a new session take over a claim without activity for staleHours, also with its open PR', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
+  const work = (issueHours, prHours, status = 'In progress', mergeStateStatus = 'CLEAN') => {
+    const base = issue(status);
+    writeIssue({ ...base, updatedAt: hoursAgo(issueHours), projectItems: { nodes: [{ ...base.projectItems.nodes[0], updatedAt: hoursAgo(issueHours) }] },
+      closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', mergeStateStatus, updatedAt: hoursAgo(prHours), repository: { nameWithOwner: 'test/example' }, headRefName: 'claude/1-work' }] } });
+  };
+  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' }, body: 'Agent: claude, Session: OLD',
+    html_url: 'https://example.test/c1', created_at: '2026-10-06T10:00:00Z' }]));
+
+  work(5, 5);
+  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'within staleHours the claim holds');
+  work(7, 7);
+  const taken = run('check', '1', '--session', 'NEW');
+  assert.equal(taken.status, 0, taken.stdout);
+  assert.match(taken.stdout, /Takeover of stale claim OLD/);
+  assert.equal(run('check', '1').status, 1, 'without a session nothing is taken over');
+  work(7, 1);
+  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a push to the PR is activity');
+  work(1, 1, 'Human review', 'DIRTY');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 0, 'a Human-review PR with conflicts is abandoned at once');
+  work(1, 1, 'Human review');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a clean one is not');
 });
