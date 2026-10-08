@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { checkPullRequest, loadConfig, lock, matches, select, watch } from '../local-ci.mjs';
+import { checkPullRequest, lock, matches, select, watch } from '../local-ci.mjs';
 import { isolatedGit, temporary } from './fixtures.mjs';
 
 test('Pfad-Filter wie bei GitHub: der Reihe nach, "!" nimmt zurück, "*" bleibt im Ordner, "**" geht darunter', () => {
@@ -29,8 +29,8 @@ test('die Sperrdatei lässt nur einen Läufer zu und übernimmt die eines toten 
   lock(file)();
 });
 
-/** Ein Projekt mit Origin, PR 1 (Branch feature ändert backend/x.txt) und dem Merge-Stand unter refs/pull/1/merge. */
-function fixture(t, config) {
+/** Ein Projekt mit Origin, PR 1 (Branch feature ändert backend/x.txt, bei `prConfig` auch die Prüfliste) und dem Merge-Stand unter refs/pull/1/merge. */
+function fixture(t, config, prConfig) {
   const dir = temporary(t, 'local ci ');
   const env = { ...isolatedGit(dir), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -47,6 +47,7 @@ function fixture(t, config) {
   git(root, 'checkout', '-b', 'feature');
   mkdirSync(join(root, 'backend'));
   writeFileSync(join(root, 'backend/x.txt'), 'x');
+  if (prConfig) writeFileSync(join(root, '.github/local-checks.json'), JSON.stringify(prConfig));
   git(root, 'add', '-A');
   git(root, 'commit', '-m', 'feature');
   const head = git(root, 'rev-parse', 'HEAD');
@@ -64,20 +65,25 @@ function fixture(t, config) {
     if (path.startsWith('git/matching-refs/')) return server.refs.filter(({ ref }) => ref.startsWith(`refs/heads/${path.split('heads/')[1]}`));
     return [];
   };
-  const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, mergeWaitMs: 1, mergeAttempts: 2,
-    config: () => loadConfig(root), git, api };
-  return { ctx, pr, posts, server, base, root, dir, summary: () => posts.map(({ context, state }) => `${context}: ${state}`) };
+  const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, mergeWaitMs: 1, mergeAttempts: 2, git, api };
+  /** Ändert die Prüfliste auf main von origin (wie ein Merge dort); der Läufer liest sie beim nächsten Durchlauf. */
+  const publish = next => {
+    writeFileSync(join(root, '.github/local-checks.json'), JSON.stringify(next));
+    git(root, 'commit', '-qam', 'checks');
+    git(root, 'push', '-q', 'origin', 'main');
+  };
+  return { ctx, pr, posts, server, base, root, dir, publish, summary: () => posts.map(({ context, state }) => `${context}: ${state}`) };
 }
 
 test('wählt nach den geänderten Dateien, meldet pending vor dem Ergebnis und gibt die Umgebung der Actions-CI weiter', async t => {
   const f = fixture(t, { setup: [], checks: [] });
   const env = base => `test "$EVENT" = pull_request && test "$BASE_SHA" = ${base} && test "$HEAD_REF" = feature && test "$BASE_REF" = main`;
-  writeFileSync(join(f.root, '.github/local-checks.json'), JSON.stringify({ checks: [
+  f.publish({ checks: [
     { context: 'Backend', paths: ['backend/**'], run: [env(f.base), 'echo fein'], timeoutMinutes: 1 },
     { context: 'Broken', paths: ['**', '!frontend/**'], run: ['echo "kaputt: Fehler 7" >&2; exit 3', 'echo nie'], timeoutMinutes: 1 },
     { context: 'Slow', paths: ['backend/*.txt'], run: ['sleep 30'], timeoutMinutes: 0.001 },
     { context: 'Frontend', paths: ['frontend/**'], run: ['exit 1'], timeoutMinutes: 1 },
-    { context: 'Lint', paths: ['**', '!backend/**'], run: ['exit 1'], timeoutMinutes: 1 }] }));
+    { context: 'Lint', paths: ['**', '!backend/**'], run: ['exit 1'], timeoutMinutes: 1 }] });
   const result = await checkPullRequest(f.ctx, f.pr);
   assert.deepEqual([result.ok, result.next], [false, null]);
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'Broken: pending', 'Slow: pending',
@@ -89,11 +95,31 @@ test('ohne betroffene Prüfung bleibt es bei einem grünen local-ci; ein fehlges
   const f = fixture(t, { checks: [{ context: 'Frontend', paths: ['frontend/**'], run: ['exit 1'], timeoutMinutes: 1 }] });
   assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
   assert.deepEqual(f.summary(), ['local-ci: pending', 'local-ci: success']);
-  writeFileSync(join(f.root, '.github/local-checks.json'), JSON.stringify({ setup: ['exit 1'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['touch gelaufen'], timeoutMinutes: 1 }] }));
+  f.publish({ setup: ['exit 1'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['touch gelaufen'], timeoutMinutes: 1 }] });
   f.posts.length = 0;
   assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, false);
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'Backend: failure', 'local-ci: failure']);
   assert.ok(!existsSync(join(f.ctx.work, 'gelaufen')));
+});
+
+test('die Prüfliste kommt vom Ziel-Branch auf origin, weder aus dem PR noch aus dem eigenen Checkout; ein neuer Stand dort gilt beim nächsten Durchlauf', async t => {
+  const check = (context, run) => ({ context, paths: ['backend/**'], run: [run], timeoutMinutes: 1 });
+  const f = fixture(t, { checks: [check('Ziel', 'touch ziel')] }, { checks: [check('PR', 'touch pr')] });
+  writeFileSync(join(f.root, '.github/local-checks.json'), JSON.stringify({ checks: [check('Lokal', 'touch lokal')] })); // ungepushte Änderung im Läufer-Checkout
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'Ziel: pending', 'Ziel: success', 'local-ci: success']);
+  assert.deepEqual(['ziel', 'pr', 'lokal'].map(name => existsSync(join(f.ctx.work, name))), [true, false, false]);
+  f.publish({ checks: [check('Neu', 'touch neu')] });
+  f.posts.length = 0;
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'Neu: pending', 'Neu: success', 'local-ci: success']);
+});
+
+test('fehlt die Konfiguration auf dem Ziel-Branch, meldet local-ci das klar und die Schleife prüft den nächsten PR', async t => {
+  const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }] });
+  f.server.pulls = [{ ...f.pr, number: 2, base: { ref: 'release/9' } }, f.pr];
+  await watch({ ...f.ctx, pollMs: 1 }, { rounds: 1 });
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'local-ci: failure', 'local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
 });
 
 test('ein neuer Head bricht die laufende Prüfung ab, schließt ihre Status und liefert den neuen PR', async t => {
