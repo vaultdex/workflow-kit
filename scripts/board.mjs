@@ -1198,7 +1198,8 @@ const updateBranchChecks = () => {
 };
 let optional;
 const isOptional = name => (optional ??= optionalReviewers()).has(reviewerKey(name));
-const isOptionalCheck = check => isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
+const isLocalCi = check => check.__typename === 'StatusContext' && check.context === 'local-ci';
+const isOptionalCheck = check => !(project.localChecks && isLocalCi(check)) && isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 const readPr = prNumber => graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
@@ -1323,6 +1324,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   const decisiveRun = check => newestExecuted.get(jobKey(check)) ?? newestSkipped.get(jobKey(check));
   const current = contexts.nodes.filter(check => !orderable(check) || runOf(check) === decisiveRun(check));
+  if (project.localChecks && !current.some(isLocalCi)) waiting.push({ text: 'check local-ci', since: Infinity });
   for (const check of current.filter(check => orderable(check) && newestSkipped.get(jobKey(check)) > runOf(check))) {
     lines.push(`note: ${check.name} was SKIPPED in a newer run, which proves nothing; run ${runOf(check)} decides`);
   }
