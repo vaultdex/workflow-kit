@@ -55,7 +55,7 @@ export async function waitReason(ctx, pr, { apps }) {
   const sonar = runs.find(run => run.app?.slug === 'sonarqubecloud' && run.status === 'completed' && run.conclusion !== 'skipped');
   if (!sonar) return null;
   const { origin, searchParams } = new URL(sonar.details_url ?? 'invalid:');
-  if (!['https://sonarcloud.io', 'https://sonarqube.us'].includes(origin)) throw new Error('der Sonar-Check verlinkt keine Analyse');
+  if (!['https://sonarcloud.io', 'https://sonarqube.us'].includes(origin) || !searchParams.get('id') || searchParams.get('pullRequest') !== String(pr.number)) throw new Error('der Sonar-Check verlinkt nicht die Analyse dieses PRs');
   let open;
   if (ctx.sonarToken) { // Ein grünes Gate heißt nicht 0 Befunde; die anonyme API meldet bei privaten Projekten 0, darum nur mit Token
     const search = new URLSearchParams({ componentKeys: searchParams.get('id'), pullRequest: pr.number, resolved: 'false', ps: 1 });

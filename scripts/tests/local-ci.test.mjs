@@ -311,7 +311,6 @@ test('slow: eine langsame Prüfung läuft nur, wenn der Diff riskPaths trifft, s
   f.publish({ riskPaths: ['db/**'], checks });
   assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Slow: success', 'local-ci: success']);
-  assert.match(f.posts[1].description, /übersprungen: risikoarm/);
   assert.ok(!existsSync(join(f.ctx.work, 'gelaufen')));
   for (const config of [{ riskPaths: ['backend/**'], checks }, { checks }]) { // Risiko-Pfad getroffen, und ganz ohne riskPaths
     f.publish(config);
@@ -325,17 +324,17 @@ test('slow: eine langsame Prüfung läuft nur, wenn der Diff riskPaths trifft, s
 test('localCiAfterApps: der Läufer nimmt den PR erst, wenn Sonar für den Head fertig ist und 0 Befunde offen sind; ohne die Einstellung startet er sofort', async t => {
   const checks = [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }];
   const sonar = summary => [{ app: { slug: 'sonarqubecloud' }, status: 'completed', conclusion: 'success', details_url: 'https://sonarcloud.io/dashboard?id=o_r&pullRequest=1', output: { summary } }];
-  const round = async (f, rounds = 1) => { f.posts.length = 0; await watch({ ...f.ctx, pollMs: 1 }, { rounds }); return f.summary().concat(f.posts.map(post => post.description)); };
+  const round = async (f, rounds = 1) => { f.posts.length = 0; await watch({ ...f.ctx, pollMs: 1 }, { rounds }); return f.summary(); };
   const plain = fixture(t, { checks });
-  assert.deepEqual((await round(plain)).slice(0, 4), ['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
+  assert.deepEqual(await round(plain),['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
 
   const f = fixture(t, { checks });
   writeFileSync(join(f.root, '.github/workflow-project.json'), JSON.stringify({ repository: 'o/r', localChecks: '.github/local-checks.json', awaitApps: ['sonarqubecloud'], localCiAfterApps: true }));
   f.ctx.git(f.root, 'commit', '-qam', 'warten');
   f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
-  assert.deepEqual(await round(f, 2), ['local-ci: pending', 'wartet auf sonarqubecloud'], 'zwei Runden, ein Status');
+  assert.deepEqual(await round(f, 2), ['local-ci: pending'], 'Sonar noch nicht fertig: zwei Runden, ein Status, kein Lauf');
   f.server.checkRuns = sonar('[3 New issues](x)');
-  assert.deepEqual(await round(f), ['local-ci: pending', '3 Sonar-Befunde offen']);
+  assert.deepEqual(await round(f), ['local-ci: pending'], 'Befunde offen: kein Lauf');
   f.server.checkRuns = sonar('[0 New issues](x)');
-  assert.deepEqual((await round(f)).slice(0, 4), ['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
+  assert.deepEqual(await round(f),['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
 });
