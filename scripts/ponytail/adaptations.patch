@@ -1,5 +1,5 @@
 diff --git a/hooks/ponytail-activate.js b/hooks/ponytail-activate.js
-index 68894bd..af18d25 100644
+index 93510ce..432a6ba 100644
 --- a/hooks/ponytail-activate.js
 +++ b/hooks/ponytail-activate.js
 @@ -3,13 +3,10 @@
@@ -52,13 +52,20 @@ index 68894bd..af18d25 100644
    }
  }
  
-@@ -57,103 +55,9 @@ try {
+@@ -57,110 +55,9 @@ try {
  }
  
  // 2. Emit the ponytail ruleset, filtered to the active intensity level.
 -let output = getPonytailInstructions(mode);
 +const output = getPonytailInstructions(mode);
  
+-// 2b. Codebase map: what already exists, so "reuse first" costs no search. Fail open: a map
+-// that cannot be built must never block or slow the session start.
+-if (mode !== 'review' && process.env.PONYTAIL_MAP !== '0') try {
+-  const map = require('./ponytail-map').buildMap(process.cwd());
+-  if (map) output += '\n\n' + map;
+-} catch (e) { /* no map */ }
+-
 -// 3. Detect missing statusline config — nudge Claude to help set it up
 -if (!isCodex && !isCopilot && !isCursor && !isCodeBuddy) try {
 -  const isWindows = process.platform === 'win32';
@@ -154,7 +161,7 @@ index 68894bd..af18d25 100644
 -} catch (e) {
 -  // Silent fail — don't block session start over statusline detection
 -}
-+// Vaultdex: no global statusline setup or personal-settings reads.
++// Vaultdex: no global statusline setup, personal-settings reads or codebase map (the kit packages no ponytail-map.js).
  
  try {
    writeHookOutput('SessionStart', mode, output);
@@ -329,35 +336,22 @@ index f2d9fe2..f94d4ca 100644
 +// Keep fallback alive for stuck stdin; normal EOF cancels it.
 +const fallback = setTimeout(finishInput, 1000);
 diff --git a/skills/ponytail/SKILL.md b/skills/ponytail/SKILL.md
-index 02c0712..bc4e068 100644
+index 32ac909..e57554b 100644
 --- a/skills/ponytail/SKILL.md
 +++ b/skills/ponytail/SKILL.md
-@@ -13,7 +13,6 @@ description: >
-   over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT
-   use for non-coding requests (general knowledge, prose, translation,
-   summaries, recipes).
+@@ -6,7 +6,6 @@ description: >
+   fixing, refactoring, reviewing, choosing dependencies) and when the user says
+   "ponytail", "be lazy", "simplest solution", "yagni", or complains about
+   over-engineering or bloat. Levels: lite, full (default), ultra.
 -argument-hint: "[lite|full|ultra]"
  license: MIT
  ---
  
-@@ -107,9 +106,9 @@ just less code, the physical world needs tuning a minimal model can't see.
- Lazy code without its check is unfinished. Non-trivial logic (a branch, a
- loop, a parser, a money/security path) leaves ONE runnable check behind, the
- smallest thing that fails if the logic breaks: an `assert`-based
--`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no
--fixtures, no per-function suites unless asked. Trivial one-liners need no
--test, YAGNI applies to tests too.
-+`demo()`/`__main__` self-check or one focused test in the repository's existing
-+test infrastructure. Keep required repository checks; add no new framework
-+for this minimum. Trivial one-liners need no extra test, YAGNI applies to tests too.
- 
- ## Boundaries
- 
 diff --git a/skills/ponytail-debt/SKILL.md b/skills/ponytail-debt/SKILL.md
-index d8fab97..db95d06 100644
+index f74a0d2..b09af33 100644
 --- a/skills/ponytail-debt/SKILL.md
 +++ b/skills/ponytail-debt/SKILL.md
-@@ -39,6 +39,6 @@ End with `<N> markers, <M> with no trigger.` Nothing found: `No ponytail: debt.
+@@ -37,6 +37,6 @@ End with `<N> markers, <M> with no trigger.` Nothing found: `No ponytail: debt.
  
  ## Boundaries
  
@@ -368,10 +362,10 @@ index d8fab97..db95d06 100644
 +the repository's CONTRIBUTING.md, not in a second ledger file. One-shot.
 +"stop ponytail-debt" or "normal mode" to revert.
 diff --git a/skills/ponytail-help/SKILL.md b/skills/ponytail-help/SKILL.md
-index b3a3f60..c182e2a 100644
+index 54e6beb..f439a8e 100644
 --- a/skills/ponytail-help/SKILL.md
 +++ b/skills/ponytail-help/SKILL.md
-@@ -32,39 +32,31 @@ Level sticks until changed or session end.
+@@ -31,39 +31,31 @@ Level sticks until changed or session end.
  | **ponytail-gain** | `/ponytail-gain` | Measured-impact scoreboard: less code, less cost, more speed. |
  | **ponytail-help** | `/ponytail-help` | This card. |
  
