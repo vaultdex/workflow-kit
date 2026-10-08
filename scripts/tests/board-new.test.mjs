@@ -37,6 +37,8 @@ test('new checks every required value before creating, reads all values back and
   refused('Status is no --field', ...base, '--field', 'Status=Done');
   refused('--start without a session', ...base, '--start', '--agent', 'claude');
   refused('a session without --start', ...base, '--session', 'S1');
+  refused('a Status the Project does not have', ...base, '--status', 'Nonsense');
+  refused('--status with --start', ...base, '--status', 'Ready', '--start', '--agent', 'claude', '--session', 'S1');
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', requiredFields: ['Zielrelease'] }));
   assert.match(refused('a field the project requires', ...base), /Zielrelease/);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', requiredFields: ['Size'] }));
@@ -58,6 +60,12 @@ test('new checks every required value before creating, reads all values back and
   assert.deepEqual(read('created.json'), { title: 'Titel', body: 'Text', milestone: 4, labels: ['enhancement'] });
   assert.deepEqual(read('stored-values.json'), { F1: 'Backlog', F2: 'Low', F3: 'XS' });
   assert.equal(existsSync(join(checkout, 'comment-writes')), false, 'No claim without --start');
+
+  // --status sets the Project status at creation, without --start (#418).
+  result = run(...base, '--status', 'Ready');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(read('stored-values.json'), { F1: 'Ready', F2: 'Low', F3: 'XS' });
+  assert.equal(existsSync(join(checkout, 'comment-writes')), false, 'No claim with --status');
 
   // A value that does not read back is a failure that names the created issue.
   stored({ milestone: { title: 'other' } });

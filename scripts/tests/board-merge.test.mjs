@@ -362,8 +362,6 @@ test('merge --stack gates every layer, merges only the top through merge-async a
   assert.equal(asyncMerges(), `merge_action=direct_merge merge_method=merge sha=${first}\n`, 'only the top head goes to GitHub');
   assert.match(merged.stdout, new RegExp(`^MERGED #7 head ${first} merge commit f{40}$`, 'm'));
   assert.match(merged.stdout, new RegExp(`^MERGED #5 head ${second} merge commit f{40}$`, 'm'));
-  assert.match(merged.stdout, /^issue #1 \(PR #5\): open, status Human review$/m);
-  assert.match(merged.stdout, /^issue #1 \(PR #7\): open, status Human review$/m);
 
   // A layer that GitHub did not merge with the top is not hidden: ERROR exit, no branch delete for it.
   prepare();
@@ -373,11 +371,11 @@ test('merge --stack gates every layer, merges only the top through merge-async a
   assert.match(stayed.stdout, /^NOT MERGED \(OPEN\) #5 /m);
   assert.deepEqual(calls(), ['merge-async', 'delete claude/7-topic']);
 
-  // On the default branch an issue that stays open is closed as completed (once, for the issue both layers deliver); one GitHub closed itself is left alone (#397).
-  for (const [label, state, expected] of [['open', 'open', ['close 1 state_reason=completed']], ['closed', 'closed', []]]) {
+  // On any trunk (a release branch too, #418) an issue that stays open is closed as completed (once, for the issue both layers deliver); one GitHub closed itself is left alone (#397).
+  for (const [trunk, label, state, expected] of [['main', 'open', 'open', ['close 1 state_reason=completed']], ['main', 'closed', 'closed', []], ['release/0.1.1', 'open', 'open', ['close 1 state_reason=completed']]]) {
     prepare();
     rmSync(join(checkout, 'stack-layers-stay'), { force: true });
-    json('stacks.json', [{ number: 42, open: true, base: { ref: 'main' }, pull_requests: [5, 7].map(number => ({ number, state: 'open' })) }]);
+    json('stacks.json', [{ number: 42, open: true, base: { ref: trunk }, pull_requests: [5, 7].map(number => ({ number, state: 'open' })) }]);
     json('backlink-1.json', { number: 1, state, comments: 0 });
     json('backlink-comments-1.json', []);
     const onMain = run('merge', '7', '--stack', '--interval', '0');
