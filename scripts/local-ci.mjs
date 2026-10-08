@@ -233,7 +233,8 @@ async function main() {
   const root = projectRoot(), gh = externalTool('gh', root), git = externalTool('git', root);
   const exec = (tool, args, options) => execFileSync(tool.file, args, { encoding: 'utf8', env: tool.env, maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'pipe'], ...options });
   const { repository } = loadConfig(root);
-  const dir = join(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()), 'local-ci');
+  // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
+  const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   const ctx = {
     repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000, mergeWaitMs: 10_000, mergeAttempts: 6,
     config: () => loadConfig(root),

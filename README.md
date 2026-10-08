@@ -427,7 +427,7 @@ a check alone does not claim work.
 
 For a project without Actions minutes, `scripts/local-ci.mjs` runs the PR checks on this machine and reports them as
 commit statuses (REST only, no GraphQL points). **The status comes from this script, not from an agent's claim**;
-the log stays in `<git-common-dir>/local-ci/logs`. Run it in Git Bash (commands go through `bash -c`), only for
+the log stays in `<main checkout>-local-ci/logs` (a folder beside the main checkout). Run it in Git Bash (commands go through `bash -c`), only for
 PRs whose code you trust: the checks execute it.
 
 ```sh
@@ -453,7 +453,7 @@ script runs in, so update that checkout to change the checks):
 
 - `paths` use GitHub's rules for `*`, `**` and `!` only (no `?` or `[…]`): in order, a later match wins, `!` takes a file
   back out, `*` stays within a folder, `**` goes below it. A check runs when one changed file of the PR matches.
-- Per PR the script fetches `refs/pull/N/merge` into its own worktree (`<git-common-dir>/local-ci/work`, ignored files such as
+- Per PR the script fetches `refs/pull/N/merge` into its own worktree (`<main checkout>-local-ci/work`; not under `.git`, where Jest finds no tests, ignored files such as
   `node_modules` stay), so `HEAD^1` is the base like in Actions. The commands get `BASE_SHA`, `BASE_REF`, `HEAD_REF` and
   `EVENT=pull_request` and run one after the other until one fails; `timeoutMinutes` limits all commands of a check.
 - Status flow: `local-ci` (all checks of the head) and every selected check go `pending` at once, then `success` or
