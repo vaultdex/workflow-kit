@@ -158,6 +158,11 @@ function api(argv, input, stdout, stderr, exit) {
       stdout(fs.existsSync('activity.json') ? fs.readFileSync('activity.json') : JSON.stringify([{ after: head, timestamp: '2000-01-01T00:00:00Z' }]));
       exit(0);
     }
+    if (parts[3] === 'actions') {
+      // The workflow runs of the head branch (runs.json, by default none).
+      stdout(JSON.stringify({ workflow_runs: fs.existsSync('runs.json') ? JSON.parse(fs.readFileSync('runs.json')) : [] }));
+      exit(0);
+    }
     if (parts[3] === 'pulls' && parts.length === 5) {
       // The PR as REST shows it, derived from pr.json so GraphQL and REST agree. Each read takes the next overlay of pr-rest-reads.json
       // (the last one stays) and applies it to pr.json: a change that becomes visible between two rounds of `wait`. Reads are counted in rest-reads.

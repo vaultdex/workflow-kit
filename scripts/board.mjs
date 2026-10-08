@@ -4,7 +4,8 @@
 // working directory decides the project, and a driver in another project would read and write the wrong board.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { externalTool, takeCwd } from './checkout-root.mjs';
 import { isRateLimited, quotaOf, retryAt, splitResponse, untilText, waitInterval } from './quota.mjs';
@@ -180,13 +181,15 @@ function dependentPrs(branch) {
   assert.ok(Array.isArray(dependents), 'The open PRs on the branch are unreadable');
   return dependents;
 }
-/** A lower stack layer keeps conflicts with its own base: they resolve in the top PR (#405). Read only for a DIRTY PR, so it costs nothing otherwise. */
-const lowerLayer = pr => {
-  if (pr.mergeStateStatus !== 'DIRTY') return false;
-  // An unreadable lookup keeps the conflict as the verdict: a known conflict is never turned into an error.
-  try { return dependentPrs(pr.headRefName).length > 0; } catch { return false; }
+/** A conflict in a lower layer locks the whole native stack, so it is a blocker (#412, undoes #405). This is the order that fixes it; `stack-sync` does it. */
+const stackOrderText = 'merge the base into the lowest layer, then each layer into the next one up (merge, never rebase or force-push); `board.mjs stack-sync TOP` does it for the stack';
+/** The blocker line for conflicts; a PR that has a PR on top of it is a lower layer and gets the order. Read only for a DIRTY PR, an unreadable lookup keeps the plain conflict. */
+const conflictLine = pr => {
+  let lower = false;
+  try { lower = dependentPrs(pr.headRefName).length > 0; } catch { /* the plain verdict stands */ }
+  return `blocker: merge conflicts${lower ? ` in a lower stack layer, which locks the whole stack: ${stackOrderText}` : ''}`;
 };
-const conflicting = issue => projectItem(issue)?.status?.name === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY' && !lowerLayer(openPr(issue));
+const conflicting = issue => projectItem(issue)?.status?.name === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY';
 /** Abandoned: no activity for staleHours, or a Human-review PR with conflicts (it is not mergeable, so nobody finishes it). A claim on such an issue has expired. */
 const isStale = issue => idleMs(issue) > staleHours * 3_600_000 || conflicting(issue);
 
@@ -606,7 +609,7 @@ function sweep() {
       if (projectItem(issue)?.status?.name !== 'Human review') continue;
       const linked = issue.closedByPullRequestsReferences;
       assert.ok(linked.totalCount <= linked.nodes.length, `#${issue.number} has more linked PRs than sweep reads; it would be reported clean`);
-      const pr = linked.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() && !lowerLayer(node));
+      const pr = linked.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
       if (!pr) continue;
       plan ??= resolveOption('Status', 'Automated review');
       // The comment first: a failed comment must not leave an issue out of Human review that nobody was told about.
@@ -1396,15 +1399,26 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     reasons.push('PR is still Draft');
     lines.push(`blocker: PR is still Draft; run board.mjs ready ${pr.number} --local`);
   }
+  // GitHub sometimes starts no pull_request run for a push and keeps the merge state UNKNOWN, so the wait never ends (#412). In a native stack
+  // a conflict in a lower layer causes it. After 10 minutes without a pull_request or workflow_dispatch run on the head that is a blocker with its cause.
+  // Nothing is dispatched: that costs Actions minutes, a person decides.
+  if (!pr.isDraft && pr.mergeStateStatus === 'UNKNOWN' && contexts.nodes.every(isOptionalCheck) && now - headSetAt(pr, pushes()) > 10 * 60_000) {
+    const headRuns = rest(`repos/${project.repository}/actions/runs?head_sha=${pr.headRefOid}&per_page=100`).workflow_runs;
+    assert.ok(Array.isArray(headRuns), 'The workflow runs of the head are unreadable');
+    if (!headRuns.some(run => ['pull_request', 'workflow_dispatch'].includes(run.event))) {
+      failed = true;
+      reasons.push('no CI run on the head');
+      lines.push(`blocker: no pull_request run on the head 10 minutes after the push and the merge state is UNKNOWN; ${readStacks(pr.number).length
+        ? `probably a conflict in a layer of the native stack locks it: ${stackOrderText}`
+        : 'push an empty commit or push the head again'}`);
+    }
+  }
   // Conflicts start no workflow, so the wait would never end; the fix is merging the base now.
   // UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
-  // A lower layer of a stack (another open PR is based on it) conflicts with its own base until the top PR merges it: a note, not a blocker (#405).
-  const lower = !pr.isDraft && lowerLayer(pr);
-  if (lower) lines.push('note: stacked: conflicts resolve in the top PR');
-  else if (pr.mergeStateStatus === 'DIRTY' && !pr.isDraft) {
+  if (pr.mergeStateStatus === 'DIRTY' && !pr.isDraft) {
     failed = true;
     reasons.push('merge conflicts');
-    lines.push('blocker: merge conflicts');
+    lines.push(conflictLine(pr));
   }
   // A known CI failure or conflict is the verdict; later review reads must not turn it into ERROR.
   if (failed) return { done: true, failed, reasons, lines, pr, baseOnly: reasons.every(reason => baseReasons.has(reason)) };
@@ -1553,13 +1567,12 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
       lines.push(`dismissed stale change request by ${login(review.author)}: all threads are resolved`);
     } else lines.push(`blocker: changes requested by ${login(review.author)}`);
   }
-  if (pr.mergeStateStatus === 'DIRTY' && !lower) lines.push('blocker: merge conflicts'); // a Draft returned above
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, reasons, lines, pr, comments, threads, lower };
+  return { done: failed || !pending.length, failed, reasons, lines, pr, comments, threads };
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
@@ -1876,7 +1889,7 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
   }
   // The snapshot's own DIRTY is already a blocker line of reviews(); a DIRTY that GitHub computed during the re-reads is new.
   if (state === 'DIRTY' && result.pr.mergeStateStatus !== 'DIRTY') reasons.push('merge conflicts: resolve them before ' + action);
-  if (!mergeStates.includes(state) && !(state === 'DIRTY' && result.lower)) {
+  if (!mergeStates.includes(state)) {
     if (!reasons.length) {
       console.log('WAITING\nwaiting: PR mergeability is not determined');
       process.exitCode = 3;
@@ -1936,9 +1949,9 @@ function handoff() {
 }
 
 /** The native stacks of PR `number`. No Stacks API (404) means no stack. */
-function readStacks() {
+function readStacks(pull = number) {
   let stacks;
-  try { stacks = rest(`repos/${project.repository}/stacks?pull_request=${number}`); } catch (error) {
+  try { stacks = rest(`repos/${project.repository}/stacks?pull_request=${pull}`); } catch (error) {
     if (!/\b404\b|Not Found/.test(String(error.stderr))) throw error;
     stacks = [];
   }
@@ -1962,8 +1975,8 @@ function layerReasons(layer, viewer) {
   if (threads.length) reasons.push(`has ${threads.length} unresolved review thread${threads.length === 1 ? '' : 's'}`);
   assert.equal(pr.latestOpinionatedReviews.nodes.length, pr.latestOpinionatedReviews.totalCount, 'Not every review decision is readable');
   for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) reasons.push(`has a change request by ${review.author?.login}`);
-  // Below the top, conflicts with the own base resolve when the top merges the layer: a note in merge(), as in handoff (#405).
-  if (pr.mergeStateStatus === 'DIRTY' && layer === number) reasons.push('has merge conflicts');
+  // A conflict in any layer locks the whole stack (#412).
+  if (pr.mergeStateStatus === 'DIRTY') reasons.push(`has merge conflicts, which lock the whole stack: ${stackOrderText}`);
   reasons.push(...selfReviewReasons(pr.bodyHTML, selfReviewChecks()));
   const { nodes, totalCount } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
     closingIssuesReferences(first:100){totalCount nodes{number}}}}}`, { owner, name, number: layer }).repository.pullRequest.closingIssuesReferences;
@@ -2007,6 +2020,44 @@ function stackReasons(viewer) {
 const mergeGate = viewer => finishedPr(number, 'merge', undefined, () => viewer ? stackReasons(viewer) : readStacks()
   .flatMap(({ pull_requests: members = [] }) => members.slice(0, Math.max(0, members.findIndex(member => member.number === number)))
     .filter(member => member.state === 'open').map(member => `PR #${member.number} below it in its stack is still open: merge it first, merging this layer would merge it too`)));
+
+/**
+ * `stack-sync TOP` (#412): from the bottom layer up, merges the base of each layer of TOP's native stack into it and pushes it
+ * (git merge, never a rebase or a force-push). It works in a temporary worktree, so no branch of the caller changes.
+ * A real conflict stops it: the layer and the files are named, the merge stays open in the printed worktree.
+ */
+function stackSync() {
+  const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
+  const stacks = readStacks();
+  if (stacks.length !== 1) return fail(`PR #${number} is ${stacks.length ? 'in several native stacks' : 'not in a native stack'}: stack-sync syncs one stack`);
+  const open = stackMembers(stacks[0]).filter(member => member.state === 'open');
+  if (open.at(-1)?.number !== number) return fail(`PR #${number} is not the top open layer of its stack${open.length ? ` (that is PR #${open.at(-1).number})` : ''}`);
+  const git = externalTool('git', process.cwd(), projectDirectory);
+  const run = (cwd, ...args) => execFileSync(git.file, ['-C', cwd, ...args], { encoding: 'utf8', env: git.env, stdio: 'pipe' }).trim();
+  run(projectDirectory, 'fetch', 'origin');
+  const tree = mkdtempSync(join(tmpdir(), 'stack-sync-'));
+  run(projectDirectory, 'worktree', 'add', '--detach', tree, `origin/${open[0].head.ref}`);
+  let base = `origin/${stacks[0].base.ref}`;
+  let keep = false; // only a conflict leaves the worktree, for its resolution
+  try {
+    for (const layer of open) {
+      run(tree, 'checkout', '--detach', `origin/${layer.head.ref}`);
+      try { run(tree, 'merge', '--no-edit', base); } catch (error) {
+        const files = run(tree, 'diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
+        if (!files.length) throw error;
+        keep = true;
+        return fail(`merging ${base} into PR #${layer.number} (${layer.head.ref}) conflicts in ${filesText(files)}; resolve and commit in ${tree}, push ${layer.head.ref}, then run stack-sync again`);
+      }
+      const synced = run(tree, 'rev-parse', 'HEAD') !== run(tree, 'rev-parse', `origin/${layer.head.ref}`);
+      if (synced) run(tree, 'push', 'origin', `HEAD:refs/heads/${layer.head.ref}`);
+      console.log(`PR #${layer.number} ${layer.head.ref}: ${synced ? 'merged and pushed' : 'already up to date'}`);
+      base = run(tree, 'rev-parse', 'HEAD');
+    }
+    console.log(`DONE stack of PR #${number} is synced; CI starts on the pushed heads`);
+  } finally {
+    if (!keep) run(projectDirectory, 'worktree', 'remove', '--force', tree);
+  }
+}
 
 /**
  * Merge the moved base into the PR branch (update-branch, only if the head is still `head`), then wait until the PR shows the new head.
@@ -2073,7 +2124,6 @@ async function merge() {
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     // Fail before the CI wait when a layer lacks something.
     const reasons = stackReasons(viewer);
-    for (const layer of stackOrder.slice(0, -1)) if (stackLayers.get(layer)?.pr.mergeStateStatus === 'DIRTY') console.log(`note: PR #${layer} stacked: conflicts resolve in the top PR`);
     if (reasons.length) {
       console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
       process.exitCode = 1;
@@ -2432,7 +2482,7 @@ function sub() {
 }
 
 const commands = { next, sweep, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
-  reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
+  reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, 'stack-sync': stackSync, ready, link, body, 'body-replace': bodyReplace };
 const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next [--session ID] | sweep | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | new --from FILE'
@@ -2441,6 +2491,7 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next [--session ID] | sweep 
   + ' | quota-wait [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
   + ' | merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
+  + ' | stack-sync TOP'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // --help (-h) is the one flag that never writes: usage on stdout, success.
@@ -2454,7 +2505,7 @@ const writeArgs = { sweep: { words: 0 }, status: { words: 2 }, priority: { words
   body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
   new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1 } },
   ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1 } },
-  merge: { words: 1, flags: { '--stack': 0, '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } } };
+  merge: { words: 1, flags: { '--stack': 0, '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } }, 'stack-sync': { words: 1 } };
 function refusesArguments() {
   const { words, flags = {} } = writeArgs[command], args = process.argv.slice(3);
   let given = 0;
@@ -2523,7 +2574,7 @@ try {
 } catch (error) {
   console.log = print;
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'quota-wait', 'handoff', 'merge', 'ready', 'link', 'body', 'body-replace', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
+  if (!['check', 'reviews', 'wait', 'quota-wait', 'handoff', 'merge', 'stack-sync', 'ready', 'link', 'body', 'body-replace', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
   console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;

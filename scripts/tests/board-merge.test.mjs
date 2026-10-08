@@ -347,13 +347,12 @@ test('merge --stack gates every layer, merges only the top through merge-async a
   assert.match(moved.stdout, /^blocker: release\/0\.1\.1 gained 2 commits .*`git merge origin\/release\/0\.1\.1`.*`board\.mjs merge 7 --stack`/m);
   assert.deepEqual(calls(), []);
 
-  // A layer below the top conflicts with its own base until the top merges it: a note, no blocker (#405).
+  // A conflict in a layer below the top locks the whole stack: a blocker with the order that fixes it (#412).
   prepare({ lower: layer({ mergeStateStatus: 'DIRTY' }) });
   const dirty = run('merge', '7', '--stack', '--interval', '0');
-  assert.equal(dirty.status, 0, dirty.stdout + dirty.stderr);
-  assert.match(dirty.stdout, /^note: PR #5 stacked: conflicts resolve in the top PR$/m);
-  assert.doesNotMatch(dirty.stdout, /has merge conflicts/);
-  assert.deepEqual(calls(), ['merge-async', 'delete claude/5-lower', 'delete claude/7-topic']);
+  assert.equal(dirty.status, 1, dirty.stdout + dirty.stderr);
+  assert.match(dirty.stdout, /^blocker: PR #5 has merge conflicts, which lock the whole stack: .*stack-sync/m);
+  assert.deepEqual(calls(), []);
 
   // Complete layers: one merge-async of the top head, no plain merge, no update; every layer shows as merged, with its issue and branch.
   prepare();
