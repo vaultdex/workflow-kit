@@ -116,7 +116,8 @@ check again before Human review.
 ## Kit issues from a project worktree
 
 Do not clone the kit elsewhere: the isolation guard rejects git outside your worktree.
-From the project worktree root, run each step as its own command:
+From the project worktree root, run each step as its own command. The isolation guard accepts `git -C` only with the
+literal absolute path (`git -C F:/…/<worktree>/.vendor/workflow-kit …`); a relative path is rejected:
 
 1. `git submodule update --init .vendor/workflow-kit`
 2. `git -C .vendor/workflow-kit fetch origin main`
