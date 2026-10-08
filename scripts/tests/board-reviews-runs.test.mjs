@@ -188,6 +188,17 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   assert.equal(reviews(pr({ contexts: [sonar, local('FAILURE', 'local-ci')] })), 1, 'A red aggregate fails even if its creator is optional');
   assert.equal(reviews(pr({ contexts: [sonar, local('SUCCESS', 'local-ci')] })), 0, 'A successful aggregate completes the review');
   writeFileSync(config, plain);
+  // An Actions check run and a commit status of one name are one check: only the newer decides, the older is a note.
+  const actions = (conclusion, minutes) => ({ ...check('COMPLETED', conclusion), name: 'Repository checks', completedAt: minutesAgo(minutes) });
+  const commitStatus = (state, minutes) => ({ ...local(state, 'Repository checks'), createdAt: minutesAgo(minutes) });
+  const replaced = look(pr({ contexts: [actions('FAILURE', 30), commitStatus('SUCCESS', 3)] }));
+  assert.equal(replaced.status, 0, replaced.stdout + replaced.stderr);
+  assert.match(replaced.stdout, /^note: Repository checks FAILURE as check run is replaced by a newer one of the same name$/m);
+  assert.equal(reviews(pr({ contexts: [commitStatus('SUCCESS', 3), actions('FAILURE', 30)] })), 0, 'The order of the list does not matter');
+  assert.equal(reviews(pr({ contexts: [actions('SUCCESS', 30), commitStatus('FAILURE', 3)] })), 1, 'A newer red status beats an older green check run');
+  assert.equal(reviews(pr({ contexts: [commitStatus('FAILURE', 30), actions('SUCCESS', 3)] })), 0, 'A newer green check run beats an older red status');
+  assert.equal(reviews(pr({ contexts: [actions('FAILURE', 30), { ...actions('SUCCESS', 3), checkSuite: { databaseId: 99 } }] })), 1,
+    'Two check runs of one name never replace each other');
   assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');

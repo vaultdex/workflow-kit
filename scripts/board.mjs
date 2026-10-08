@@ -1102,8 +1102,8 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   reviewThreads(first:100){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:1){nodes{url}}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
-      ...on CheckRun{name status conclusion title summary detailsUrl checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
-      ...on StatusContext{context state description creator{login}}}}}}}}
+      ...on CheckRun{name status conclusion title summary detailsUrl startedAt completedAt checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
+      ...on StatusContext{context state description createdAt creator{login}}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
     requestedReviewer{...on User{login} ...on Bot{login} ...on Team{name}}}}}}}}`;
@@ -1336,7 +1336,16 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     newest.set(jobKey(check), Math.max(newest.get(jobKey(check)) ?? -Infinity, runOf(check)));
   }
   const decisiveRun = check => newestExecuted.get(jobKey(check)) ?? newestSkipped.get(jobKey(check));
-  const current = contexts.nodes.filter(check => !orderable(check) || runOf(check) === decisiveRun(check));
+  const live = contexts.nodes.filter(check => !orderable(check) || runOf(check) === decisiveRun(check));
+  // A check run and a commit status of one name are the same check reported twice (Actions first, local CI later): the newer
+  // kind decides, the older one is only a note. Entries of one kind never replace each other here. No time reads as newest.
+  const labelOf = check => check.name ?? check.context;
+  const stamp = check => Date.parse(check.__typename === 'CheckRun' ? check.completedAt ?? check.startedAt : check.createdAt) || Infinity;
+  const replacedByOtherKind = check => live.some(other => other.__typename !== check.__typename && labelOf(other) === labelOf(check) && stamp(other) > stamp(check));
+  const current = live.filter(check => isOptionalCheck(check) || !replacedByOtherKind(check));
+  for (const check of live.filter(check => !current.includes(check))) {
+    lines.push(`note: ${labelOf(check)} ${check.conclusion ?? check.state} as ${check.__typename === 'CheckRun' ? 'check run' : 'commit status'} is replaced by a newer one of the same name`);
+  }
   if (project.localChecks && !current.some(isLocalCi)) waiting.push({ text: 'check local-ci', since: Infinity });
   for (const check of current.filter(check => orderable(check) && newestSkipped.get(jobKey(check)) > runOf(check))) {
     lines.push(`note: ${check.name} was SKIPPED in a newer run, which proves nothing; run ${runOf(check)} decides`);
