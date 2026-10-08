@@ -1199,9 +1199,7 @@ let gate = project;
 let optional;
 function useBaseSettings(pr) {
   assert.ok(pr.baseRefName, 'The PR base is not readable');
-  const ref = `repos/${project.repository}/contents/.github/workflow-project.json?ref=${encodeURIComponent(pr.baseRefName)}`;
-  let file;
-  try { file = rest(ref); } catch (error) { throw new Error(`.github/workflow-project.json is not readable on ${pr.baseRefName}: ${String(error.stderr || error.message).trim()}`); }
+  const file = rest(`repos/${project.repository}/contents/.github/workflow-project.json?ref=${encodeURIComponent(pr.baseRefName)}`);
   assert.equal(file?.encoding, 'base64', `.github/workflow-project.json on ${pr.baseRefName} is unreadable`);
   const base = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
   gate = { ...project, ...Object.fromEntries(['localChecks', 'awaitApps', 'optionalReviewers', 'updateBranchChecks'].map(key => [key, base[key]])) };
@@ -1223,7 +1221,7 @@ const updateBranchChecks = () => {
   assert.ok(Array.isArray(list) && list.every(name => typeof name === 'string' && name.trim()), 'updateBranchChecks must be a list of non-empty check names');
   return new Set(list);
 };
-const isOptional =name => (optional ??= optionalReviewers()).has(reviewerKey(name));
+const isOptional = name => (optional ??= optionalReviewers()).has(reviewerKey(name));
 const isLocalCi = check => check.__typename === 'StatusContext' && check.context === 'local-ci';
 const isOptionalCheck = check => !(gate.localChecks && isLocalCi(check)) && isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
