@@ -464,8 +464,10 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   until every app in `awaitApps` has a finished check run on its head and SonarCloud counts 0 open issues for the PR
   (`api/issues/search?…&resolved=false` with `SONAR_TOKEN`; without a token, the "N New issues" count in the check's summary).
   The project key comes from the Sonar check's link (as in `board.mjs`), so no `sonar-project.properties` is needed.
-  Meanwhile `local-ci` is `pending` with the reason ("wartet auf sonarqubecloud", "3 Sonar-Befunde offen"), posted once per head
-  and reason. Without the setting nothing changes. `local-ci.mjs PR` by hand does not wait.
+  A missing or skipped Sonar analysis does not count as finished, and neither does a failed read of the setting (the fetch of the base branch).
+  Meanwhile `local-ci` is `pending` with the reason ("wartet auf sonarqubecloud", "3 Sonar-Befunde offen", "Wartebedingung nicht lesbar"), posted once per head
+  and reason. The same wait applies to a new head that arrives while a run is aborted by a push: the old run ends, the new head waits for the next round.
+  Without the setting nothing changes. `local-ci.mjs PR` by hand does not wait.
 - `riskPaths` (list, same rules as `paths`, next to `checks` in the `localChecks` file) and `"slow": true` on a check: a slow check
   selected by its `paths` runs only when a changed file matches `riskPaths`; otherwise it reports `success` with
   "übersprungen: risikoarm" and does not start. Without `riskPaths` slow checks always run (nothing changes).
