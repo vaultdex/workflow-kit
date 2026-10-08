@@ -2198,6 +2198,7 @@ async function merge() {
   assert.equal(state, 'MERGED', `Merge read-back shows #${number} as ${state}${asynchronous ? '; merge-async was accepted and may still land: read the PR before merging again' : ''}`);
   console.log(`MERGED #${number} head ${headRefOid} merge commit ${mergeCommit?.oid}`);
   // The layers below: GitHub marks each as merged with the top; one line per layer, its issues and head branch (the top's goes below).
+  let defaultBranch;
   for (const layer of stack ? stackOrder : []) {
     const { pr, issues } = stackLayers.get(layer);
     if (layer !== number) {
@@ -2206,12 +2207,25 @@ async function merge() {
       if (lower.state !== 'MERGED') process.exitCode = 2;
       else dropBranch(pr);
     }
-    // Issues close with the merge into the default branch; behind a release branch they stay open until the release.
+    // Behind a release branch the issues stay open until the release (the project's workflow closes them). On the default branch GitHub should close them
+    // with the merge; a layer's issue that is still open after a short re-read (#397) is closed here, with a pointer to the merged PR.
     for (const issueNumber of issues) {
       try {
-        const issue = readIssue(false, issueNumber);
-        console.log(`issue #${issueNumber} (PR #${layer}): ${issue.state.toLowerCase()}, status ${projectItem(issue)?.status?.name ?? 'unset'}`);
-      } catch (error) { console.log(`note: issue #${issueNumber} (PR #${layer}) not read (${String(error.stderr || error.message).trim()})`); }
+        if (stackTrunk !== (defaultBranch ??= rest(`repos/${project.repository}`).default_branch)) {
+          const issue = readIssue(false, issueNumber);
+          console.log(`issue #${issueNumber} (PR #${layer}): ${issue.state.toLowerCase()}, status ${projectItem(issue)?.status?.name ?? 'unset'}`);
+          continue;
+        }
+        const path = `repos/${project.repository}/issues/${issueNumber}`;
+        let open;
+        for (let read = 1; (open = rest(path).state !== 'closed') && read < 5; read++) sleep(numberOption('--interval', 3));
+        if (open) {
+          execFileSync(gh.file, ['api', `${path}/comments`, '-X', 'POST', '-F', 'body=@-'],
+            { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `Geschlossen von \`board.mjs merge --stack\`: PR #${layer} ist in ${stackTrunk} gemergt, GitHub hat das Issue nicht selbst geschlossen.\n` });
+          execFileSync(gh.file, ['api', path, '-X', 'PATCH', '-f', 'state=closed', '-f', 'state_reason=completed'], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
+        }
+        console.log(`issue #${issueNumber} (PR #${layer}): closed`);
+      } catch (error) { console.log(`note: issue #${issueNumber} (PR #${layer}) not handled (${String(error.stderr || error.message).trim()})`); }
     }
   }
   dropBranch(result.pr);

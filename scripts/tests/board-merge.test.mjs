@@ -372,4 +372,19 @@ test('merge --stack gates every layer, merges only the top through merge-async a
   assert.equal(stayed.status, 2, stayed.stdout + stayed.stderr);
   assert.match(stayed.stdout, /^NOT MERGED \(OPEN\) #5 /m);
   assert.deepEqual(calls(), ['merge-async', 'delete claude/7-topic']);
+
+  // On the default branch an issue that stays open is closed as completed (once, for the issue both layers deliver); one GitHub closed itself is left alone (#397).
+  for (const [label, state, expected] of [['open', 'open', ['close 1 state_reason=completed']], ['closed', 'closed', []]]) {
+    prepare();
+    rmSync(join(checkout, 'stack-layers-stay'), { force: true });
+    json('stacks.json', [{ number: 42, open: true, base: { ref: 'main' }, pull_requests: [5, 7].map(number => ({ number, state: 'open' })) }]);
+    json('backlink-1.json', { number: 1, state, comments: 0 });
+    json('backlink-comments-1.json', []);
+    const onMain = run('merge', '7', '--stack', '--interval', '0');
+    assert.equal(onMain.status, 0, `${label}: ${onMain.stdout}${onMain.stderr}`);
+    assert.match(onMain.stdout, /^issue #1 \(PR #5\): closed$/m, label);
+    assert.match(onMain.stdout, /^issue #1 \(PR #7\): closed$/m, label);
+    assert.deepEqual(calls().filter(call => call.startsWith('close')), expected, label);
+    assert.equal(JSON.parse(readFileSync(join(checkout, 'backlink-comments-1.json'), 'utf8')).length, expected.length, `${label}: one comment per close`);
+  }
 });
