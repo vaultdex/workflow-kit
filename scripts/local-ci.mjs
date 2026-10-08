@@ -120,6 +120,7 @@ export async function checkPullRequest(ctx, pr) {
       if (now.head.sha !== sha || now.state !== 'open') { state.aborted = now; killTree(state.child); }
     } catch { /* GitHub nicht erreichbar: die Prüfung läuft weiter */ }
   }, ctx.pollMs);
+  const newHead = () => state.aborted?.state === 'open' ? state.aborted : null;
   let ok = false;
   try {
     report(AGGREGATE, 'pending', `Prüfung läuft auf ${host}`);
@@ -129,8 +130,8 @@ export async function checkPullRequest(ctx, pr) {
       files = changed;
       env = { ...process.env, BASE_SHA: base, BASE_REF: pr.base.ref, HEAD_REF: pr.head.ref, EVENT: 'pull_request' };
     } catch (error) {
-      report(AGGREGATE, 'failure', error.message);
-      return { ok, next: null };
+      if (!state.aborted) report(AGGREGATE, 'failure', error.message); // sonst schließt finally den Status; der neue Head folgt
+      return { ok, next: newHead() };
     }
     const selected = select(config.checks, files);
     if (!selected.length) {
@@ -143,6 +144,7 @@ export async function checkPullRequest(ctx, pr) {
       const log = join(ctx.logs, `pr${pr.number}-${sha.slice(0, 7)}-${name.replace(/[^\w.-]+/g, '-')}.log`), begun = Date.now(), end = begun + minutes * 60_000;
       writeFileSync(log, '');
       for (const [index, command] of commands.entries()) {
+        if (state.aborted) return null; // der Abbruch kam zwischen zwei Befehlen, als kein Prozess lief
         appendFileSync(log, `$ ${command}\n`);
         const { code, timedOut } = await shell(command, { cwd: work, env, log, timeoutMs: end - Date.now(), state });
         if (state.aborted) return null;
@@ -169,7 +171,7 @@ export async function checkPullRequest(ctx, pr) {
     clearInterval(watcher);
     for (const context of [...open]) report(context, 'error', state.aborted ? 'Abgebrochen: neuer Head oder PR geschlossen' : 'Abgebrochen: Fehler im Läufer');
   }
-  return { ok, next: state.aborted?.state === 'open' ? state.aborted : null };
+  return { ok, next: newHead() };
 }
 
 /** Prüft den PR und, wenn währenddessen ein neuer Head kommt, auch diesen. */
@@ -210,7 +212,7 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
   const heads = new Map(), done = new Map();
   for (let round = 0; round < rounds; round++) {
     try {
-      await pushed(ctx, heads);
+      await pushed(ctx, heads).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
       for (const pr of ctx.api('GET', 'pulls?state=open&per_page=100').filter(pr => !pr.draft && pr.head.repo?.full_name === ctx.repository)) {
         if (done.get(pr.number) === pr.head.sha || finished(ctx, pr.head.sha)) continue;
         done.set(pr.number, pr.head.sha); // ponytail: ein Läuferfehler wiederholt den Head nicht; ein neuer Push oder `local-ci.mjs PR` prüft erneut

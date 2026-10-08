@@ -451,15 +451,16 @@ script runs in, so update that checkout to change the checks):
 }
 ```
 
-- `paths` work like GitHub's: in order, a later match wins, `!` takes a file back out, `*` stays within a folder,
-  `**` goes below it. A check runs when one changed file of the PR matches.
+- `paths` use GitHub's rules for `*`, `**` and `!` only (no `?` or `[…]`): in order, a later match wins, `!` takes a file
+  back out, `*` stays within a folder, `**` goes below it. A check runs when one changed file of the PR matches.
 - Per PR the script fetches `refs/pull/N/merge` into its own worktree (`<git-common-dir>/local-ci/work`, ignored files such as
   `node_modules` stay), so `HEAD^1` is the base like in Actions. The commands get `BASE_SHA`, `BASE_REF`, `HEAD_REF` and
   `EVENT=pull_request` and run one after the other until one fails; `timeoutMinutes` limits all commands of a check.
 - Status flow: `local-ci` (all checks of the head) and every selected check go `pending` at once, then `success` or
   `failure` with duration and host or the first error line. A check no changed file selects gets **no** status;
   `local-ci` then says so, which is what `board.mjs` needs to stop waiting for the "first CI check".
-- `setup` runs once per PR before the selected checks (not at all when none is selected); a failed setup fails them.
+- `setup` runs once per PR before the selected checks (not at all when none is selected, 60 minutes at most); a failed setup fails them.
+- Stopping the runner by hand (Ctrl+C) leaves the statuses of the running head `pending`; the next `local-ci.mjs PR`, or `--watch` after a restart, runs that head again.
 - `push` runs in the project checkout whenever `main` or a `release/*` branch moved while `--watch` runs, with
   `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
 - `board.mjs reviews`, `wait`, `handoff` and `merge` read these statuses like check runs: `pending` waits, `failure` and
