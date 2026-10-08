@@ -1089,7 +1089,7 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
   reviewThreads(first:100){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:1){nodes{url}}}}
   commits(last:1){nodes{commit{oid committedDate checkSuites(first:100){totalCount nodes{createdAt status conclusion app{slug} workflowRun{databaseId workflow{id}} checkRuns(first:1){totalCount}}}
     statusCheckRollup{contexts(first:100){totalCount nodes{__typename
-      ...on CheckRun{name status conclusion title detailsUrl checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
+      ...on CheckRun{name status conclusion title summary detailsUrl checkSuite{databaseId createdAt app{slug} workflowRun{databaseId event workflow{id name}}}}
       ...on StatusContext{context state description creator{login}}}}}}}}
   reviewRequests(first:100){totalCount nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
   requestEvents:timelineItems(last:100,itemTypes:[REVIEW_REQUESTED_EVENT]){totalCount nodes{...on ReviewRequestedEvent{createdAt
@@ -1207,15 +1207,19 @@ const sonarHosts = ['https://sonarcloud.io', 'https://sonarqube.us'];
 const sonarListed = 10; // findings printed per analysis; the count says how many more
 /**
  * OPEN and CONFIRMED issues of the pull request analysis a SonarCloud check run points at. The anonymous API reports 0
- * for private projects, so a missing token or a failed read throws (never "clean"). Sync like the other reads: the
- * request runs in a child process.
+ * for private projects, so a failed read throws (never "clean"). Without a token the count comes from the check
+ * run's summary instead (total null when unreadable). Sync like the other reads: the request runs in a child process.
  */
-function sonarIssues(detailsUrl, prNumber) {
+function sonarIssues(detailsUrl, prNumber, summary) {
   const target = new URL(detailsUrl ?? 'invalid:');
   const key = target.searchParams.get('id');
   assert.ok(sonarHosts.includes(target.origin) && key && target.searchParams.get('pullRequest') === String(prNumber),
     `The SonarCloud check does not link PR #${prNumber}'s analysis (${detailsUrl}); open issues are unreadable`);
-  assert.ok(process.env.SONAR_TOKEN, 'Set SONAR_TOKEN: without it the Sonar API reports 0 issues for private projects, so open issues are unreadable');
+  if (!process.env.SONAR_TOKEN) {
+    // The check run's own summary names the count ("[0 New issues](…)"); only that is a readable number, else total is null.
+    const count = /\[(\d+) New issues?\]/.exec(summary ?? '')?.[1];
+    return { total: count === undefined ? null : Number(count), lines: count > 0 ? [`sonar: list them with SONAR_TOKEN set, or at ${target.href}`] : [] };
+  }
   const api = new URL('/api/issues/search', target.origin);
   api.search = new URLSearchParams({ componentKeys: key, pullRequest: String(prNumber), issueStatuses: 'OPEN,CONFIRMED', ps: String(sonarListed) });
   const body = execFileSync(process.execPath, ['--input-type=module', '-e',
@@ -1470,7 +1474,11 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final; a skipped check ran no analysis.
   for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
-    const { total: open, lines: found } = sonarIssues(check.detailsUrl, pr.number);
+    const { total: open, lines: found } = sonarIssues(check.detailsUrl, pr.number, check.summary);
+    if (open === null) {
+      lines.push('blocker: the Sonar issue count is unreadable: SONAR_TOKEN is not set and the SonarCloud check summary has no "N New issues"; set SONAR_TOKEN (README, Board commands) and run handoff again');
+      continue;
+    }
     lines.push(`sonar: ${open} open issue${open === 1 ? '' : 's'}`, ...found);
     if (open) lines.push(`blocker: ${open} open Sonar issue${open === 1 ? '' : 's'} on this head; fix them or justify each as a false positive`);
   }
@@ -1765,7 +1773,7 @@ function handoffIssueReasons(issue, viewer, reviewedHead, currentPrNumber) {
   }
   if (!['Automated review', 'Human review'].includes(status)) reasons.push(`status is ${status ?? 'unset'}: when the work is done, run board.mjs status ISSUE "Automated review" PR, then post a new handoff comment for the current head`);
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
-    reasons.push('the issue is not assigned to the authenticated driver');
+    reasons.push(`the issue is not assigned to the authenticated driver: gh issue edit ${issue.number} --repo ${project.repository} --add-assignee "@me"`);
   }
   return reasons;
 }
