@@ -34,6 +34,9 @@ test('die Sperrdatei lässt nur einen Läufer zu und übernimmt die eines toten 
   lock(file)();
 });
 
+/** Im Arbeitsordner: BASE_SHA und HEAD^1 sind beide genau der aktuelle Stand von origin/main (der Fetch des Läufers hat ihn nachgezogen). */
+const onBase = 'test "$BASE_SHA" = "$(git rev-parse refs/remotes/origin/main)" && test "$(git rev-parse HEAD^1)" = "$BASE_SHA"';
+
 /** Ein Projekt mit Origin, PR 1 (Branch feature ändert backend/x.txt, bei `prConfig` auch die Prüfliste) und dem Head unter refs/pull/1/head. */
 function fixture(t, config, prConfig) {
   const dir = temporary(t, 'local ci ');
@@ -85,7 +88,7 @@ function fixture(t, config, prConfig) {
 
 test('wählt nach den geänderten Dateien, meldet pending vor dem Ergebnis und gibt die Umgebung der Actions-CI weiter', async t => {
   const f = fixture(t, { setup: [], checks: [] });
-  const env = 'test "$EVENT" = pull_request && test "$BASE_SHA" = "$(git rev-parse HEAD^1)" && test "$HEAD_REF" = feature && test "$BASE_REF" = main';
+  const env = `test "$EVENT" = pull_request && ${onBase} && test "$HEAD_REF" = feature && test "$BASE_REF" = main`;
   f.publish({ checks: [
     { context: 'Backend', paths: ['backend/**'], run: [env, 'echo fein'], timeoutMinutes: 1 },
     { context: 'Broken', paths: ['**', '!frontend/**'], run: ['echo "kaputt: Fehler 7" >&2; exit 3', 'echo nie'], timeoutMinutes: 1 },
@@ -125,7 +128,7 @@ test('bewegt sich der Ziel-Branch, prüft watch den offenen PR ohne neuen Push g
   const ctx = { ...f.ctx, pollMs: 1 }, api = ctx.api;
   let moved = false;
   ctx.api = (method, path, fields) => {
-    if (path.startsWith('pulls?') && f.posts.length && !moved) { moved = true; f.publish({ checks: [check('Neu', 'test "$BASE_SHA" = "$(git rev-parse HEAD^1)" && touch neu')] }); }
+    if (path.startsWith('pulls?') && f.posts.length && !moved) { moved = true; f.publish({ checks: [check('Neu', `${onBase} && touch neu`)] }); }
     return api(method, path, fields);
   };
   await watch(ctx, { rounds: 3 });

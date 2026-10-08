@@ -112,16 +112,18 @@ async function checkout(ctx, pr) {
     git(root, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
     head = git(root, 'rev-parse', 'FETCH_HEAD');
   } catch { throw fail(`origin/${branch} oder refs/pull/${pr.number}/head ist nicht abrufbar`); }
-  if (head !== pr.head.sha) throw fail('Der Head des PRs hat sich bewegt');
+  if (head !== pr.head.sha) throw Object.assign(fail('Der Head des PRs hat sich bewegt'), { moved: true }); // kein Fehler des PRs: der nächste Poll sieht den neuen Head
   if (existsSync(join(work, '.git'))) git(work, 'checkout', '--quiet', '--detach', '--force', base);
   else { mkdirSync(dirname(work), { recursive: true }); git(root, 'worktree', 'prune'); git(root, 'worktree', 'add', '--quiet', '--detach', work, base); }
   git(work, 'clean', '-ffdxq'); // auch Ignoriertes (node_modules) und verschachtelte Repos: der Ordner ist genau der PR-Stand, das Setup stellt Abhängigkeiten wieder her
   try {
-    // ohne Hooks (ein nie angelegter hooksPath), feste Identität unabhängig von der Git-Konfiguration des Rechners
-    git(work, '-c', `core.hooksPath=${join(dirname(work), 'keine-hooks')}`, '-c', 'user.name=local-ci', '-c', 'user.email=local-ci@localhost', 'merge', '--no-ff', '--quiet', '-m', `Merge PR ${pr.number} in ${branch}`, head);
-  } catch {
+    // ohne Hooks und Signatur, feste Identität unabhängig von der Git-Konfiguration des Rechners
+    git(work, '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=local-ci', '-c', 'user.email=local-ci@localhost', 'merge', '--no-ff', '--quiet', '-m', `Merge PR ${pr.number} in ${branch}`, head);
+  } catch (error) {
+    const conflicted = git(work, 'diff', '--name-only', '--diff-filter=U');
     try { git(work, 'merge', '--abort'); } catch { /* kein Merge im Gang */ }
-    throw fail(`Konflikt mit ${branch}`);
+    // nur ein echter Konflikt (nicht zusammengeführte Pfade) heißt so; jeder andere Fehler nennt seine erste Zeile
+    throw fail(conflicted ? `Konflikt mit ${branch}` : `Merge fehlgeschlagen: ${String(error.stderr || error.stdout || error.message).split(/\r?\n/).find(line => line.trim())?.trim()}`);
   }
   return { base, files: git(work, 'diff', '--name-only', '-z', base, 'HEAD').split('\0').filter(Boolean) };
 }
@@ -147,7 +149,7 @@ export async function checkPullRequest(ctx, pr) {
     } catch { /* GitHub nicht erreichbar: die Prüfung läuft weiter */ }
   }, ctx.pollMs);
   const newHead = () => state.aborted?.state === 'open' ? state.aborted : null;
-  let ok = false;
+  let ok = false, moved = false;
   try {
     report(AGGREGATE, 'pending', `Prüfung läuft auf ${host}`);
     let config, env, files, base;
@@ -158,7 +160,8 @@ export async function checkPullRequest(ctx, pr) {
       env = { ...process.env, BASE_SHA: base, BASE_REF: pr.base.ref, HEAD_REF: pr.head.ref, EVENT: 'pull_request' };
     } catch (error) {
       base ??= error.base;
-      if (!state.aborted) aggregate('failure', error.message); // sonst schließt finally den Status; der neue Head folgt
+      if (error.moved) moved = true; // finally schließt den Status ohne rotes Ergebnis
+      else if (!state.aborted) aggregate('failure', error.message); // sonst schließt finally den Status; der neue Head folgt
       return { ok, next: newHead() };
     }
     const selected = select(config.checks, files);
@@ -197,7 +200,7 @@ export async function checkPullRequest(ctx, pr) {
     }
   } finally {
     clearInterval(watcher);
-    for (const context of [...open]) report(context, 'error', state.aborted ? 'Abgebrochen: neuer Head oder PR geschlossen' : 'Abgebrochen: Fehler im Läufer');
+    for (const context of [...open]) report(context, 'error', state.aborted || moved ? 'Abgebrochen: neuer Head oder PR geschlossen' : 'Abgebrochen: Fehler im Läufer');
   }
   return { ok, next: newHead() };
 }
@@ -249,7 +252,10 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
       await pushed(ctx, heads).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
       const bases = new Map(); // aktueller SHA je Ziel-Branch, einmal pro Runde
       for (const pr of ctx.api('GET', 'pulls?state=open&per_page=100').filter(pr => !pr.draft && pr.head.repo?.full_name === ctx.repository)) {
-        if (!bases.has(pr.base.ref)) bases.set(pr.base.ref, ctx.api('GET', `git/ref/heads/${pr.base.ref}`).object.sha);
+        try { if (!bases.has(pr.base.ref)) bases.set(pr.base.ref, ctx.api('GET', `git/ref/heads/${pr.base.ref}`).object.sha); } catch (error) {
+          console.error(`#${pr.number}: Basis ${pr.base.ref} nicht lesbar, übersprungen (${error.message.split('\n')[0]})`); // 404 oder Rate-Limit hält die übrigen PRs nicht auf
+          continue;
+        }
         const base = bases.get(pr.base.ref), key = `${pr.head.sha} ${base}`;
         if (done.get(pr.number) === key || finished(ctx, pr.head.sha, base)) continue;
         done.set(pr.number, key); // ponytail: ein Läuferfehler wiederholt Head und Basis nicht; ein neuer Push, eine neue Basis oder `local-ci.mjs PR` prüft erneut
