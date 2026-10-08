@@ -329,7 +329,7 @@ and then work in that directory, their relative paths (changed files given to `a
   keeps waiting (`waiting: PR still shows head …`) while an open PR still reports another head:
   right after a push GitHub serves the previous head for a moment, and a plain `wait` would end `DONE` for it.
   A head that never matches waits on until stopped by hand. `wait PR --merged` waits for the human merge
-  and ends `FAILED` if the PR is closed unmerged. After `--max-minutes N` (default 9, `0` = no limit) `wait` stops
+  and ends `FAILED: <reasons>` (e.g. `FAILED: check Frontend FAILURE; merge conflicts`) if a check is red or the PR is closed unmerged. After `--max-minutes N` (default 9, `0` = no limit) `wait` stops
   unfinished with exit 4 and the line `still waiting: call wait again`, so it ends before the 10-minute limit of an agent's
   shell tool; a quota pause that would end after that time is not slept through, the line then names the reset
   (`still waiting: call wait again after <time> (GitHub quota pause)`). Call `wait` again on exit 4. Analyzers that create their
