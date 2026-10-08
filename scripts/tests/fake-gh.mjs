@@ -36,8 +36,15 @@ function api(argv, input, stdout, stderr, exit) {
       exit(0);
     }
     if (parts[3] === 'issues' && parts.length === 5 && argv.includes('PATCH')) {
-      // A body write; body-overwritten is what another session writes right after it.
       const issue = JSON.parse(fs.readFileSync(backlink));
+      if (argv.includes('state=closed')) {
+        // `merge --stack` closing an issue: the reason is kept, the call is listed.
+        fs.appendFileSync('calls', `close ${parts[4]} ${argv.find(arg => arg.startsWith('state_reason='))}\n`);
+        fs.writeFileSync(backlink, JSON.stringify({ ...issue, state: 'closed' }));
+        stdout('{}');
+        exit(0);
+      }
+      // A body write; body-overwritten is what another session writes right after it.
       // Like gh: body=@- is stdin, body=@<path> a file.
       const source = argv.find(arg => arg.startsWith('body=@')).slice(6);
       issue.body = (fs.existsSync('body-overwritten') ? fs.readFileSync('body-overwritten', 'utf8') : source === '-' ? input : fs.readFileSync(source, 'utf8'));

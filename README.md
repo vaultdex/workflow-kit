@@ -333,8 +333,8 @@ and then work in that directory, their relative paths (changed files given to `a
   A trunk that gained commits under files the stack changes ends `FAILED` with the manual way (`git merge origin/<trunk>` in the top layer,
   push once, run again), because `update-branch` of the top would only merge the layer below. The output has a `MERGED #N …` line per
   layer (`NOT MERGED (STATE) #N …` and exit 2 when GitHub left one open), `issue #N (PR #L): STATE, status S` per delivered issue
-  (merge writes no status: the issue closes with the merge into the default branch, behind a release branch it stays open until the
-  release). After the merge it deletes the head branch (every layer's with `--stack`, lower layers first; `branch deleted: …`) unless the repository's setting "Automatically delete head branches" does it,
+  (merge writes no status: behind a release branch the issue stays open until the release). On a stack based on the default branch the
+  issue is read again for about 15 s; one that is still open is closed as completed with a comment naming the merged PR (`issue #N (PR #L): closed`, #397). After the merge it deletes the head branch (every layer's with `--stack`, lower layers first; `branch deleted: …`) unless the repository's setting "Automatically delete head branches" does it,
   the branch is not of this repository, is the default branch or is the base of another open PR (a stack: GitHub would close
   that PR); it prints `branch kept: …` with the reason. A failed or already done delete is a `note:` or `branch gone:` line,
   never an error of the merge. Without `--stack` it does not read the issue, claims or the [handoff comment](#handoff-comment).
