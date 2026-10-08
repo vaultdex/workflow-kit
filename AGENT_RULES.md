@@ -182,6 +182,14 @@ Run [board commands](README.md#board-commands) in the project with authenticated
   checkout differs). Run search and Explore subagents in the foreground
   (`run_in_background: false`) so exactly one report returns.
 - Every push restarts CI and reviews: finish fixes and formatting before pushing.
+- Cost is turns × context size, since each turn rereads the whole context. Coordinating
+  sessions keep their context small and take few turns.
+- Message another session or agent only when the recipient must act: no status
+  updates or acknowledgements, and bundle several points into one message.
+- Read files in excerpts (search, line range) and trim command output. Driver and
+  subagent reports stay within about 8 lines.
+- If the account owner sets a usage limit, check it before starting each new agent
+  and start nothing new once it is reached.
 - Native stack depth has no local maximum. Use native stacks to continue dependent work
   at the current stack tip. Do not create
   artificial wait or summary issues solely for stack depth or merge-queue progress;
