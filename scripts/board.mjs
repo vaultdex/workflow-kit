@@ -1960,7 +1960,8 @@ function layerReasons(layer, viewer) {
   if (threads.length) reasons.push(`has ${threads.length} unresolved review thread${threads.length === 1 ? '' : 's'}`);
   assert.equal(pr.latestOpinionatedReviews.nodes.length, pr.latestOpinionatedReviews.totalCount, 'Not every review decision is readable');
   for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) reasons.push(`has a change request by ${review.author?.login}`);
-  if (pr.mergeStateStatus === 'DIRTY') reasons.push('has merge conflicts');
+  // Below the top, conflicts with the own base resolve when the top merges the layer: a note in merge(), as in handoff (#405).
+  if (pr.mergeStateStatus === 'DIRTY' && layer === number) reasons.push('has merge conflicts');
   reasons.push(...selfReviewReasons(pr.bodyHTML, selfReviewChecks()));
   const { nodes, totalCount } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
     closingIssuesReferences(first:100){totalCount nodes{number}}}}}`, { owner, name, number: layer }).repository.pullRequest.closingIssuesReferences;
@@ -2070,6 +2071,7 @@ async function merge() {
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     // Fail before the CI wait when a layer lacks something.
     const reasons = stackReasons(viewer);
+    for (const layer of stackOrder.slice(0, -1)) if (stackLayers.get(layer)?.pr.mergeStateStatus === 'DIRTY') console.log(`note: PR #${layer} stacked: conflicts resolve in the top PR`);
     if (reasons.length) {
       console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
       process.exitCode = 1;
