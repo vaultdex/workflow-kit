@@ -12,10 +12,19 @@ class Exit extends Error {
 function api(argv, input, stdout, stderr, exit) {
   const path = argv[2] ?? '';
   if (!path.startsWith('graphql')) {
-    if (fs.existsSync('fail') || fs.existsSync('fail-rest')) exit(1);
+    if (fs.existsSync('fail') || (fs.existsSync('fail-rest') && !path.includes('/contents/'))) exit(1);
     // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
     const parts = path.split('?')[0].split('/');
     const backlink = 'backlink-' + parts[4] + '.json';
+    if (parts[3] === 'contents') {
+      // The project settings on the PR base: base-project.json (a branch ahead of the checkout), else the checkout's own file; base-missing: not there.
+      // Not hit by fail-rest, so the tests of the reads after the settings keep their verdict. The ref asked for is kept.
+      fs.appendFileSync('contents-refs', new URLSearchParams(path.split('?')[1]).get('ref') + '\n');
+      if (fs.existsSync('base-missing')) { stderr('gh: Not Found (HTTP 404)\n'); exit(1); }
+      const settings = fs.readFileSync(fs.existsSync('base-project.json') ? 'base-project.json' : '.github/workflow-project.json');
+      stdout(JSON.stringify({ encoding: 'base64', content: settings.toString('base64') }));
+      exit(0);
+    }
     if (parts[3] === 'issues' && parts.length === 4 && argv.includes('POST')) {
       // A new issue: the request is kept for the test (created.json the last one, creates.json all of them), the answer is prepared by it:
       // create-response.json for every call, or create-responses.json, one after the other.
@@ -175,7 +184,7 @@ function api(argv, input, stdout, stderr, exit) {
       }
       const pr = JSON.parse(fs.readFileSync('pr.json'));
       stdout(JSON.stringify({ number: pr.number, state: pr.state === 'OPEN' ? 'open' : 'closed', merged: pr.state === 'MERGED', draft: pr.isDraft, updated_at: pr.updatedAt ?? 'u',
-        mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid } }));
+        mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid }, base: { ref: pr.baseRefName } }));
       exit(0);
     }
     if (parts[3] === 'commits' && ['check-runs', 'check-suites', 'status'].includes(parts[5])) {

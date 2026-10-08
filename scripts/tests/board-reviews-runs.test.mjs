@@ -248,3 +248,28 @@ test('reviews names the cause of a head without pull_request runs and an UNKNOWN
   assert.equal(stuckAt(30).status, 3, 'A head with a run keeps waiting');
   assert.equal(look({ ...pr({ contexts: [check('IN_PROGRESS')] }), mergeStateStatus: 'UNKNOWN' }).status, 3, 'Running CI keeps waiting');
 });
+
+test('the review gate takes localChecks and the reviewer lists from the PR base, not from the checkout (#448)', t => {
+  const { checkout, runBriefly, look, reviews, pr, check } = reviewsFixture(t);
+  const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8'), base = join(checkout, 'base-project.json');
+  const local = state => ({ __typename: 'StatusContext', context: 'local-ci', state, description: '12 s auf PC', creator: { login: 'maintainer' } });
+  const withLocal = { ...JSON.parse(plain), localChecks: '.github/local-checks.json' };
+  // A stale checkout without localChecks, the base has them: green CI alone is not enough.
+  writeFileSync(base, JSON.stringify(withLocal));
+  const stale = look(pr());
+  assert.equal(stale.status, 3, stale.stdout + stale.stderr);
+  assert.match(stale.stdout, /^waiting: check local-ci$/m);
+  assert.equal(readFileSync(join(checkout, 'contents-refs'), 'utf8').trim(), 'release/0.1.1', 'The settings are read from the base of the PR');
+  assert.match(runBriefly(3000, 'wait', '7'), /^WAITING\nwaiting: check local-ci/, 'wait, handoff and merge use the same look');
+  assert.equal(reviews(pr({ contexts: [check('COMPLETED'), local('SUCCESS')] })), 0, 'The aggregate on the head completes the review');
+  // The reviewer list comes from the base as well.
+  writeFileSync(base, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: 'coderabbitai' }));
+  assert.equal(reviews(pr()), 2, 'A malformed list on the base is an error');
+  // The other way round: the base dropped localChecks, the stale checkout still has them.
+  writeFileSync(config, JSON.stringify(withLocal));
+  writeFileSync(base, plain);
+  assert.equal(reviews(pr()), 0, 'Without localChecks on the base no local-ci is awaited');
+  // A base that cannot be read is no reason to fall back to the checkout.
+  writeFileSync(join(checkout, 'base-missing'), '');
+  assert.equal(reviews(pr()), 2, 'An unreadable base fails closed');
+});

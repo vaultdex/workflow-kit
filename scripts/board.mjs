@@ -1193,26 +1193,38 @@ function verifyBacklinks(issue) {
 }
 const login = user => user?.login?.replace(/\[bot\]$/, '');
 const isBot = user => user?.type === 'Bot';
+// The review gate (`reviews`, so `wait`, `handoff` and `merge`) takes these settings from the target branch of the PR as it is now, never from
+// the checkout: a stale checkout would apply rules the branch has since changed, and merge a PR without the local-ci the branch demands (#448).
+// ponytail: one REST read per look, no cache; cache by base commit if the REST quota ever gets tight.
+let gate = project;
+let optional; // the optionalReviewers set of `gate`, built on first use and dropped with every new `gate`
+function useBaseSettings(pr) {
+  assert.ok(pr.baseRefName, 'The PR base is not readable');
+  const file = rest(`repos/${project.repository}/contents/.github/workflow-project.json?ref=${encodeURIComponent(pr.baseRefName)}`);
+  assert.equal(file?.encoding, 'base64', `.github/workflow-project.json on ${pr.baseRefName} is unreadable`);
+  const base = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+  gate = { ...project, ...Object.fromEntries(['localChecks', 'awaitApps', 'optionalReviewers', 'updateBranchChecks'].map(key => [key, base[key]])) };
+  optional = undefined;
+}
 // "optionalReviewers" lists bot logins or app slugs whose traces are shown but never awaited, stalled or counted as red
 // (a review bot on a free plan that is rate limited most of the time). Their open threads and change requests still block; `handoff` dismisses a change request once all threads are resolved.
 const reviewerKey = name => name?.trim().toLowerCase().replace(/^(@|app\/)/, '').replace(/\[bot\]$/, '');
 // Read on use, so a malformed list is an ERROR of the review commands, not a crash of every command.
 const optionalReviewers = () => {
-  const list = project.optionalReviewers === undefined ? [] : project.optionalReviewers; // only a missing field is allowed; null is malformed
+  const list = gate.optionalReviewers === undefined ? [] : gate.optionalReviewers; // only a missing field is allowed; null is malformed
   assert.ok(Array.isArray(list) && list.every(name => typeof name === 'string' && name.trim()),
     'optionalReviewers must be a list of non-empty bot logins or app slugs');
   return new Set(list.map(reviewerKey));
 };
 // "updateBranchChecks" lists checks whose failure only asks for the base to be merged into the PR branch (#383, e.g. a retarget restart check): `merge` does that itself.
 const updateBranchChecks = () => {
-  const list = project.updateBranchChecks === undefined ? [] : project.updateBranchChecks;
+  const list = gate.updateBranchChecks === undefined ? [] : gate.updateBranchChecks;
   assert.ok(Array.isArray(list) && list.every(name => typeof name === 'string' && name.trim()), 'updateBranchChecks must be a list of non-empty check names');
   return new Set(list);
 };
-let optional;
 const isOptional = name => (optional ??= optionalReviewers()).has(reviewerKey(name));
 const isLocalCi = check => check.__typename === 'StatusContext' && check.context === 'local-ci';
-const isOptionalCheck = check => !(project.localChecks && isLocalCi(check)) && isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
+const isOptionalCheck = check => !(gate.localChecks && isLocalCi(check)) && isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 const readPr = prNumber => graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
@@ -1297,6 +1309,7 @@ const filesText = files => files.slice(0, 10).join(', ') + (files.length > 10 ? 
 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw (`dismissStale`, handoff only, is the one write). `threadsOf` reads the unresolved threads (wait reuses the last answer). */
 function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption(), threadsOf = current => unresolvedThreads(current.number, current.reviewThreads), dismissStale = false) {
+  useBaseSettings(pr);
   isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
   const baseChecks = updateBranchChecks(), baseReasons = new Set();
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
@@ -1346,7 +1359,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const check of live.filter(check => !current.includes(check))) {
     lines.push(`note: ${labelOf(check)} ${check.conclusion ?? check.state} as ${check.__typename === 'CheckRun' ? 'check run' : 'commit status'} is replaced by a newer one of the same name`);
   }
-  if (project.localChecks && !current.some(isLocalCi)) waiting.push({ text: 'check local-ci', since: Infinity });
+  if (gate.localChecks && !current.some(isLocalCi)) waiting.push({ text: 'check local-ci', since: Infinity });
   for (const check of current.filter(check => orderable(check) && newestSkipped.get(jobKey(check)) > runOf(check))) {
     lines.push(`note: ${check.name} was SKIPPED in a newer run, which proves nothing; run ${runOf(check)} decides`);
   }
@@ -1374,7 +1387,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // An Actions suite without runs is a triggered workflow about to report. Other apps (Sonar, CodeRabbit,
   // Renovate …) open a suite on every push and often never run it, so they count only when the project
   // lists them in "awaitApps" (analyzers such as SonarCloud create their run only when finished). Both may stall.
-  const awaited = new Set(['github-actions', ...project.awaitApps ?? []].filter(slug => !isOptional(slug)));
+  const awaited = new Set(['github-actions', ...gate.awaitApps ?? []].filter(slug => !isOptional(slug)));
   // A suite of a NEWER run of the same workflow replaces an empty one (Draft then Ready cancels the first run before it
   // reports). The replacing suite then answers for the workflow with its own status and conclusion, runs or not: its
   // check runs alone would show only the jobs reported so far. Another workflow or app never replaces it.
@@ -2388,7 +2401,8 @@ function pausedRound(resetAt, marker) {
   const lines = [];
   let text = `GitHub quota used up until ${untilText(resetAt)}; threads and the verdict are read after it`;
   if (marker) {
-    const checks = [...marker.runs.filter(run => !isOptional(run.app?.slug)).map(run => run.status === 'completed' ? run.conclusion : 'pending'),
+    useBaseSettings({ baseRefName: marker.pull.base.ref }); // no look at the PR has happened yet in this round: the optional list must not come from the checkout
+    const checks =[...marker.runs.filter(run => !isOptional(run.app?.slug)).map(run => run.status === 'completed' ? run.conclusion : 'pending'),
       ...marker.statuses.map(status => status.state)];
     const count = names => checks.filter(result => names.includes(result)).length;
     text += `; checks over REST: ${count(['pending'])} pending, ${count(['failure', 'error', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale'])} failed or cancelled, ${count(['success', 'neutral', 'skipped'])} passed`;

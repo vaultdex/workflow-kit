@@ -475,6 +475,9 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
 - With `localChecks` configured, `board.mjs reviews`, `wait`, `handoff` and `merge` require the head's `local-ci` commit
   status: missing or `pending` waits, `failure` and `error` are red, and only `success` passes.
+  `localChecks`, `awaitApps`, `optionalReviewers` and `updateBranchChecks` are read from `.github/workflow-project.json` on the
+  PR's base branch at each look (GitHub contents API), not from the checkout, so a stale checkout cannot skip `local-ci`;
+  an unreadable file there is an error, never a fallback to the checkout.
 
 ## Project test map
 
