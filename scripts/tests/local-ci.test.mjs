@@ -1,4 +1,4 @@
-// Lokale CI mit echtem Git (Merge-Stand wie refs/pull/N/merge) und nachgebautem gh: Filter, Auswahl, Ablauf der Status, Abbruch.
+// Lokale CI mit echtem Git (Merge-Stand wird aus origin/<base> und refs/pull/N/head gebaut) und nachgebautem gh: Filter, Auswahl, Ablauf der Status, Abbruch, Basis-Wechsel.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -34,7 +34,7 @@ test('die Sperrdatei lässt nur einen Läufer zu und übernimmt die eines toten 
   lock(file)();
 });
 
-/** Ein Projekt mit Origin, PR 1 (Branch feature ändert backend/x.txt, bei `prConfig` auch die Prüfliste) und dem Merge-Stand unter refs/pull/1/merge. */
+/** Ein Projekt mit Origin, PR 1 (Branch feature ändert backend/x.txt, bei `prConfig` auch die Prüfliste) und dem Head unter refs/pull/1/head. */
 function fixture(t, config, prConfig) {
   const dir = temporary(t, 'local ci ');
   const env = { ...isolatedGit(dir), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
@@ -57,9 +57,7 @@ function fixture(t, config, prConfig) {
   git(root, 'add', '-A');
   git(root, 'commit', '-m', 'feature');
   const head = git(root, 'rev-parse', 'HEAD');
-  git(root, 'checkout', '-b', 'merge', 'main');
-  git(root, 'merge', '--no-ff', '-m', 'merge', 'feature');
-  git(root, 'push', '-q', 'origin', 'merge:refs/pull/1/merge', 'feature', 'main');
+  git(root, 'push', '-q', 'origin', 'feature:refs/pull/1/head', 'feature', 'main');
   git(root, 'checkout', 'main');
   const posts = [];
   const pr = { number: 1, state: 'open', draft: false, head: { sha: head, ref: 'feature', repo: { full_name: 'o/r' } }, base: { ref: 'main' } };
@@ -69,9 +67,13 @@ function fixture(t, config, prConfig) {
     if (path.startsWith('pulls?')) return server.pulls;
     if (path.startsWith('pulls/')) return server.current;
     if (path.startsWith('git/matching-refs/')) return server.refs.filter(({ ref }) => ref.startsWith(`refs/heads/${path.split('heads/')[1]}`));
+    if (path.startsWith('git/ref/heads/')) { // Ziel-Branch auf origin; ein Branch, den es dort nicht gibt, bekommt einen Platzhalter
+      try { return { object: { sha: git(origin, 'rev-parse', `refs/heads/${path.slice('git/ref/heads/'.length)}`) } }; } catch { return { object: { sha: '0'.repeat(40) } }; }
+    }
+    if (path.startsWith('commits/')) return posts.filter(post => post.context === 'local-ci').reverse(); // neuester zuerst wie bei GitHub
     return [];
   };
-  const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, mergeWaitMs: 1, mergeAttempts: 2, git, api };
+  const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, git, api };
   /** Ändert die Prüfliste auf main von origin (wie ein Merge dort); der Läufer liest sie beim nächsten Durchlauf. */
   const publish = next => {
     writeFileSync(join(root, '.github/local-checks.json'), JSON.stringify(next));
@@ -83,9 +85,9 @@ function fixture(t, config, prConfig) {
 
 test('wählt nach den geänderten Dateien, meldet pending vor dem Ergebnis und gibt die Umgebung der Actions-CI weiter', async t => {
   const f = fixture(t, { setup: [], checks: [] });
-  const env = base => `test "$EVENT" = pull_request && test "$BASE_SHA" = ${base} && test "$HEAD_REF" = feature && test "$BASE_REF" = main`;
+  const env = 'test "$EVENT" = pull_request && test "$BASE_SHA" = "$(git rev-parse HEAD^1)" && test "$HEAD_REF" = feature && test "$BASE_REF" = main';
   f.publish({ checks: [
-    { context: 'Backend', paths: ['backend/**'], run: [env(f.base), 'echo fein'], timeoutMinutes: 1 },
+    { context: 'Backend', paths: ['backend/**'], run: [env, 'echo fein'], timeoutMinutes: 1 },
     { context: 'Broken', paths: ['**', '!frontend/**'], run: ['echo "kaputt: Fehler 7" >&2; exit 3', 'echo nie'], timeoutMinutes: 1 },
     { context: 'Slow', paths: ['backend/*.txt'], run: ['sleep 30'], timeoutMinutes: 0.001 },
     { context: 'Frontend', paths: ['frontend/**'], run: ['exit 1'], timeoutMinutes: 1 },
@@ -115,10 +117,36 @@ test('die Prüfliste kommt vom Ziel-Branch auf origin, weder aus dem PR noch aus
   assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Ziel: pending', 'Ziel: success', 'local-ci: success']);
   assert.deepEqual(['ziel', 'pr', 'lokal'].map(name => existsSync(join(f.ctx.work, name))), [true, false, false]);
-  f.publish({ checks: [check('Neu', 'touch neu')] });
-  f.posts.length = 0;
-  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
-  assert.deepEqual(f.summary(), ['local-ci: pending', 'Neu: pending', 'Neu: success', 'local-ci: success']);
+});
+
+test('bewegt sich der Ziel-Branch, prüft watch den offenen PR ohne neuen Push gegen die neue Basis (und deren Prüfliste); danach ist er fertig', async t => {
+  const check = (context, run) => ({ context, paths: ['backend/**'], run: [run], timeoutMinutes: 1 });
+  const f = fixture(t, { checks: [check('Alt', 'touch alt')] });
+  const ctx = { ...f.ctx, pollMs: 1 }, api = ctx.api;
+  let moved = false;
+  ctx.api = (method, path, fields) => {
+    if (path.startsWith('pulls?') && f.posts.length && !moved) { moved = true; f.publish({ checks: [check('Neu', 'test "$BASE_SHA" = "$(git rev-parse HEAD^1)" && touch neu')] }); }
+    return api(method, path, fields);
+  };
+  await watch(ctx, { rounds: 3 });
+  const aggregates = f.posts.filter(post => post.context === 'local-ci');
+  assert.deepEqual(aggregates.map(post => post.state), ['pending', 'success', 'pending', 'success'], 'zwei Läufe, in Runde 3 nichts mehr');
+  const [before, after] = aggregates.filter(post => post.state === 'success').map(post => post.description);
+  assert.ok(before.startsWith(`Basis ${f.base.slice(0, 12)}:`) && after.startsWith(`Basis ${f.ctx.git(f.root, 'rev-parse', 'main').slice(0, 12)}:`), `${before} | ${after}`);
+  assert.deepEqual(['alt', 'neu'].map(name => existsSync(join(f.ctx.work, name))), [false, true], 'der Arbeitsordner ist der Stand gegen die neue Basis');
+});
+
+test('ein Konflikt mit dem Ziel-Branch ergibt ein rotes local-ci mit der Basis, ohne eine Prüfung zu starten', async t => {
+  const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['touch gelaufen'], timeoutMinutes: 1 }] });
+  mkdirSync(join(f.root, 'backend'));
+  writeFileSync(join(f.root, 'backend/x.txt'), 'anders');
+  f.ctx.git(f.root, 'add', '-A');
+  f.ctx.git(f.root, 'commit', '-qm', 'konflikt');
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, false);
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'local-ci: failure']);
+  assert.match(f.posts.at(-1).description, /^Basis [0-9a-f]{12}: Konflikt mit main$/);
+  assert.ok(!existsSync(join(f.ctx.work, 'gelaufen')));
 });
 
 test('vor jedem Lauf ist der Arbeitsordner genau der PR-Stand: eine ignorierte Datei des vorigen Laufs ist weg', async t => {

@@ -95,26 +95,35 @@ const firstError = log => {
   return (lines.find(line => /error|fail|exception/i.test(line)) ?? lines.at(-1) ?? 'ohne Ausgabe').trim().slice(0, 90);
 };
 
-/** Holt den Merge-Stand des PRs in den eigenen Worktree (HEAD^1 ist die Basis wie in der Actions-CI) und nennt die geänderten Dateien. */
+/** Basis-Stempel im Gesamtstatus `local-ci`: gegen welchen Stand von origin/<base> der Head geprüft wurde. */
+const baseMark = sha => `Basis ${sha.slice(0, 12)}`;
+
+/**
+ * Baut den Merge-Stand selbst (GitHubs refs/pull/N/merge bleibt nach einem Merge in den Ziel-Branch auf der alten Basis stehen):
+ * frischer Fetch von origin/<base> und dem PR-Head, dann Head in die Basis im eigenen Worktree. `HEAD^1` ist die Basis wie in der Actions-CI.
+ */
 async function checkout(ctx, pr) {
-  const { git, root, work } = ctx, ref = `refs/pull/${pr.number}/merge`;
-  let merge;
-  for (let attempt = 1; !merge; attempt++) {
-    try {
-      git(root, 'fetch', '--quiet', 'origin', ref);
-      const [commit, , head] = git(root, 'rev-list', '--parents', '-n1', 'FETCH_HEAD').split(' ');
-      if (head === pr.head.sha) merge = commit;
-    } catch { /* kein Merge-Stand, solange der PR Konflikte hat */ }
-    if (merge) break;
-    // GitHub baut den Merge-Stand verzögert nach einem Push.
-    if (attempt === ctx.mergeAttempts) throw new Error(`${ref} fehlt oder ist nicht der aktuelle Head (Konflikt mit ${pr.base.ref}?)`);
-    ctx.api('GET', `pulls/${pr.number}`);
-    await pause(ctx.mergeWaitMs);
-  }
-  if (existsSync(join(work, '.git'))) git(work, 'checkout', '--quiet', '--detach', '--force', merge);
-  else { mkdirSync(dirname(work), { recursive: true }); git(root, 'worktree', 'prune'); git(root, 'worktree', 'add', '--quiet', '--detach', work, merge); }
+  const { git, root, work } = ctx, branch = pr.base.ref;
+  let base, head;
+  const fail = message => Object.assign(new Error(message), { base }); // die Basis hängt am Fehler, damit der Status sie nennt
+  try {
+    git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+    base = git(root, 'rev-parse', `refs/remotes/origin/${branch}`);
+    git(root, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+    head = git(root, 'rev-parse', 'FETCH_HEAD');
+  } catch { throw fail(`origin/${branch} oder refs/pull/${pr.number}/head ist nicht abrufbar`); }
+  if (head !== pr.head.sha) throw fail('Der Head des PRs hat sich bewegt');
+  if (existsSync(join(work, '.git'))) git(work, 'checkout', '--quiet', '--detach', '--force', base);
+  else { mkdirSync(dirname(work), { recursive: true }); git(root, 'worktree', 'prune'); git(root, 'worktree', 'add', '--quiet', '--detach', work, base); }
   git(work, 'clean', '-ffdxq'); // auch Ignoriertes (node_modules) und verschachtelte Repos: der Ordner ist genau der PR-Stand, das Setup stellt Abhängigkeiten wieder her
-  return { base: git(work, 'rev-parse', 'HEAD^1'), files: git(work, 'diff', '--name-only', '-z', 'HEAD^1', 'HEAD').split('\0').filter(Boolean) };
+  try {
+    // ohne Hooks (ein nie angelegter hooksPath), feste Identität unabhängig von der Git-Konfiguration des Rechners
+    git(work, '-c', `core.hooksPath=${join(dirname(work), 'keine-hooks')}`, '-c', 'user.name=local-ci', '-c', 'user.email=local-ci@localhost', 'merge', '--no-ff', '--quiet', '-m', `Merge PR ${pr.number} in ${branch}`, head);
+  } catch {
+    try { git(work, 'merge', '--abort'); } catch { /* kein Merge im Gang */ }
+    throw fail(`Konflikt mit ${branch}`);
+  }
+  return { base, files: git(work, 'diff', '--name-only', '-z', base, 'HEAD').split('\0').filter(Boolean) };
 }
 
 /**
@@ -141,19 +150,20 @@ export async function checkPullRequest(ctx, pr) {
   let ok = false;
   try {
     report(AGGREGATE, 'pending', `Prüfung läuft auf ${host}`);
-    let config, env, files;
+    let config, env, files, base;
+    const aggregate = (result, text) => report(AGGREGATE, result, base ? `${baseMark(base)}: ${text}` : text); // die Basis gehört in jeden Endstand, sonst gälte er nach einem Merge in den Ziel-Branch weiter
     try {
       config = branchConfig(ctx, pr.base.ref); // bei jedem Durchlauf neu vom Ziel-Branch; fehlt sie dort, wird der PR übersprungen
-      const { base, files: changed } = await checkout(ctx, pr);
-      files = changed;
+      ({ base, files } = await checkout(ctx, pr));
       env = { ...process.env, BASE_SHA: base, BASE_REF: pr.base.ref, HEAD_REF: pr.head.ref, EVENT: 'pull_request' };
     } catch (error) {
-      if (!state.aborted) report(AGGREGATE, 'failure', error.message); // sonst schließt finally den Status; der neue Head folgt
+      base ??= error.base;
+      if (!state.aborted) aggregate('failure', error.message); // sonst schließt finally den Status; der neue Head folgt
       return { ok, next: newHead() };
     }
     const selected = select(config.checks, files);
     if (!selected.length) {
-      report(AGGREGATE, 'success', `Keine Prüfung betrifft die ${files.length} geänderten Dateien`);
+      aggregate('success', `Keine Prüfung betrifft die ${files.length} geänderten Dateien`);
       return { ok: true, next: null };
     }
     for (const check of selected) report(check.context, 'pending', `Läuft auf ${host}`);
@@ -183,7 +193,7 @@ export async function checkPullRequest(ctx, pr) {
     }
     if (!state.aborted) {
       ok = !failed.length;
-      report(AGGREGATE, ok ? 'success' : 'failure', ok ? `${selected.length} Prüfungen grün in ${took()} auf ${host}` : `${failed.length} von ${selected.length} rot: ${failed.join(', ')}`);
+      aggregate(ok ? 'success' : 'failure', ok ? `${selected.length} Prüfungen grün in ${took()} auf ${host}` : `${failed.length} von ${selected.length} rot: ${failed.join(', ')}`);
     }
   } finally {
     clearInterval(watcher);
@@ -200,7 +210,11 @@ export async function follow(ctx, pr) {
   }
 }
 
-const finished = (ctx, sha) => ['success', 'failure'].includes(ctx.api('GET', `commits/${sha}/statuses?per_page=100`).find(status => status.context === AGGREGATE)?.state);
+/** Fertig ist ein Head nur, wenn sein Endstand gegen die Basis lief, die origin/<base> jetzt noch hat. */
+const finished = (ctx, sha, base) => {
+  const status = ctx.api('GET', `commits/${sha}/statuses?per_page=100`).find(status => status.context === AGGREGATE);
+  return ['success', 'failure'].includes(status?.state) && !!status.description?.startsWith(baseMark(base));
+};
 
 /** `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat; die erste Beobachtung löst nichts aus. */
 async function pushed(ctx, heads) {
@@ -227,15 +241,18 @@ async function pushed(ctx, heads) {
   }
 }
 
-/** Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head genau einmal, einen nach dem anderen. */
+/** Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head oder neuer Basis genau einmal, einen nach dem anderen. */
 export async function watch(ctx, { rounds = Infinity } = {}) {
   const heads = new Map(), done = new Map();
   for (let round = 0; round < rounds; round++) {
     try {
       await pushed(ctx, heads).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
+      const bases = new Map(); // aktueller SHA je Ziel-Branch, einmal pro Runde
       for (const pr of ctx.api('GET', 'pulls?state=open&per_page=100').filter(pr => !pr.draft && pr.head.repo?.full_name === ctx.repository)) {
-        if (done.get(pr.number) === pr.head.sha || finished(ctx, pr.head.sha)) continue;
-        done.set(pr.number, pr.head.sha); // ponytail: ein Läuferfehler wiederholt den Head nicht; ein neuer Push oder `local-ci.mjs PR` prüft erneut
+        if (!bases.has(pr.base.ref)) bases.set(pr.base.ref, ctx.api('GET', `git/ref/heads/${pr.base.ref}`).object.sha);
+        const base = bases.get(pr.base.ref), key = `${pr.head.sha} ${base}`;
+        if (done.get(pr.number) === key || finished(ctx, pr.head.sha, base)) continue;
+        done.set(pr.number, key); // ponytail: ein Läuferfehler wiederholt Head und Basis nicht; ein neuer Push, eine neue Basis oder `local-ci.mjs PR` prüft erneut
         await follow(ctx, pr);
       }
     } catch (error) { console.error(error.message); }
@@ -257,7 +274,7 @@ async function main() {
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
   const ctx = {
-    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000, mergeWaitMs: 10_000, mergeAttempts: 6,
+    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000,
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
     api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };

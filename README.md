@@ -454,9 +454,14 @@ which is untrusted, and not from its own checkout either (only the `repository` 
 
 - `paths` use GitHub's rules for `*`, `**` and `!` only (no `?` or `[…]`): in order, a later match wins, `!` takes a file
   back out, `*` stays within a folder, `**` goes below it. A check runs when one changed file of the PR matches.
-- Per PR the script fetches `refs/pull/N/merge` into its own worktree (`<main checkout>-local-ci/work`; not under `.git`, where Jest finds no tests, ignored files such as
-  `node_modules` stay), so `HEAD^1` is the base like in Actions. The commands get `BASE_SHA`, `BASE_REF`, `HEAD_REF` and
+- Per PR the script builds the merge state itself in its own worktree (`<main checkout>-local-ci/work`; not under `.git`,
+  where Jest finds no tests; the folder is cleaned before every run, ignored files such as `node_modules` included): fresh fetch of `origin/<base>` and
+  `refs/pull/N/head`, then the head is merged into the base (`--no-ff`, fixed identity, no hooks), so `HEAD^1` is the base like in
+  Actions. GitHub's `refs/pull/N/merge` is not used: it stays on the old base after a merge into the target branch. A merge conflict gives a red
+  `local-ci` with "Konflikt mit <base>". The commands get `BASE_SHA`, `BASE_REF`, `HEAD_REF` and
   `EVENT=pull_request` and run one after the other until one fails; `timeoutMinutes` limits all commands of a check.
+- The final `local-ci` status starts with `Basis <first 12 characters of the base SHA>`. `--watch` counts a head as done only while that is still the
+  tip of `origin/<base>`, so when the base moves, open PRs are checked again against the new base without a new push.
 - Status flow: `local-ci` (all checks of the head) and every selected check go `pending` at once, then `success` or
   `failure` with duration and host or the first error line. A check no changed file selects gets **no** status;
   `local-ci` then says so, which is what `board.mjs` needs to stop waiting for the "first CI check".
