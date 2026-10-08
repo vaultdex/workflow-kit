@@ -230,6 +230,23 @@ test('a failing kit update prints the command and does not fail the switch', asy
   assert.notEqual(result.stderr.trim(), '', 'a diagnostic is printed');
 });
 
+test('a .git file that points nowhere is cleared when it is the only thing in the kit folder, otherwise reported', async t => {
+  const f = await kitFixture(t);
+  const inner = join(f.repo, '.vendor/workflow-kit');
+  rmSync(join(f.repo, '.git/modules'), { recursive: true });
+  let result = await f.switchTo('other');
+  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.stderr.trim(), '', 'a dangling .git with other files is reported');
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 1\n');
+  for (const name of readdirSync(inner)) if (name !== '.git') rmSync(join(inner, name), { recursive: true });
+  mkdirSync(join(f.repo, '.git/modules'));
+  result = await f.switchTo('main');
+  assert.equal(result.status, 0, result.stderr);
+  result = await f.switchTo('other');
+  assert.equal(result.stderr, '');
+  assert.equal(readFileSync(f.rules, 'utf8'), 'rules 2\n');
+});
+
 test('local commits and ignored files are kept; a clean published kit still follows', async t => {
   const kit = f => join(f.repo, '.vendor/workflow-kit');
   await Promise.all([
