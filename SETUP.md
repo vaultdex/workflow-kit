@@ -77,7 +77,9 @@ wait for it or call it stalled, and agents neither re-request nor replace its re
 Its findings, open threads and change requests still count, and its 👀 reaction is
 shown as a note. An analyzer such as SonarCloud listed there still reports its open issues
 as a blocker, because they are findings, not waiting. A `null` or other non-list value is an
-ERROR; omit the field instead. The script keeps these settings too.
+ERROR; omit the field instead. A check that only asks for the base to be merged (the retarget restart check of a
+stacked PR) goes in `"updateBranchChecks"`, a list of check names: `board.mjs merge` then merges the base into the PR
+branch instead of ending `FAILED`. The script keeps these settings too.
 `board.mjs wait`, `reviews` and `handoff` also keep waiting a few minutes after Ready and after each push, because a
 review bot may start late (`"reviewerGraceMinutes"`, default 3). The wait ends sooner when a required bot has answered on
 the head, a limit notice included. A project whose bots do not start on their own sets

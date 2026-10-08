@@ -1065,6 +1065,12 @@ const optionalReviewers = () => {
     'optionalReviewers must be a list of non-empty bot logins or app slugs');
   return new Set(list.map(reviewerKey));
 };
+// "updateBranchChecks" lists checks whose failure only asks for the base to be merged into the PR branch (#383, e.g. a retarget restart check): `merge` does that itself.
+const updateBranchChecks = () => {
+  const list = project.updateBranchChecks === undefined ? [] : project.updateBranchChecks;
+  assert.ok(Array.isArray(list) && list.every(name => typeof name === 'string' && name.trim()), 'updateBranchChecks must be a list of non-empty check names');
+  return new Set(list);
+};
 let optional;
 const isOptional = name => (optional ??= optionalReviewers()).has(reviewerKey(name));
 const isOptionalCheck = check => isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
@@ -1149,6 +1155,7 @@ const filesText = files => files.slice(0, 10).join(', ') + (files.length > 10 ? 
 /** One look at the PR head: done or still waiting, and whether CI failed; read failures throw (`dismissStale`, handoff only, is the one write). `threadsOf` reads the unresolved threads (wait reuses the last answer). */
 function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = readPr(prNumber), graceMinutes = graceOption(), threadsOf = current => unresolvedThreads(current.number, current.reviewThreads), dismissStale = false) {
   isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
+  const baseChecks = updateBranchChecks(), baseReasons = new Set();
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
   if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', reasons: ['PR closed without merge'], lines, pr };
@@ -1201,7 +1208,12 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // CI never stalls: a running check is not success however long it takes.
     if (pending) { waiting.push({ text: `check ${label}`, since: Infinity }); continue; }
     const result = check.conclusion ?? check.state;
-    if (!passed.has(result)) { failed = true; reasons.push(`check ${label} ${result}`); }
+    if (!passed.has(result)) {
+      failed = true;
+      const asks = baseChecks.has(label);
+      reasons.push(`check ${label} ${result}${asks ? ` asks for the base: run board.mjs merge ${pr.number} or merge the base and push` : ''}`);
+      if (asks) baseReasons.add(reasons.at(-1));
+    }
     // Descriptions carry results such as "Review rate limited" behind a green state.
     lines.push(`check ${label}: ${result}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);
   }
@@ -1268,7 +1280,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     lines.push('blocker: merge conflicts');
   }
   // A known CI failure or conflict is the verdict; later review reads must not turn it into ERROR.
-  if (failed) return { done: true, failed, reasons, lines, pr };
+  if (failed) return { done: true, failed, reasons, lines, pr, baseOnly: reasons.every(reason => baseReasons.has(reason)) };
   // A pull_request run skipped while the PR was still Draft (the usual `!draft` job guard) executed nothing, so it says
   // nothing about the Ready head. Ready normally starts a fresh run; until the workflow has an executed run created after
   // Ready, its path is missing, not green. An executed Draft run does not exempt the workflow (an unguarded job next to a
@@ -1861,19 +1873,26 @@ function deleteHeadBranch(pr) {
  */
 async function merge() {
   // Like `wait`: look again until CI and the reviewers have finished (or --max-minutes runs out: exit 4); the gate then decides once.
-  if (!await poll(() => reviews(stallOption()))) return;
+  const polled = await poll(() => reviews(stallOption()));
+  if (!polled) return;
+  // The new head's CI (and any reviewer that answers the push) decides, so the gate runs again; one update per run.
+  const update = async ({ baseRefName, headRefOid: before }, why) => {
+    assert.match(before, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
+    console.log(`update: ${why}; merging ${baseRefName} into the PR branch first`);
+    const updated = updateBranch(before, baseRefName);
+    if (!updated) return false;
+    console.log(`updated: head ${before.slice(0, 7)} -> ${updated.slice(0, 7)}; waiting for CI`);
+    return Boolean(await poll(() => reviews(stallOption())));
+  };
+  // A red check from "updateBranchChecks" as the only reason asks for the base (#383): that is the update, not a FAILED.
+  const forCheck = polled.baseOnly;
+  if (forCheck && !await update(polled.pr, polled.reasons.join('; '))) return;
   let result = mergeGate();
   if (!result) return;
-  const { baseRefName, headRefOid: before } = result.pr;
-  assert.match(before, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
-  const moved = baseMovement(result.pr);
+  assert.match(result.pr.headRefOid, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
+  const moved = forCheck ? null : baseMovement(result.pr);
   if (moved?.shared.length) {
-    console.log(`update: ${baseRefName} gained ${moved.behind} commits that change ${filesText(moved.shared)} like this PR; merging it into the PR branch first`);
-    const updated = updateBranch(before, baseRefName);
-    if (!updated) return;
-    console.log(`updated: head ${before.slice(0, 7)} -> ${updated.slice(0, 7)}; waiting for CI`);
-    // The new head's CI (and any reviewer that answers the push) decides, so the gate runs again; one update per run.
-    if (!await poll(() => reviews(stallOption()))) return;
+    if (!await update(result.pr, `${result.pr.baseRefName} gained ${moved.behind} commits that change ${filesText(moved.shared)} like this PR`)) return;
     result = mergeGate();
     if (!result) return;
   }
@@ -2074,7 +2093,8 @@ function reviewsForHead() {
 /** Looks again and again until `look` is done and returns that result; returns nothing after printing "still waiting" (exit 4). */
 async function poll(look) {
   const maxMinutes = numberOption('--max-minutes', 9);
-  if (maxMinutes > 0) deadline = Date.now() + maxMinutes * 60_000;
+  // One deadline per run: `merge` polls twice (before and after a base update), and both phases must fit the one tool call.
+  if (maxMinutes > 0 && deadline === Infinity) deadline = Date.now() + maxMinutes * 60_000;
   let shown, quiet = 0;
   // Exit 4: not finished, call the command again (a driver's tool call must end before its 10-minute limit).
   const stillWaiting = resetAt => {

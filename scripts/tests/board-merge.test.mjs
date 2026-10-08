@@ -171,6 +171,48 @@ test('merge merges a base that moved under the same files into the PR branch, wa
   }
 });
 
+test('merge merges the base for a red check from updateBranchChecks, but only when it is the sole reason', t => {
+  const { checkout, run, show, calls, json, first, second, headOf } = mergeFixture(t);
+  const red = name => ({ statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion: 'FAILURE' }] } } });
+  const restart = red('Restart CI after retarget');
+  const config = join(checkout, '.github/workflow-project.json'), plain = JSON.parse(readFileSync(config, 'utf8'));
+
+  // Without the setting the red check is a plain FAILED.
+  show(headOf(first, restart));
+  assert.equal(run('merge', '7').status, 1);
+  assert.deepEqual(calls(), []);
+
+  writeFileSync(config, JSON.stringify({ ...plain, updateBranchChecks: ['Restart CI after retarget'] }));
+  // wait names the way out instead of ending in a bare FAILED.
+  show(headOf(first, restart));
+  assert.match(run('wait', '7').stdout, /^FAILED: check Restart CI after retarget FAILURE asks for the base: run board\.mjs merge 7/m);
+
+  show(headOf(first, restart));
+  json('pr-reads.json', [{}, {}, headOf(second)]);
+  const merged = run('merge', '7', '--interval', '0');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.deepEqual(calls(), [`update-branch ${first}`, 'merge', 'delete claude/7-topic']);
+
+  // Another red check next to it is a real failure: no update.
+  const both = { statusCheckRollup: { contexts: { totalCount: 2, nodes: [...restart.statusCheckRollup.contexts.nodes, ...red('CI').statusCheckRollup.contexts.nodes] } } };
+  show(headOf(first, both));
+  assert.equal(run('merge', '7').status, 1);
+  assert.deepEqual(calls(), []);
+});
+
+test('merge gives both CI waits around a base update one shared --max-minutes deadline', t => {
+  const { checkout, run, show, calls, json, first, second, headOf } = mergeFixture(t);
+  const check = (conclusion, status = 'COMPLETED', name = 'Restart CI after retarget') => ({ statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name, status, conclusion }] } } });
+  const config = join(checkout, '.github/workflow-project.json'), plain = JSON.parse(readFileSync(config, 'utf8'));
+  writeFileSync(config, JSON.stringify({ ...plain, updateBranchChecks: ['Restart CI after retarget'] }));
+  // The restart check fails only when the deadline (0.3 s) is reached; the new head's CI is still running, then green.
+  show(headOf(first, check(null, 'IN_PROGRESS')));
+  json('pr-reads.json', [{}, headOf(first, check('FAILURE')), headOf(second, check(null, 'IN_PROGRESS', 'CI')), headOf(second, check(null, 'IN_PROGRESS', 'CI')), headOf(second)]);
+  const waiting = run('merge', '7', '--interval', '0.4', '--max-minutes', '0.005');
+  assert.equal(waiting.status, 4, waiting.stdout + waiting.stderr);
+  assert.deepEqual(calls(), [`update-branch ${first}`], 'the second wait has no time left of its own: nothing is merged');
+});
+
 test('merge falls back to merge-async with the checked head when gh refuses a PR with stacked children, and reads the merge back', t => {
   const { checkout, run, show, calls, flag, first } = mergeFixture(t);
   const asyncMerges = () => readFileSync(join(checkout, 'async-merges'), 'utf8');
