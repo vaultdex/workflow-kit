@@ -48,6 +48,16 @@
         ]
       },
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dir=${CLAUDE_PROJECT_DIR:-.}\nroot=$(git -C \"$dir\" rev-parse --show-toplevel 2>/dev/null) || exit 0\n[ -d \"$root/node_modules\" ] && exit 0\ntr -d ' \\n\\r\\t' < \"$root/package.json\" 2>/dev/null | grep -Eq '\"(dev[Dd]|d)ependencies\":\\{\"' || exit 0\nsetup=$(tr -d '\\n\\r' < \"$root/.github/workflow-project.json\" 2>/dev/null | sed -n 's/.*\"setup\" *: *\"\\([^\"]*\\)\".*/\\1/p' | tr -cd 'A-Za-z0-9 /._:=@-')\nmsg=\"node_modules is missing in this worktree although package.json lists dependencies, so Node may resolve modules from a parent checkout. Nothing was installed: run ${setup:-the project setup (see its AGENTS.md)}.\"\nprintf '%s\\n' \"$msg\"",
+            "timeout": 10,
+            "shell": "bash"
+          }
+        ]
+      },
+      {
         "matcher": "startup|clear",
         "hooks": [
           {

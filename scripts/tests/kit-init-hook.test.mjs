@@ -277,5 +277,50 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
       }
     });
   });
+
+  describe(`${kind} hooks report a missing node_modules, name the project setup and never install`, { skip: !available && `${shell[kind]} unavailable`, concurrency: true }, () => {
+    for (const [file, key] of variants) test(file, async t => {
+      const temp = temporary(t, 'kit-modules ');
+      const env = { ...isolatedGit(temp), CLAUDE_PROJECT_DIR: '' };
+      const commands = new Set(handlers(file, key, 'node_modules'));
+      assert.equal(commands.size, 1, `${file} carries the node_modules handler`);
+      const [command] = commands;
+      let count = 0;
+      const project = async (manifest, setup) => {
+        const dir = join(temp, `p${count++}`);
+        mkdirSync(join(dir, '.github'), { recursive: true });
+        assert.equal((await spawn('git', ['init', '--quiet'], { cwd: dir, env })).status, 0);
+        if (manifest) writeFileSync(join(dir, 'package.json'), manifest);
+        if (setup) writeFileSync(join(dir, '.github/workflow-project.json'), JSON.stringify({ setup }, null, 2));
+        return dir;
+      };
+      const trial = async dir => {
+        const result = await spawn(shell[kind], [...args, command], { cwd: dir, env });
+        assert.equal(result.status, 0, result.stderr);
+        return result.stdout;
+      };
+      const reported = async (dir, why) => {
+        const out = await trial(dir);
+        assert.match(out, /node_modules is missing/, why);
+        if (file !== '.claude/settings.json') assert.doesNotThrow(() => JSON.parse(out), `${file}: host JSON`);
+        assert.ok(!existsSync(join(dir, 'node_modules')), 'nothing is installed');
+        return out;
+      };
+      const silent = async (dir, why) => assert.equal(await trial(dir), '', why);
+
+      const manifest = JSON.stringify({ name: 'x', devDependencies: { a: '1' } }, null, 2);
+      await reported(await project(manifest), 'a worktree without node_modules is reported');
+      assert.match(await reported(await project(manifest, 'pnpm run setup:all'), 'the setup field is honored'), /pnpm run setup:all/);
+
+      const installed = await project(manifest);
+      mkdirSync(join(installed, 'node_modules'));
+      await silent(installed, 'a worktree with node_modules is left alone');
+      await silent(await project(JSON.stringify({ name: 'x', dependencies: {} })), 'a manifest without dependencies is left alone');
+      await silent(await project(JSON.stringify({ peerDependencies: { a: '1' } })), 'only the dependencies npm installs by default count, the same in every shell');
+      await silent(await project('{ not json'), 'a broken package.json is not reported');
+      await silent(await project(), 'a project without package.json is left alone');
+      await silent(temp, 'a directory outside any repository is left alone');
+    });
+  });
 }
 });
