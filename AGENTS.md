@@ -20,5 +20,5 @@ kit paths drop the `.vendor/workflow-kit/` prefix (`node scripts/board.mjs check
   them, secrets or private product content. The [hook rule](AGENT_RULES.md#hooks)
   authorizes agents to invoke the two existing installers; no hook or script may.
   The two commands a hook runs itself are `git merge --ff-only` (a clean checkout without own commits,
-  to the last fetched base) and `git submodule update --init .vendor/workflow-kit`:
-  for a missing or lagging kit, and from the Git `post-checkout` hook after a branch checkout.
+  to the last fetched base) and `git submodule update --init .vendor/workflow-kit` (for a missing or
+  lagging kit, and from the Git `post-checkout` hook after a branch checkout).

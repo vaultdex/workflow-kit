@@ -171,7 +171,8 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
       const state = async dir => [await git(dir, 'rev-parse', 'HEAD'), await git(dir, 'rev-parse', 'origin/HEAD'), await git(dir, 'status', '--porcelain')];
       const dirty = dir => writeFileSync(join(dir, 'notes.txt'), 'mine');
 
-      const [warn, init] = [new Set(handlers(file, key, 'commit(s) behind')), new Set(handlers(file, key))];
+      const init = new Set(handlers(file, key));
+      const warn = new Set(handlers(file, key, 'merge-base --is-ancestor').filter(command => !init.has(command)));
       assert.ok(warn.size && init.size, `${file} carries the stale branch handler and the kit init handler`);
       for (const command of warn) {
         const trial = cwd => spawn(shell[kind], [...args, command], { cwd, env: { ...env, CLAUDE_PROJECT_DIR: '' } });
@@ -222,6 +223,26 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
         assert.equal(result.status, 0, result.stderr);
         const [head, base, status] = await state(dir);
         assert.deepEqual([head, status], [base, ''], `${file} fast-forwards a clean checkout to the last fetched base`);
+
+        // No hook of the checkout runs: a team-wide relative core.hooksPath reaches a post-merge hook that arrives with the merge.
+        const marker = join(temp, 'hook-ran').replaceAll('\\', '/');
+        const nested = { ...env, HOOK_MARKER: marker, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '.githooks', CLAUDE_PROJECT_DIR: '' };
+        const hooked = async () => {
+          const { up, dir } = await scenario(0, 0);
+          mkdirSync(join(up, '.githooks'));
+          writeFileSync(join(up, '.githooks/post-merge'), '#!/bin/sh\necho ran > "$HOOK_MARKER"\n');
+          await git(up, 'add', '.'); await git(up, 'update-index', '--chmod=+x', '.githooks/post-merge'); await commit(up);
+          await git(dir, 'fetch', '--quiet');
+          return dir;
+        };
+        const plain = await spawn('git', ['merge', '--quiet', '--ff-only', 'origin/HEAD'], { cwd: await hooked(), env: nested });
+        assert.equal(plain.status, 0, plain.stderr);
+        assert.ok(existsSync(marker), 'the fixture hook runs when nothing disables hooks');
+        rmSync(marker);
+        const guarded = await hooked();
+        await spawn(shell[kind], [...args, command], { cwd: guarded, env: nested });
+        assert.equal((await state(guarded))[0], await git(guarded, 'rev-parse', 'origin/HEAD'), 'the checkout was fast-forwarded');
+        assert.ok(!existsSync(marker), `${file} runs no hook from the checkout`);
       }
     });
   });
