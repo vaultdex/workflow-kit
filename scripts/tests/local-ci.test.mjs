@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { checkPullRequest, gitBash, loadConfig, lock, matches, select, watch } from '../local-ci.mjs';
+import { checkPullRequest, gitBash, loadConfig, loadSlots, lock, mainSlots, matches, select, watch } from '../local-ci.mjs';
 import { isolatedGit, temporary } from './fixtures.mjs';
 
 test('Pfad-Filter wie bei GitHub: der Reihe nach, "!" nimmt zurück, "*" bleibt im Ordner, "**" geht darunter', () => {
@@ -286,5 +286,20 @@ test('slots muss eine ganze Zahl ab 1 sein, fehlt es, gilt 1', () => {
   const read = slots => path => path.endsWith('workflow-project.json') ? '{"localChecks":"c.json"}' : JSON.stringify({ checks: [], ...slots === undefined ? {} : { slots } });
   assert.equal(loadConfig(read()).slots, 1);
   assert.equal(loadConfig(read(2)).slots, 2);
-  for (const bad of [0, 1.5, '2']) assert.throws(() => loadConfig(read(bad)), /slots/);
+  assert.equal(loadSlots(read(2)), 2);
+  for (const bad of [0, 1.5, '2']) assert.throws(() => loadSlots(read(bad)), /slots/);
+});
+
+test('main ohne lokale CI: der Start gibt 1 Platz, und der Release-PR wird mit der Prüfliste seines Ziel-Branchs geprüft', async t => {
+  const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }] });
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main:refs/heads/release/9');
+  writeFileSync(join(f.root, '.github/workflow-project.json'), JSON.stringify({ repository: 'o/r' }));
+  f.ctx.git(f.root, 'commit', '-qam', 'main ohne lokale CI');
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
+  f.server.pulls = [{ ...f.pr, base: { ref: 'release/9' } }];
+  const ctx = { ...f.ctx, pollMs: 1 };
+  ctx.slots = mainSlots(ctx);
+  assert.equal(ctx.slots, 1);
+  await watch(ctx, { rounds: 1 });
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
 });

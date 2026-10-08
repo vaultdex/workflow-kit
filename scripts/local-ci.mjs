@@ -36,11 +36,15 @@ export function loadConfig(read) {
   return { repository: project.repository, checks, setup, push, slots };
 }
 
+/** Die Platzzahl von main: ohne `localChecks` dort gilt 1 (die Prüflisten der PRs kommen vom jeweiligen Ziel-Branch), ein ungültiger Wert bleibt ein Fehler. */
+export const loadSlots = read => JSON.parse(read('.github/workflow-project.json')).localChecks ? loadConfig(read).slots : 1;
+export const mainSlots = ctx => branchConfig(ctx, 'main', undefined, loadSlots);
+
 /** Die Konfiguration von origin/<branch> nach frischem Fetch: nie aus dem eigenen Checkout und nie aus dem PR, dem man nicht traut. */
-export function branchConfig({ git, root }, branch, sha) {
+export function branchConfig({ git, root }, branch, sha, load = loadConfig) {
   // Mit `sha` (die Basis, gegen die gemerged wurde) kein neuer Fetch: Prüfliste und Merge-Stand stammen aus demselben Commit.
   if (!sha) try { git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`); } catch { throw new Error(`origin/${branch} ist nicht abrufbar`); }
-  return loadConfig(path => {
+  return load(path => {
     try { return git(root, 'show', `${sha ?? `origin/${branch}`}:${path}`); } catch { throw new Error(`${path} fehlt auf origin/${branch}`); }
   });
 }
@@ -325,7 +329,7 @@ async function main() {
   };
   lock(join(dir, 'lock'));
   if (mode === '--watch') {
-    ctx.slots = branchConfig(ctx, 'main').slots; // einmal beim Start von origin/main wie die Prüfliste, nicht aus dem eigenen Checkout; ein neuer Wert gilt nach Neustart
+    ctx.slots = mainSlots(ctx); // einmal beim Start von origin/main wie die Prüfliste, nicht aus dem eigenen Checkout; ein neuer Wert gilt nach Neustart
     await watch(ctx);
   } else process.exitCode = (await follow(ctx, ctx.api('GET', `pulls/${mode}`))).ok ? 0 : 1;
 }
