@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fixture, handoffPr, pushedAt, test } from './board-fixture.mjs';
+import { fixture, handoffComment, handoffPr, issue, pushedAt, test } from './board-fixture.mjs';
 
 
 test('merge merges the checked head by its full id only when no review is running, and proves the merge', t => {
@@ -279,4 +279,69 @@ test('merge deletes the head branch only when nothing else needs it, and the mer
 
 test('merge refuses an unknown flag before any write', t => {
   fixture(t).refusesUnknownFlag('merge', '7');
+});
+
+test('merge --stack gates every layer, merges only the top through merge-async and reports each layer (#389)', t => {
+  const { checkout, run, show, calls, flag, json, first, second, headOf } = mergeFixture(t);
+  const redCi = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } };
+  // The layer below has a red CI: only the top head's CI counts.
+  const layer = changes => handoffPr({ number: 5, headRefName: 'claude/5-lower', isCrossRepository: false, headRepository: { nameWithOwner: 'Test/Example' },
+    ...headOf(second, redCi), ...changes });
+  const handoff = head => handoffComment({ id: head === first ? 900 : 901, body: `## Übergabe\n\nHead: ${head.slice(0, 7)}\n\n### Retro\n\n- Keine Funde` });
+  const complete = [handoff(first), handoff(second)];
+  const prepare = ({ lower = layer(), comments = complete, members = [5, 7], status = 'Human review' } = {}) => {
+    show();
+    json('stacks.json', [{ number: 42, open: true, base: { ref: 'release/0.1.1' }, pull_requests: members.map(number => ({ number, state: 'open' })) }]);
+    json('stack-prs.json', { 5: lower });
+    json('issues-comments.json', comments);
+    json('issue.json', issue(status));
+  };
+  const asyncMerges = () => readFileSync(join(checkout, 'async-merges'), 'utf8');
+
+  // A layer that lacks something is named, and nothing is merged.
+  const refused = [
+    ['a layer without a handoff comment for its head', { comments: [handoff(first)] }, /^blocker: PR #5 has no handoff comment for head 1234567/m],
+    ['a layer with an open thread', { lower: layer({ threadPages: [[false]] }) }, /^blocker: PR #5 has 1 unresolved review thread/m],
+    ['a layer with a change request', { lower: layer({ latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'reviewer' } }] } }) },
+      /^blocker: PR #5 has a change request by reviewer/m],
+    ['an issue that is not in Human review', { status: 'In progress' }, /^blocker: PR #5 delivers issue #1, whose status is In progress/m],
+    ['a PR that is not the top', { members: [5, 7, 8] }, /^blocker: PR #8 is above PR #7/m],
+  ];
+  for (const [label, setup, expected] of refused) {
+    prepare(setup);
+    const result = run('merge', '7', '--stack', '--interval', '0');
+    assert.equal(result.status, 1, `${label}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, expected, label);
+    assert.deepEqual(calls(), [], `${label}: nothing is merged`);
+  }
+  prepare();
+  rmSync(join(checkout, 'stacks.json'));
+  assert.match(run('merge', '7', '--stack').stdout, /^blocker: PR #7 is not in a native stack/m);
+
+  // The trunk gained commits under files the stack changes: the driver merges it into the top layer (update-branch would only merge the layer below).
+  prepare();
+  json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
+  const moved = run('merge', '7', '--stack', '--interval', '0');
+  assert.equal(moved.status, 1, moved.stdout + moved.stderr);
+  assert.match(moved.stdout, /^blocker: release\/0\.1\.1 gained 2 commits .*`git merge origin\/release\/0\.1\.1`.*`board\.mjs merge 7 --stack`/m);
+  assert.deepEqual(calls(), []);
+
+  // Complete layers: one merge-async of the top head, no plain merge, no update; every layer shows as merged, with its issue and branch.
+  prepare();
+  const merged = run('merge', '7', '--stack', '--interval', '0');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.deepEqual(calls(), ['merge-async', 'delete claude/5-lower', 'delete claude/7-topic']);
+  assert.equal(asyncMerges(), `merge_action=direct_merge merge_method=merge sha=${first}\n`, 'only the top head goes to GitHub');
+  assert.match(merged.stdout, new RegExp(`^MERGED #7 head ${first} merge commit f{40}$`, 'm'));
+  assert.match(merged.stdout, new RegExp(`^MERGED #5 head ${second} merge commit f{40}$`, 'm'));
+  assert.match(merged.stdout, /^issue #1 \(PR #5\): open, status Human review$/m);
+  assert.match(merged.stdout, /^issue #1 \(PR #7\): open, status Human review$/m);
+
+  // A layer that GitHub did not merge with the top is not hidden: ERROR exit, no branch delete for it.
+  prepare();
+  flag('stack-layers-stay');
+  const stayed = run('merge', '7', '--stack', '--interval', '0');
+  assert.equal(stayed.status, 2, stayed.stdout + stayed.stderr);
+  assert.match(stayed.stdout, /^NOT MERGED \(OPEN\) #5 /m);
+  assert.deepEqual(calls(), ['merge-async', 'delete claude/7-topic']);
 });

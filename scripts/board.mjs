@@ -1834,19 +1834,67 @@ function handoff() {
   console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid}`);
 }
 
-/** The merge gate: handoff's PR gate plus the stack rule. Merging an upper layer of a stack merges every open layer below it too
- * (GitHub: "merge the top pull request, every pull request below it comes with it"), so the lower layer goes first, by itself.
- * No Stacks API (404) means no stack. */
-const mergeGate = () => finishedPr(number, 'merge', undefined, () => {
+/** The native stacks of PR `number`. No Stacks API (404) means no stack. */
+function readStacks() {
   let stacks;
   try { stacks = rest(`repos/${project.repository}/stacks?pull_request=${number}`); } catch (error) {
     if (!/\b404\b|Not Found/.test(String(error.stderr))) throw error;
     stacks = [];
   }
   assert.ok(Array.isArray(stacks), 'The stack membership is unreadable');
-  return stacks.flatMap(({ pull_requests: members = [] }) => members.slice(0, Math.max(0, members.findIndex(member => member.number === number)))
-    .filter(member => member.state === 'open').map(member => `PR #${member.number} below it in its stack is still open: merge it first, merging this layer would merge it too`));
-});
+  return stacks;
+}
+
+// What `merge --stack` read last: the open layers bottom first, the stack's trunk, and per layer its PR and issue numbers (for the report after the merge).
+let stackOrder = [], stackTrunk;
+const stackLayers = new Map();
+
+/** Why one layer of the stack does not hold the gate of `handoff` (CI and reviewers are the top head's business only): handoff comment for its head, threads, change requests, issue status. */
+function layerReasons(layer, viewer) {
+  const pr = readPr(layer);
+  if (pr.state !== 'OPEN' || pr.isDraft) return ['is not an open, non-draft PR'];
+  const reasons = [];
+  if (!findHandoffComment(restAll(`repos/${project.repository}/issues/${layer}/comments`), viewer, pr.headRefOid)) {
+    reasons.push(`has no handoff comment for head ${pr.headRefOid.slice(0, 7)} (a "## Übergabe" heading and a "Head: ${pr.headRefOid.slice(0, 7)}" line)`);
+  }
+  const threads = unresolvedThreads(layer, pr.reviewThreads);
+  if (threads.length) reasons.push(`has ${threads.length} unresolved review thread${threads.length === 1 ? '' : 's'}`);
+  assert.equal(pr.latestOpinionatedReviews.nodes.length, pr.latestOpinionatedReviews.totalCount, 'Not every review decision is readable');
+  for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) reasons.push(`has a change request by ${review.author?.login}`);
+  if (pr.mergeStateStatus === 'DIRTY') reasons.push('has merge conflicts');
+  reasons.push(...selfReviewReasons(pr.bodyHTML, selfReviewChecks()));
+  const { nodes, totalCount } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+    closingIssuesReferences(first:100){totalCount nodes{number}}}}}`, { owner, name, number: layer }).repository.pullRequest.closingIssuesReferences;
+  assert.equal(nodes.length, totalCount, `Not every issue link of PR #${layer} is readable`);
+  for (const { number: issueNumber } of nodes) {
+    const status = projectItem(readIssue(false, issueNumber))?.status?.name;
+    if (status !== 'Human review') reasons.push(`delivers issue #${issueNumber}, whose status is ${status ?? 'unset'}, not Human review`);
+  }
+  stackLayers.set(layer, { pr, issues: nodes.map(issue => issue.number) });
+  return reasons;
+}
+
+/** The reasons `merge --stack` refuses: PR `number` is not the top of exactly one native stack, or a layer lacks something. Names the layer. */
+function stackReasons(viewer) {
+  const stacks = readStacks();
+  if (stacks.length !== 1) return [`PR #${number} is ${stacks.length ? 'in several native stacks' : 'not in a native stack'}: --stack merges one stack`];
+  const members = stackMembers(stacks[0]);
+  assert.equal(typeof stacks[0].base?.ref, 'string', 'The native stack names no base branch');
+  const open = members.filter(member => member.state === 'open');
+  const closed = members.filter(member => member.state !== 'open' && !member.merged_at);
+  if (closed.length) return closed.map(member => `PR #${member.number} in the stack is closed without merge`);
+  if (open.at(-1)?.number !== number) return [`PR #${open.at(-1)?.number} is above PR #${number} in its stack: run merge ${open.at(-1)?.number} --stack for the top layer`];
+  stackOrder = open.map(member => member.number);
+  stackTrunk = stacks[0].base.ref;
+  return stackOrder.flatMap(layer => layerReasons(layer, viewer).map(reason => `PR #${layer} ${reason}`));
+}
+
+/** The merge gate: handoff's PR gate plus the stack rule. Merging an upper layer of a stack merges every open layer below it too
+ * (GitHub: "merge the top pull request, every pull request below it comes with it"), so without `--stack` the lower layer goes first, by itself;
+ * with it (`viewer` set) every layer must hold its own gate and the top merges them all. */
+const mergeGate = viewer => finishedPr(number, 'merge', undefined, () => viewer ? stackReasons(viewer) : readStacks()
+  .flatMap(({ pull_requests: members = [] }) => members.slice(0, Math.max(0, members.findIndex(member => member.number === number)))
+    .filter(member => member.state === 'open').map(member => `PR #${member.number} below it in its stack is still open: merge it first, merging this layer would merge it too`)));
 
 /**
  * Merge the moved base into the PR branch (update-branch, only if the head is still `head`), then wait until the PR shows the new head.
@@ -1903,8 +1951,23 @@ function deleteHeadBranch(pr) {
  * checked head: `--match-head-commit` needs the full object id, and it also refuses a push that lands after the check, so
  * no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR, except the stack refusal of a PR with stacked children (#321),
  * which goes once to merge-async with the same head and is read back until merged. Afterwards the head branch goes (see deleteHeadBranch).
+ * `--stack`: PR is the top of a native stack. Every layer holds its own gate first (stackReasons), CI and reviewers count for the top head
+ * only (it contains all layers), then the top alone goes to merge-async: GitHub merges every layer below it too, bottom first, and shows each as merged (#389).
+ * A moved trunk under files the stack changes is the driver's to merge into the top layer (update-branch would only merge the layer below).
  */
 async function merge() {
+  let viewer;
+  if (stack) {
+    ({ viewer } = graphql('query{viewer{login}}'));
+    assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
+    // Fail before the CI wait when a layer lacks something.
+    const reasons = stackReasons(viewer);
+    if (reasons.length) {
+      console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
+      process.exitCode = 1;
+      return;
+    }
+  }
   // Like `wait`: look again until CI and the reviewers have finished (or --max-minutes runs out: exit 4); the gate then decides once.
   const polled = await poll(() => reviews(stallOption()));
   if (!polled) return;
@@ -1918,20 +1981,31 @@ async function merge() {
     return Boolean(await poll(() => reviews(stallOption())));
   };
   // A red check from "updateBranchChecks" as the only reason asks for the base (#383): that is the update, not a FAILED.
-  const forCheck = polled.baseOnly;
+  const forCheck = !stack && polled.baseOnly;
   if (forCheck && !await update(polled.pr, polled.reasons.join('; '))) return;
-  let result = mergeGate();
+  let result = mergeGate(viewer);
   if (!result) return;
   assert.match(result.pr.headRefOid, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
-  const moved = forCheck ? null : baseMovement(result.pr);
+  const moved = forCheck ? null : baseMovement(stack ? { ...result.pr, baseRefName: stackTrunk } : result.pr);
+  if (moved?.shared.length && stack) {
+    console.log(['FAILED', `blocker: ${stackTrunk} gained ${moved.behind} commits that change ${filesText(moved.shared)} like this stack: run \`git merge origin/${stackTrunk}\` in the top layer's worktree, push once, then run \`board.mjs merge ${number} --stack\` again`].join('\n'));
+    process.exitCode = 1;
+    return;
+  }
   if (moved?.shared.length) {
     if (!await update(result.pr, `${result.pr.baseRefName} gained ${moved.behind} commits that change ${filesText(moved.shared)} like this PR`)) return;
-    result = mergeGate();
+    result = mergeGate(viewer);
     if (!result) return;
   }
   const { headRefOid } = result.pr;
   let asynchronous = false;
-  try {
+  const mergeAsync = () => {
+    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/merge-async`, '-X', 'PUT', '-f', 'merge_action=direct_merge', '-f', 'merge_method=merge', '-f', `sha=${headRefOid}`],
+      { encoding: 'utf8', env: gh.env });
+    asynchronous = true;
+  };
+  // A stack is merged by GitHub from its top, and a plain `gh pr merge` of the top would land it in the layer below: merge-async only.
+  if (stack) mergeAsync(); else try {
     execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
       { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
   } catch (error) {
@@ -1941,28 +2015,47 @@ async function merge() {
     const text = `${error.stderr}${error.stdout}`;
     if (!/part of a stack|asynchronous merge REST API|HTTP 403/i.test(text)) throw error;
     console.log(`note: gh pr merge was refused (${/HTTP 403/i.test(text) ? 'HTTP 403' : 'part of a stack'}); merging the same head with merge-async`);
-    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/merge-async`, '-X', 'PUT', '-f', 'merge_action=direct_merge', '-f', 'merge_method=merge', '-f', `sha=${headRefOid}`],
-      { encoding: 'utf8', env: gh.env });
-    asynchronous = true;
+    mergeAsync();
   }
-  let merged;
-  for (let read = 1; ; read++) {
-    merged = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-      pullRequest(number:$number){state mergeCommit{oid}}}}`, { owner, name, number }).repository.pullRequest;
-    if (!asynchronous || merged.state === 'MERGED' || read >= 10) break;
-    sleep(numberOption('--interval', 3));
-  }
-  const { state, mergeCommit } = merged;
+  // The merge is done and read back: nothing about the branch may turn it into an ERROR.
+  const dropBranch = pr => {
+    try { console.log(deleteHeadBranch(pr)); } catch (error) {
+      console.log(`note: branch ${pr.headRefName} not deleted (${String(error.stderr || error.message).trim()})`);
+    }
+  };
+  // merge-async answers 202 and merges in the background: read until the PR shows it (a stack layer too).
+  const readMerged = (layer, until) => {
+    for (let read = 1; ; read++) {
+      const current = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
+        pullRequest(number:$number){state mergeCommit{oid}}}}`, { owner, name, number: layer }).repository.pullRequest;
+      if (!until || current.state === 'MERGED' || read >= 10) return current;
+      sleep(numberOption('--interval', 3));
+    }
+  };
+  const { state, mergeCommit } = readMerged(number, asynchronous);
   assert.equal(state, 'MERGED', `Merge read-back shows #${number} as ${state}${asynchronous ? '; merge-async was accepted and may still land: read the PR before merging again' : ''}`);
   console.log(`MERGED #${number} head ${headRefOid} merge commit ${mergeCommit?.oid}`);
-  // The merge is done and read back: nothing about the branch may turn it into an ERROR.
-  try { console.log(deleteHeadBranch(result.pr)); } catch (error) {
-    console.log(`note: branch ${result.pr.headRefName} not deleted (${String(error.stderr || error.message).trim()})`);
+  // The layers below: GitHub marks each as merged with the top; one line per layer, its issues and head branch (the top's goes below).
+  for (const layer of stack ? stackOrder : []) {
+    const { pr, issues } = stackLayers.get(layer);
+    if (layer !== number) {
+      const lower = readMerged(layer, true);
+      console.log(`${lower.state === 'MERGED' ? 'MERGED' : `NOT MERGED (${lower.state})`} #${layer} head ${pr.headRefOid} merge commit ${lower.mergeCommit?.oid}`);
+      if (lower.state !== 'MERGED') process.exitCode = 2;
+      else dropBranch(pr);
+    }
+    // Issues close with the merge into the default branch; behind a release branch they stay open until the release.
+    for (const issueNumber of issues) {
+      const issue = readIssue(false, issueNumber);
+      console.log(`issue #${issueNumber} (PR #${layer}): ${issue.state.toLowerCase()}, status ${projectItem(issue)?.status?.name ?? 'unset'}`);
+    }
   }
+  dropBranch(result.pr);
 }
 
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
 const stallOption = () => numberOption('--stall', 20);
+const stack = process.argv.includes('--stack');
 // "reviewerGraceMinutes" in the project file is the default of --grace; 0 turns the grace off. Only a missing field is allowed.
 const projectGrace = project.reviewerGraceMinutes === undefined ? 3 : project.reviewerGraceMinutes;
 const graceOption = () => numberOption('--grace', projectGrace);
@@ -2219,7 +2312,7 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | sweep | check ISSUE [
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
   + ' | quota-wait [--max-minutes N]'
   + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
-  + ' | merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
+  + ' | merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // --help (-h) is the one flag that never writes: usage on stdout, success.
@@ -2233,7 +2326,7 @@ const writeArgs = { sweep: { words: 0 }, status: { words: 2 }, priority: { words
   body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
   new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1 } },
   ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1 } },
-  merge: { words: 1, flags: { '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } } };
+  merge: { words: 1, flags: { '--stack': 0, '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } } };
 function refusesArguments() {
   const { words, flags = {} } = writeArgs[command], args = process.argv.slice(3);
   let given = 0;

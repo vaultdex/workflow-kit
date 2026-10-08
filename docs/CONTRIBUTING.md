@@ -304,7 +304,9 @@ existing issue, PR and chat progress for coordination.
    base PR and yours), to target the branch of the layer directly below it
    and to contain that branch's current head (after a push below, rebase first and let CI run again). The handoff
    comment names the merge order (base PR first, then yours). `board.mjs merge` refuses an upper layer while a layer below it is
-   open, because GitHub would merge that one along.
+   open, because GitHub would merge that one along. To merge the whole stack in one run, call `board.mjs merge TOP --stack` for the top
+   layer: it checks every layer (handoff comment for its head, threads, change requests, issue in Human review), waits for CI of the top
+   head only and lets GitHub merge all layers with the top (README: `merge`).
 
 ### PR backlinks
 
