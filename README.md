@@ -453,13 +453,12 @@ which is untrusted, and not from its own checkout either (only the `repository` 
 }
 ```
 
-- `slots` (whole number from 1, default 1) lets `--watch` check that many PRs at the same time. It is read once at start from the
-  runner's own checkout (restart to change it), not per PR. A PR only ever runs on one slot; a new head of a running PR stops and
-  replaces its run as before. With `slots` missing or 1 nothing changes: one PR after the other in `<main checkout>-local-ci/work`.
-  With more than one slot each gets its own worktree, `work-1`, `work-2`, … (the old `work` stays unused and can be removed with
-  `git worktree remove`). A project command that uses a shared resource must key it by the worktree folder, like Vaultdex'
-  `gradle-container.mjs` does for its Gradle volume. `push` commands still run one at a time, at the start of each round, in the
-  project checkout and independent of the slots, so they can overlap with running checks.
+- `slots` (whole number from 1, default 1): `--watch` checks that many PRs at once, read at start from the runner's own checkout
+  (restart to change). A PR runs on one slot only; a new head replaces its run as before. With `slots` missing or 1 nothing changes
+  (one PR after the other in `<main checkout>-local-ci/work`). With more, each slot has its own worktree `work-1`, `work-2`, … (the
+  old `work` stays unused; remove it with `git worktree remove`). Commands sharing a resource must key it by the worktree folder, as
+  Vaultdex' `gradle-container.mjs` does for its Gradle volume. `push` commands still run one at a time at the start of each round,
+  independent of the slots, so they can overlap running checks.
 
 - `paths` use GitHub's rules for `*`, `**` and `!` only (no `?` or `[…]`): in order, a later match wins, `!` takes a file
   back out, `*` stays within a folder, `**` goes below it. A check runs when one changed file of the PR matches.
