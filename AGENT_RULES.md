@@ -120,13 +120,17 @@ From the project worktree root, run each step as its own command. The isolation 
 literal absolute path (`git -C F:/…/<worktree>/.vendor/workflow-kit …`); a relative path is rejected:
 
 1. `git submodule update --init .vendor/workflow-kit`
-2. `git -C .vendor/workflow-kit fetch origin main`
-3. `git -C .vendor/workflow-kit checkout -b claude/ISSUE-slug origin/main`
+2. `git -C <abs>/.vendor/workflow-kit fetch origin main`
+3. `git -C <abs>/.vendor/workflow-kit checkout -b claude/ISSUE-slug origin/main`
 4. Edit, commit and push inside `.vendor/workflow-kit`; open the PR against `vaultdex/workflow-kit`.
+
+`<abs>` is the literal absolute path of your worktree. Run every board command for the kit issue with
+`node .vendor/workflow-kit/scripts/board.mjs --cwd <abs>/.vendor/workflow-kit …`; without `--cwd`, status and fields land
+on the project board instead of the kit board.
 
 Its nested submodules stay empty: tests that need them skip with the reason
 `<submodule> nicht initialisiert` and run fully in CI. Initialize them with
-`git -C .vendor/workflow-kit submodule update --init --recursive` to run them locally.
+`git -C <abs>/.vendor/workflow-kit submodule update --init --recursive` to run them locally.
 
 ## Workflow
 
