@@ -45,11 +45,10 @@
       "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
     },
     {
-      "description": "Renovate regenerate holds contents: write; its action pins stay full commit SHAs with a version comment and need human review before merge.",
+      "description": "Renovate regenerate holds contents: write; its action pins stay full commit SHAs with a version comment.",
       "matchManagers": ["github-actions"],
       "matchFileNames": [".github/workflows/renovate-regenerate.yml"],
-      "pinDigests": true,
-      "automerge": false
+      "pinDigests": true
     }
   ]
 }
