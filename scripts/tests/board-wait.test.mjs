@@ -15,7 +15,9 @@ test('wait ends at once on merge conflicts of a non-draft PR and ignores every o
   assert.equal(noCi('DIRTY').status, 1, 'A later read failure keeps the known conflict verdict');
   rmSync(join(checkout, 'fail-rest'));
   for (const state of ['UNKNOWN', 'BEHIND']) assert.equal(noCi(state).status, 3, `${state} keeps waiting`);
-  assert.equal(look({ ...pr({ contexts: [] }), mergeStateStatus: 'DIRTY' }).status, 3, 'A draft with conflicts keeps waiting');
+  const draft = look({ ...pr(), isDraft: true });
+  assert.equal(draft.status, 1, 'A Draft is never DONE, even when its checks are green');
+  assert.match(draft.stdout, /^blocker: PR is still Draft; run board\.mjs ready 7 --local$/m);
   const readied = { ...pr({ pushed: 5 }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] } };
   assert.equal(reviews({ ...readied, mergeStateStatus: 'BEHIND' }), 0, 'BEHIND is no conflict');
 });

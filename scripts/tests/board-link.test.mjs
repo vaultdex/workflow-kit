@@ -11,7 +11,7 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   const commentWrites = () => existsSync(join(checkout, 'comment-writes')) ? readFileSync(join(checkout, 'comment-writes'), 'utf8').split('\n').filter(Boolean).length : 0;
   const prepare = (changes = {}) => {
     for (const file of ['mutations', 'link-noop', 'fail', 'comment-writes', 'comment-noop']) rmSync(join(checkout, file), { force: true });
-    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [[]],
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: false, linkPages: [[]],
       url: 'https://github.com/test/example/pull/7', body: 'Refs #1', ...changes })));
     writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0 }));
     writeFileSync(join(checkout, 'backlink-comments-1.json'), '[]');
