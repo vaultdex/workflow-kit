@@ -77,7 +77,8 @@ function fixture(t, config, prConfig) {
     if (path.startsWith('commits/')) return posts.filter(post => post.context === 'local-ci' && post.sha === path.split('/')[1]).reverse(); // neuester zuerst wie bei GitHub
     return [];
   };
-  const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, git, api };
+  const bash = gitBash(git(dir, '--exec-path')); // wie der Läufer: unter Windows das Git Bash, nie ein WSL-bash im PATH
+  const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, git, api, bash };
   /** Ändert die Prüfliste auf main von origin (wie ein Merge dort); der Läufer liest sie beim nächsten Durchlauf. */
   const publish = next => {
     writeFileSync(join(root, '.github/local-checks.json'), JSON.stringify(next));
