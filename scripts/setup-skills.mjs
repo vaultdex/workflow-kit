@@ -12,8 +12,11 @@ const scripts = dirname(fileURLToPath(import.meta.url));
 for (const name of ['setup-matt-pocock.mjs', 'setup-ponytail.mjs', 'setup-impeccable.mjs'])
   execFileSync(process.execPath, [join(scripts, name)], { stdio: 'inherit' });
 const kit = dirname(scripts), root = projectRoot();
-const findSkills = join(kit, '.agents/skills/find-skills');
-checkDirectory(kit, findSkills);
-for (const provider of ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'])
-  materialize(root, join(root, provider, 'skills/find-skills'), findSkills);
+// Kit-owned skills: the canonical copy lives in the kit's .agents/skills.
+for (const skill of ['find-skills', 'spec-review']) {
+  const source = join(kit, '.agents/skills', skill);
+  checkDirectory(kit, source);
+  for (const provider of ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'])
+    materialize(root, join(root, provider, 'skills', skill), source);
+}
 console.log('Skills generated for commit. Hook installation and personal trust are separate explicit steps.');

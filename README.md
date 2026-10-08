@@ -1,7 +1,8 @@
 # Workflow Kit
 
 Contribution workflow, GitHub Project setup and agent skills: Ponytail,
-Impeccable, Matt Pocock's complete collection and Vercel's `find-skills`.
+Impeccable, Matt Pocock's complete collection, Vercel's `find-skills` and the kit's own
+`spec-review` (`/spec-review <spec>`: spec against code, open work becomes sub-issues).
 Maintained by Vaultdex under MIT. Pinned upstream submodules and the
 [find-skills snapshot](.agents/skills/find-skills/NOTICE.md) retain their licenses,
 notices and reviewed adaptations in generated skills.
