@@ -211,6 +211,31 @@ test('merge merges the base for a red check from updateBranchChecks, but only wh
   assert.deepEqual(calls(), []);
 });
 
+test('merge merges the base once for any red check when the base moved, and a second red or an unmoved base is FAILED (#425)', t => {
+  const { run, show, calls, json, first, second, headOf } = mergeFixture(t);
+  const red = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } };
+
+  // The base gained commits (no shared file): the red CI may be stale, so the base is merged and the new head decides.
+  show(headOf(first, red));
+  json('compare.json', { behind: 2, own: ['a.txt'], base: ['c.txt'] });
+  json('pr-reads.json', [{}, {}, headOf(second)]);
+  const merged = run('merge', '7', '--interval', '0');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.deepEqual(calls(), [`update-branch ${first}`, 'merge', 'delete claude/7-topic']);
+
+  // Still red on the new head: FAILED, no second update, no merge.
+  show(headOf(first, red));
+  json('compare.json', { behind: 2, own: ['a.txt'], base: ['c.txt'] });
+  json('pr-reads.json', [{}, {}, headOf(second, red)]);
+  assert.equal(run('merge', '7', '--interval', '0').status, 1);
+  assert.deepEqual(calls(), [`update-branch ${first}`]);
+
+  // The base has not moved: the red check stands, nothing is written.
+  show(headOf(first, red));
+  assert.equal(run('merge', '7').status, 1);
+  assert.deepEqual(calls(), []);
+});
+
 test('merge gives both CI waits around a base update one shared --max-minutes deadline', t => {
   const { checkout, run, show, calls, json, first, second, headOf } = mergeFixture(t);
   const check = (conclusion, status = 'COMPLETED', name = 'Restart CI after retarget') => ({ statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name, status, conclusion }] } } });

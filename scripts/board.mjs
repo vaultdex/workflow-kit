@@ -2145,8 +2145,10 @@ async function merge() {
     return Boolean(await poll(() => reviews(stallOption())));
   };
   // A red check from "updateBranchChecks" as the only reason asks for the base (#383): that is the update, not a FAILED.
-  const forCheck = !stack && polled.baseOnly;
-  if (forCheck && !await update(polled.pr, polled.reasons.join('; '))) return;
+  // Any other red check on a head the base has left behind may come from the old merge state (#425): the base is merged once and the new CI decides; a second red is FAILED.
+  const stale = !stack && polled.failed && !polled.baseOnly && polled.reasons.every(reason => reason.startsWith('check ')) ? baseMovement(polled.pr) : null;
+  const forCheck = !stack && (polled.baseOnly || stale);
+  if (forCheck && !await update(polled.pr, stale ? `${polled.pr.baseRefName} gained ${stale.behind} commits since the merge-base; ${polled.reasons.join('; ')}` : polled.reasons.join('; '))) return;
   let result = mergeGate(viewer);
   if (!result) return;
   assert.match(result.pr.headRefOid, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
