@@ -3,7 +3,7 @@
 // Aufruf: local-ci.mjs [--cwd DIR] PR | --watch
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -228,7 +228,11 @@ const finished = (ctx, sha, base) => {
  */
 async function pushed(ctx, heads, saved, idle) {
   const moved = [];
-  const save = () => ctx.headsFile && writeFileSync(ctx.headsFile, JSON.stringify(Object.fromEntries(saved)));
+  const save = () => { // erst eine Nebendatei, dann umbenennen: ein Abbruch mitten im Schreiben hinterlässt keine halbe Datei
+    if (!ctx.headsFile) return;
+    writeFileSync(`${ctx.headsFile}.tmp`, JSON.stringify(Object.fromEntries(saved)));
+    renameSync(`${ctx.headsFile}.tmp`, ctx.headsFile);
+  };
   for (const prefix of ['main', 'release/']) {
     for (const { ref, object } of ctx.api('GET', `git/matching-refs/heads/${prefix}`)) {
       const branch = ref.slice('refs/heads/'.length);
@@ -265,7 +269,9 @@ async function pushed(ctx, heads, saved, idle) {
  */
 export async function watch(ctx, { rounds = Infinity } = {}) {
   let known = {};
-  try { known = JSON.parse(readFileSync(ctx.headsFile, 'utf8')); } catch { /* erster Start oder keine Datei: die erste Beobachtung ist die Ausgangslage */ }
+  if (ctx.headsFile) try { known = JSON.parse(readFileSync(ctx.headsFile, 'utf8')); } catch (error) {
+    if (error.code !== 'ENOENT') throw error; // erster Start: die erste Beobachtung ist die Ausgangslage; eine kaputte oder fremde Datei (auch `null`) bricht den Start sichtbar ab
+  }
   const heads = new Map(Object.entries(known)), saved = new Map(heads), done = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
   const waitUntil = async free => { while (busy.size > slots - free) await Promise.race([...busy.values()].map(({ task }) => task)); };
   const slotFree = () => waitUntil(1), idle = () => waitUntil(slots);
