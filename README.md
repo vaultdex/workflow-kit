@@ -274,7 +274,10 @@ and then work in that directory, their relative paths (changed files given to `a
   1 blocked, 2 unreadable or changed state, 3 waiting). Native links are read on
   every page, including manual links on release branches; text and branch links
   alone do not count. It also requires the [handoff comment](#handoff-comment) on the
-  PR for the current head. It prints a `note:` (never a refusal) for each open task-list item
+  PR for the current head. A partial PR (`Refs #N`, no closing link) beside exactly one other open PR that closes the issue
+  needs no native link: `handoff` runs only the PR gate and leaves the issue status unchanged (`status … "Automated review"` posts
+  only the backlink comment), `merge PR` is its gate; two open closing PRs stay unknown.
+  It prints a `note:` (never a refusal) for each open task-list item
   (`- [ ]`) of the issue body without an issue reference (`#N` or `OWNER/REPO#N`) and for a missing or
   malformed `Retro` section of the handoff comment. Both are read as GitHub renders them: checked-off
   items, items with a reference GitHub links, and code blocks do not count (a `#N` in a code

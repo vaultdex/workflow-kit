@@ -198,6 +198,9 @@ function currentIssuePr(issue) {
   return { number: open[0]?.number };
 }
 
+/** A partial PR only mentions the issue (`Refs #N`, no closing link) while exactly one other open PR closes it: it has its own gate and never moves the issue's status. */
+const isPartialPr = (issue, prNumber) => { const { number } = currentIssuePr(issue); return number !== undefined && number !== prNumber; };
+
 function readStackPr(prNumber) {
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     pullRequest(number:$number){number state isDraft isCrossRepository headRepository{nameWithOwner} baseRefName headRefName headRefOid}}}`,
@@ -459,7 +462,7 @@ function baseLines(issue, stacked) {
 function check(issue = readIssue(), claims, currentPrNumber) {
   let current = currentIssuePr(issue);
   if (currentPrNumber !== undefined && !current.unknown && current.number !== currentPrNumber) {
-    current = { unknown: `PR #${currentPrNumber} is not the unique open local PR linked to this issue` };
+    current = current.number === undefined ? { unknown: `PR #${currentPrNumber} is not the unique open local PR linked to this issue` } : { partial: true };
   }
   const { status, blocked, unknown, predecessors } = issueReasons(issue);
   const notes = [];
@@ -655,7 +658,7 @@ function guardOption(issue, { fieldName, option }) {
     try { if (!mayStart(check(issue))) throw new Error(verdict.join('; ')); } finally { console.log = log; }
   }
   if (fieldName === 'Status' && option.name === 'Automated review') {
-    verifyBacklinks();
+    verifyBacklinks(issue);
     // Only a hint, never a refusal; `handoff` notes these again.
     if (typeof issue.bodyHTML === 'string') for (const line of openAcceptance(issue.bodyHTML)) console.log(`warning: open acceptance in the issue (check it off, or move it to a follow-up and link that issue): ${line}`);
   }
@@ -1056,7 +1059,7 @@ const findBacklink = (comments, prUrl) => comments.find(comment => (comment.body
 }));
 
 /** Explicit scope works with Refs on release branches; native closing links remain a separate proof. */
-function verifyBacklinks() {
+function verifyBacklinks(issue) {
   const [prRef, ...extraIssues] = process.argv.slice(command === 'field' ? 6 : 5);
   assert.ok(prRef !== undefined, 'Automated review needs the PR number: status ISSUE "Automated review" PR [OTHER_ISSUE...]');
   const positive = ref =>/^\d+$/.test(ref ?? '') && Number.isSafeInteger(Number(ref)) && Number(ref) > 0;
@@ -1078,8 +1081,10 @@ function verifyBacklinks() {
     assert.ok(reference.test(pr.body), `PR #${prNumber} does not reference ${issueRef}`);
     let backlink = findBacklink(issueComments(repository, issueNumber), url);
     // An issue of this repository gets what `link` does (native connection and comment, read back); only a failure refuses.
+    // A partial PR of this issue gets the comment only: a native link would make it a second closing PR.
     if (!backlink && repository === project.repository) {
-      linkIssue(issueNumber, prNumber);
+      if (issueNumber === number && isPartialPr(issue, prNumber)) postBacklink(issueNumber, pr.url);
+      else linkIssue(issueNumber, prNumber);
       backlink = findBacklink(issueComments(repository, issueNumber), url);
     }
     assert.ok(backlink, `Missing backlink to ${pr.url} on #${issueNumber}; post the full URL as a comment and retry`);
@@ -1581,14 +1586,18 @@ function linkIssue(issueNumber, prNumber) {
     }
   }
   console.log(`#${issueNumber} is natively linked to PR #${prNumber}`);
-  // An existing comment is a success without a write. The text goes over stdin, like in `body`; the guard's reader proves it.
-  const prUrl = new URL(pr.url);
+  postBacklink(issueNumber, pr.url);
+}
+
+/** The backlink comment alone (a partial PR must not be linked natively). An existing comment is a success without a write. The text goes over stdin, like in `body`; the guard's reader proves it. */
+function postBacklink(issueNumber, url) {
+  const prUrl = new URL(url);
   let backlink = findBacklink(issueComments(project.repository, issueNumber), prUrl);
   if (!backlink) {
     execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${issueNumber}/comments`, '-X', 'POST', '-F', 'body=@-'],
-      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `PR: ${pr.url}\n` });
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `PR: ${url}\n` });
     backlink = findBacklink(issueComments(project.repository, issueNumber), prUrl);
-    assert.ok(backlink, `Backlink read-back differs: the comment with ${pr.url} is not readable on #${issueNumber}; read the comments before writing again`);
+    assert.ok(backlink, `Backlink read-back differs: the comment with ${url} is not readable on #${issueNumber}; read the comments before writing again`);
   }
   console.log(`backlink #${issueNumber}: ${backlink.html_url}`);
 }
@@ -1798,7 +1807,7 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
 }
 
 /** Read all PR gates and native links, optionally requiring the previously checked head; `prior`: see finishedPr. */
-function handoffPr(issueId, viewer, expectedHead, prior) {
+function handoffPr(issueId, viewer, expectedHead, prior, partial) {
   const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => {
     const reasons = [];
     const comment = findHandoffComment(comments, viewer, pr.headRefOid);
@@ -1809,7 +1818,7 @@ function handoffPr(issueId, viewer, expectedHead, prior) {
         { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
       for (const note of retroNotes(rendered.body_html)) console.log(`note: ${note}`);
     }
-    if (!connectedIssues(pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
+    if (!partial && !connectedIssues(pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
     return reasons;
   }, prior);
   return result?.pr;
@@ -1825,8 +1834,11 @@ function handoff() {
   const currentPrNumber = Number(value);
   const prior = handoffIssueReasons(issue, viewer, undefined, currentPrNumber);
   if (!prior) return;
-  const pr = handoffPr(issue.id, viewer, undefined, prior);
+  // A partial PR (see isPartialPr) passes the PR gate without a native link and leaves the issue's status alone: the closing PR hands the issue off.
+  const partial = isPartialPr(issue, currentPrNumber);
+  const pr = handoffPr(issue.id, viewer, undefined, prior, partial);
   if (!pr) return;
+  if (partial) return console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid} (partial PR: the issue status stays, the closing PR hands it off)`);
   if (!set('Status', 'Human review', () => {
     if (!handoffPr(issue.id, viewer, pr.headRefOid)) return;
     const current = readIssue();
