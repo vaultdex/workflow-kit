@@ -289,7 +289,7 @@ and then work in that directory, their relative paths (changed files given to `a
   Session ownership, final
   proof and whether a finding is justified remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
-- `merge PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]`: the only way for an agent with merge
+- `merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]`: the only way for an agent with merge
   authority to merge ([review loop](docs/CONTRIBUTING.md#review-loop) step 7). It applies the review gates of
   `handoff` (open non-draft PR, CI green, every reviewer with a trace on the head finished or
   stalled, no `blocker:` line, no open thread, determined merge state, the PR body's `Selbstprüfung` section when the project lists `"selfReview"`) and prints the same
@@ -307,11 +307,20 @@ and then work in that directory, their relative paths (changed files given to `a
   and the merge is read back until it shows) and counts
   only a read-back showing the PR as merged (`MERGED #N head … merge commit …`, exit 0; any other gh
   refusal or a read-back that differs: `ERROR`, exit 2). A layer of a [stack](docs/CONTRIBUTING.md#stacked-pull-requests)
-  with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. After the merge it
-  deletes the head branch (`branch deleted: …`) unless the repository's setting "Automatically delete head branches" does it,
+  with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. `merge TOP --stack` merges
+  the whole stack in one run instead: TOP is the top layer, and before anything else every open layer must hold its own gate (a
+  handoff comment for its head, no open thread, no change request, no conflicts, the layer above contains its head, the issues it delivers in Human review, the
+  `Selbstprüfung` section); `FAILED` names the layer and the reason, and nothing is merged. CI and reviewers count for the top head
+  only (it contains every layer), so the stack costs one CI round. The top alone goes to `merge-async` (never a plain `gh pr merge`, which
+  would land it in the layer below): GitHub merges every layer below with it, bottom first, and shows each as merged, without retarget.
+  A trunk that gained commits under files the stack changes ends `FAILED` with the manual way (`git merge origin/<trunk>` in the top layer,
+  push once, run again), because `update-branch` of the top would only merge the layer below. The output has a `MERGED #N …` line per
+  layer (`NOT MERGED (STATE) #N …` and exit 2 when GitHub left one open), `issue #N (PR #L): STATE, status S` per delivered issue
+  (merge writes no status: the issue closes with the merge into the default branch, behind a release branch it stays open until the
+  release). After the merge it deletes the head branch (every layer's with `--stack`, lower layers first; `branch deleted: …`) unless the repository's setting "Automatically delete head branches" does it,
   the branch is not of this repository, is the default branch or is the base of another open PR (a stack: GitHub would close
   that PR); it prints `branch kept: …` with the reason. A failed or already done delete is a `note:` or `branch gone:` line,
-  never an error of the merge. It does not read the issue, claims or the [handoff comment](#handoff-comment).
+  never an error of the merge. Without `--stack` it does not read the issue, claims or the [handoff comment](#handoff-comment).
 - `wait PR`: repeats `reviews` (first after 60 s, then at longer intervals up to 5 minutes, again from 60 s
   when what it awaits changes; twice as long below 1000 quota points; `--interval SECONDS` sets a fixed pause instead), prints `WAITING` lines on change and
   reads GraphQL only when REST shows a change since the last full read (head, update time, merge state, check runs, check suites,

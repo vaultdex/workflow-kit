@@ -249,7 +249,7 @@ and empty sections.
 Use GitHub's [stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs)
 (public preview) so a dependent issue does not wait for the merge of its predecessor's
 PR. Stack only when `check` says STACKABLE; otherwise the issue stays BLOCKED. Nothing
-obliges you to stack, and humans still merge, the whole stack included, bottom layer first.
+obliges you to stack, and humans still merge, the whole stack included (layer by layer from the bottom, or at once with `board.mjs merge TOP --stack`, step 6).
 No stacks across forks or repositories and none made of several parallel branches.
 There is no local maximum depth: continue at the current tip when the native stack is
 linear and the issue is STACKABLE. Every correction below restarts CI and reviews above
@@ -304,7 +304,9 @@ existing issue, PR and chat progress for coordination.
    base PR and yours), to target the branch of the layer directly below it
    and to contain that branch's current head (after a push below, rebase first and let CI run again). The handoff
    comment names the merge order (base PR first, then yours). `board.mjs merge` refuses an upper layer while a layer below it is
-   open, because GitHub would merge that one along.
+   open, because GitHub would merge that one along. To merge the whole stack in one run, call `board.mjs merge TOP --stack` for the top
+   layer: it checks every layer (handoff comment for its head, threads, change requests, issue in Human review), waits for CI of the top
+   head only and lets GitHub merge all layers with the top (README: `merge`).
 
 ### PR backlinks
 

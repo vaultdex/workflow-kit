@@ -92,6 +92,11 @@ function api(argv, input, stdout, stderr, exit) {
       const merged = { state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } };
       if (fs.existsSync('merge-async-late')) fs.writeFileSync('pr-reads.json', JSON.stringify([{}, merged]));
       else fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...merged }));
+      // stack-prs.json: GitHub merges the layers below the merged top with it (`merge --stack`), unless stack-layers-stay is set.
+      if (fs.existsSync('stack-prs.json') && !fs.existsSync('stack-layers-stay')) {
+        const layers = JSON.parse(fs.readFileSync('stack-prs.json'));
+        fs.writeFileSync('stack-prs.json', JSON.stringify(Object.fromEntries(Object.entries(layers).map(([key, layer]) => [key, { ...layer, ...merged }]))));
+      }
       stdout('{"status":"pending"}');
       exit(0);
     }
@@ -322,7 +327,8 @@ function api(argv, input, stdout, stderr, exit) {
       projectItems: { nodes: [{ project: { id: 'P1' }, fieldValues: { nodes: Object.entries(values).map(([id, name]) => ({ name: lost || name, field: { name: names[id] } })) } }] } } } };
   }
   else if (query.includes('reviewThreads(first:100')) {
-    let pr = JSON.parse(fs.readFileSync('pr.json'));
+    const stackPrs = fs.existsSync('stack-prs.json') ? JSON.parse(fs.readFileSync('stack-prs.json')) : {};
+    let pr = stackPrs[Number(argv.find(arg => arg.startsWith('number='))?.slice(7))] ?? JSON.parse(fs.readFileSync('pr.json'));
     if (query.includes('readyEvents') && fs.existsSync('pr-reads.json')) {
       const reads = JSON.parse(fs.readFileSync('pr-reads.json'));
       const overlay = reads.length > 1 ? reads.shift() : reads[0];
@@ -341,7 +347,8 @@ function api(argv, input, stdout, stderr, exit) {
   }
   else if (query.includes('closingIssuesReferences')) {
     if (fs.existsSync('fail-links')) exit(1);
-    let pr = JSON.parse(fs.readFileSync('pr.json'));
+    const stackPrs = fs.existsSync('stack-prs.json') ? JSON.parse(fs.readFileSync('stack-prs.json')) : {};
+    let pr = stackPrs[Number(argv.find(arg => arg.startsWith('number='))?.slice(7))] ?? JSON.parse(fs.readFileSync('pr.json'));
     if (pr.linkPending !== undefined) {
       pr = pr.linkPending > 0 ? { ...pr, linkPending: pr.linkPending - 1 } : { ...pr, linkPending: undefined, linkPages: [['I1']] };
       fs.writeFileSync('pr.json', JSON.stringify(pr));
@@ -355,7 +362,7 @@ function api(argv, input, stdout, stderr, exit) {
       headRefOid: pr.changedHead ?? pr.headRefOid,
       closingIssuesReferences: { totalCount: pr.linkTotal ?? pages.flat().length,
         pageInfo: { hasNextPage: index + 1 < pages.length, endCursor: String(index + 1) },
-        nodes: pages[index].map(id => id === null ? null : { id }) } } } };
+        nodes: pages[index].map(id => id === null ? null : { id, number: Number(String(id).replace(/\D/g, '')) }) } } } };
   }
   else if (query.includes('pullRequest(number')) {
     const number = Number(argv.find(arg => arg.startsWith('number='))?.slice(7));
