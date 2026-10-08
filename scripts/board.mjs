@@ -1260,14 +1260,17 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // check runs alone would show only the jobs reported so far. Another workflow or app never replaces it.
   const suiteFlow = suite => JSON.stringify([suite.app?.slug, suite.workflowRun?.workflow?.id]);
   const suiteRun = suite => suite.workflowRun?.databaseId;
+  const empty = suite => !suite.checkRuns.totalCount;
+  // An empty ACTION_REQUIRED suite is a pending approval, not a result: beside another suite of its workflow that has runs it counts for nothing.
+  const flowsWithRuns = new Set(commit.checkSuites.nodes.filter(suite => !empty(suite)).map(suiteFlow));
+  const flowSuites = commit.checkSuites.nodes.filter(suite => !(empty(suite) && suite.conclusion === 'ACTION_REQUIRED' && flowsWithRuns.has(suiteFlow(suite))));
   const newestSuiteRun = new Map();
-  for (const suite of commit.checkSuites.nodes.filter(suite => Number.isSafeInteger(suiteRun(suite)))) {
+  for (const suite of flowSuites.filter(suite => Number.isSafeInteger(suiteRun(suite)))) {
     newestSuiteRun.set(suiteFlow(suite), Math.max(newestSuiteRun.get(suiteFlow(suite)) ?? -Infinity, suiteRun(suite)));
   }
-  const empty = suite => !suite.checkRuns.totalCount;
   const replaced = suite => Number.isSafeInteger(suiteRun(suite)) && suiteRun(suite) < newestSuiteRun.get(suiteFlow(suite));
-  const replacedEmpty = new Set(commit.checkSuites.nodes.filter(suite => awaited.has(suite.app?.slug) && empty(suite) && replaced(suite)).map(suiteFlow));
-  for (const suite of commit.checkSuites.nodes.filter(suite => awaited.has(suite.app?.slug) && !replaced(suite) && (empty(suite) || replacedEmpty.has(suiteFlow(suite))))) {
+  const replacedEmpty = new Set(flowSuites.filter(suite => awaited.has(suite.app?.slug) && empty(suite) && replaced(suite)).map(suiteFlow));
+  for (const suite of flowSuites.filter(suite => awaited.has(suite.app?.slug) && !replaced(suite) && (empty(suite) || replacedEmpty.has(suiteFlow(suite))))) {
     // A suite with runs is judged by CI that never stalls; an empty one is a workflow that may never report.
     if (suite.status !== 'COMPLETED') waiting.push({ text: `check suite ${suite.app.slug}${empty(suite) ? ' without runs' : ' still running'}`, since: empty(suite) ? Date.parse(suite.createdAt) : Infinity });
     // A workflow that fails to start (STARTUP_FAILURE) completes its suite without any run to show it.
