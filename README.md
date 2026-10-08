@@ -440,8 +440,9 @@ starts the new head, like `cancel-in-progress`; the aborted statuses become `err
 (it skips a head whose `local-ci` status is already `success` or `failure`, so a restart does not repeat work) and
 skips drafts and fork PRs.
 
-`"localChecks"` in `.github/workflow-project.json` names a JSON file of the project (read from the checkout the
-script runs in, so update that checkout to change the checks):
+`"localChecks"` in `.github/workflow-project.json` names a JSON file of the project (path relative to the repository root, with `/`).
+The script reads both files per PR from `origin/<base of the PR>` after a fresh fetch (`git show`), never from the PR itself,
+which is untrusted, and not from its own checkout either (only the `repository` name is read there). A change merged on `main` or a release branch applies from the next round, no restart needed:
 
 ```json
 {
@@ -461,7 +462,10 @@ script runs in, so update that checkout to change the checks):
   `local-ci` then says so, which is what `board.mjs` needs to stop waiting for the "first CI check".
 - `setup` runs once per PR before the selected checks (not at all when none is selected, 60 minutes at most); a failed setup fails them.
 - Stopping the runner by hand (Ctrl+C) leaves the statuses of the running head `pending`; the next `local-ci.mjs PR`, or `--watch` after a restart, runs that head again.
-- `push` runs in the project checkout whenever `main` or a `release/*` branch moved while `--watch` runs, with
+- Without `.github/workflow-project.json` (or its `localChecks` file) on the base branch, the PR gets a red `local-ci`
+  status that says so, and the runner goes on with the next PR.
+- `push` runs in the project checkout whenever `main` or a `release/*` branch moved while `--watch` runs (its list comes from
+  `origin/<that branch>`; a branch without the config is skipped), with
   `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
 - `board.mjs reviews`, `wait`, `handoff` and `merge` read these statuses like check runs: `pending` waits, `failure` and
   `error` are red.

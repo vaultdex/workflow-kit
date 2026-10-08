@@ -23,16 +23,24 @@ export const matches = (paths, file) => paths.reduce((hit, path) => path.startsW
 /** Die Prüfungen, deren Filter mindestens eine geänderte Datei treffen. */
 export const select = (checks, files) => checks.filter(check => files.some(file => matches(check.paths, file)));
 
-/** `localChecks` aus .github/workflow-project.json: Pfad zu einer JSON-Datei mit checks, optional setup und push. */
-export function loadConfig(root) {
-  const project = JSON.parse(readFileSync(join(root, '.github/workflow-project.json'), 'utf8'));
+/** `localChecks` aus .github/workflow-project.json: Pfad zu einer JSON-Datei mit checks, optional setup und push. `read(pfad)` liefert den Inhalt. */
+export function loadConfig(read) {
+  const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
-  const { checks, setup = [], push = [] } = JSON.parse(readFileSync(resolve(root, project.localChecks), 'utf8'));
+  const { checks, setup = [], push = [] } = JSON.parse(read(project.localChecks));
   for (const check of checks) {
     assert.ok(check.context && check.paths?.every?.(path => typeof path === 'string') && check.run?.length && check.timeoutMinutes > 0,
       `localChecks: "${check.context}" braucht context, paths, run und timeoutMinutes`);
   }
   return { repository: project.repository, checks, setup, push };
+}
+
+/** Die Konfiguration von origin/<branch> nach frischem Fetch: nie aus dem eigenen Checkout und nie aus dem PR, dem man nicht traut. */
+export function branchConfig({ git, root }, branch) {
+  try { git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`); } catch { throw new Error(`origin/${branch} ist nicht abrufbar`); }
+  return loadConfig(path => {
+    try { return git(root, 'show', `origin/${branch}:${path}`); } catch { throw new Error(`${path} fehlt auf origin/${branch}`); }
+  });
 }
 
 /** Sperrdatei: ein Läufer pro Rechner und Projekt. Eine Datei eines toten Prozesses wird übernommen. */
@@ -106,7 +114,7 @@ async function checkout(ctx, pr) {
  */
 export async function checkPullRequest(ctx, pr) {
   const { api, work } = ctx, sha = pr.head.sha, host = hostname(), started = Date.now();
-  const config = ctx.config(), took = () => `${Math.round((Date.now() - started) / 1000)} s`;
+  const took = () => `${Math.round((Date.now() - started) / 1000)} s`;
   const open = new Set(); // Status, die noch pending sind
   const report = (context, state, description) => {
     console.log(`#${pr.number} ${sha.slice(0, 7)} ${context}: ${state} (${description})`);
@@ -124,8 +132,9 @@ export async function checkPullRequest(ctx, pr) {
   let ok = false;
   try {
     report(AGGREGATE, 'pending', `Prüfung läuft auf ${host}`);
-    let env, files;
+    let config, env, files;
     try {
+      config = branchConfig(ctx, pr.base.ref); // bei jedem Durchlauf neu vom Ziel-Branch; fehlt sie dort, wird der PR übersprungen
       const { base, files: changed } = await checkout(ctx, pr);
       files = changed;
       env = { ...process.env, BASE_SHA: base, BASE_REF: pr.base.ref, HEAD_REF: pr.head.ref, EVENT: 'pull_request' };
@@ -196,11 +205,13 @@ async function pushed(ctx, heads) {
     }
   }
   for (const { branch, before, after } of moved) {
+    let commands;
+    try { commands = branchConfig(ctx, branch).push; } catch (error) { console.error(`push ${branch}: übersprungen, ${error.message}`); continue; }
     const env = { ...process.env, BRANCH: branch, BEFORE_SHA: before, AFTER_SHA: after, EVENT: 'push' };
     mkdirSync(ctx.logs, { recursive: true });
     const log = join(ctx.logs, `push-${branch.replace(/[^\w.-]+/g, '-')}.log`);
     writeFileSync(log, '');
-    for (const command of ctx.config().push) {
+    for (const command of commands) {
       const { code } = await shell(command, { cwd: ctx.root, env, log, timeoutMs: 30 * 60_000, state: {} });
       if (code) { console.error(`push ${branch}: "${command}" endete mit ${code} (${log})`); break; }
     }
@@ -232,12 +243,11 @@ async function main() {
   }
   const root = projectRoot(), gh = externalTool('gh', root), git = externalTool('git', root);
   const exec = (tool, args, options) => execFileSync(tool.file, args, { encoding: 'utf8', env: tool.env, maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'pipe'], ...options });
-  const { repository } = loadConfig(root);
+  const { repository } = JSON.parse(readFileSync(join(root, '.github/workflow-project.json'), 'utf8')); // nur die Identität des Projekts; die Prüfliste kommt pro PR vom Ziel-Branch
   // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   const ctx = {
     repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000, mergeWaitMs: 10_000, mergeAttempts: 6,
-    config: () => loadConfig(root),
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
     api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
