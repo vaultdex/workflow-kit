@@ -427,7 +427,7 @@ a check alone does not claim work.
 
 For a project without Actions minutes, `scripts/local-ci.mjs` runs the PR checks on this machine and reports them as
 commit statuses (REST only, no GraphQL points). **The status comes from this script, not from an agent's claim**;
-the log stays in `<main checkout>-local-ci/logs` (a folder beside the main checkout). Run it in Git Bash (commands go through `bash -c`), only for
+the log stays in `<main checkout>-local-ci/logs` (a folder beside the main checkout). Commands go through `bash -c`, on Windows always Git for Windows' `bash.exe` (derived from `git --exec-path`; the run aborts at start if it is missing, not the first `bash` on PATH, which can be WSL). Run it only for
 PRs whose code you trust: the checks execute it.
 
 ```sh
