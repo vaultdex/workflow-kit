@@ -167,7 +167,7 @@ and then work in that directory, their relative paths (changed files given to `a
   Automated review, newest claim names your session) under "Finish your own work first"; then abandoned work, a "Stale or conflicting" list of issues in
   In progress, Automated review or Human review whose open PR had no activity for `"staleHours"` (project file, default 6; 0 or more) or whose
   Human-review PR has merge conflicts (DIRTY). Activity is the newest update of the issue (comments), its Project item (status) and its open PR
-  (push, comments, reviews), including bots. A claim without activity for `staleHours` has expired: `check ISSUE --session NEW` then notes the stale claim
+  (push, comments, reviews), including bots. A claim without activity for `staleHours` (or on a Human-review issue whose PR has conflicts) has expired: `check ISSUE --session NEW` then notes the stale claim
   instead of BLOCKED (the open PR and branch of that issue hold nothing either); the new claim comment says `Takeover of stale claim OLD`, the assignees stay.
   `check ISSUE --session ID` of a new start is BLOCKED with `finish #N first` while you have such an own issue (a resume of it, or a stack on its work, is not).
 - `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open

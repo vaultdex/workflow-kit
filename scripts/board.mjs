@@ -130,7 +130,7 @@ const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!
   refs(refPrefix:"refs/heads/",query:$branch,first:20){nodes{name}}
   issue(number:$number){
   ${issueFields(predecessorFields)} bodyHTML
-  closedByPullRequestsReferences(first:100){totalCount nodes{number state updatedAt repository{nameWithOwner} headRefName}}
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state updatedAt mergeStateStatus repository{nameWithOwner} headRefName}}
   ${subIssues ? `subIssues(first:${subIssues}){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}` : ''}}}}`;
 /** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
 const named = (label, read) => {
@@ -160,18 +160,21 @@ function loadDeliveries(predecessors) {
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
 // "staleHours" in the project file (default 6): after that long without activity a claim has expired and the work counts as abandoned (#400).
-const staleHours = project.staleHours ?? 6;
+const staleHours = project.staleHours === undefined ? 6 : project.staleHours;
 /**
  * Milliseconds since the last activity: the newest of the issue (comments), its Project item (status) and its open PR (push, comments, reviews),
  * all read with the issue anyway. undefined when GitHub gave no time.
- * ponytail: PR activity includes bot comments; a PR that a bot keeps touching never goes stale. Cheapest signal, no extra query per issue.
+ * ponytail: PR activity includes bot comments, so a PR that a bot keeps touching never goes stale; replace with the newest commit date of the PR head if that bites.
  */
 function idleMs(issue) {
   const prs = (issue.closedByPullRequestsReferences?.nodes ?? []).filter(pr => pr?.state === 'OPEN');
   const times = [issue.updatedAt, projectItem(issue)?.updatedAt, ...prs.map(pr => pr.updatedAt)].map(time => Date.parse(time)).filter(Number.isFinite);
   return times.length ? Date.now() - Math.max(...times) : undefined;
 }
-const isStale = issue => idleMs(issue) > staleHours * 3_600_000;
+const openPr = issue => issue.closedByPullRequestsReferences?.nodes.find(pr => pr?.state === 'OPEN' && pr.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
+const conflicting = issue => projectItem(issue)?.status?.name === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY';
+/** Abandoned: no activity for staleHours, or a Human-review PR with conflicts (it is not mergeable, so nobody finishes it). A claim on such an issue has expired. */
+const isStale = issue => idleMs(issue) > staleHours * 3_600_000 || conflicting(issue);
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
 function predecessorReasons({ totalCount, nodes }) {
@@ -406,9 +409,11 @@ function claimReasons(issue, session) {
 function workReasons(issue, session) {
   const own = session ? `no claim of session ${session}` : 'pass --session ID to prove it is yours';
   const prs = (issue.closedByPullRequestsReferences?.nodes ?? []).filter(pr => pr?.state === 'OPEN');
+  // An abandoned PR (see isStale) may be taken over with --session; a branch has no activity signal and keeps holding the issue.
+  const mayTake = session && prs.length && isStale(issue);
   const heads = new Set(prs.map(pr => pr.headRefName));
   const branches = (issue.branches ?? []).map(branch => branch.name).filter(branch => new RegExp(`^[\\w.-]+/${issue.number}-`).test(branch) && !heads.has(branch));
-  return [...prs.map(pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName})` : ''} closes this issue; ${own}`),
+  return [...(mayTake ? [] : prs).map(pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName})` : ''} closes this issue; ${own}`),
     ...branches.map(branch => `branch ${branch} belongs to this issue; ${own}`)];
 }
 
@@ -516,8 +521,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
     blocked.push(...found.blocked);
     notes.push(...found.notes);
     claim = found.claim;
-    // Abandoned work (no activity for staleHours) may be taken over: its PR and branch hold nothing then.
-    if ((!claims.session || claim?.session !== claims.session) && !(claims.session && isStale(issue))) blocked.push(...workReasons(issue, claims.session));
+    if (!claims.session || claim?.session !== claims.session) blocked.push(...workReasons(issue, claims.session));
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;
@@ -541,8 +545,9 @@ function check(issue = readIssue(), claims, currentPrNumber) {
   // Finish first: another issue of the caller in In progress or Automated review holds a new start (not a resume, not a stack on that very work).
   if (claims?.session && !blocked.length && !unknown.length && claim?.session !== claims.session) try {
     const login = issue.viewer.login, mine = ownWork(assignedIssues(login), login, claims.session).filter(own => own.number !== issue.number);
-    const stacksOnOwn = stackedOn && predecessors.open.some(open => open.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() && mine.some(own => own.number === open.number));
-    if (!stacksOnOwn) blocked.push(...mine.map(own => `finish #${own.number} first: it is your open work (${projectItem(own).status.name}); hand it off before starting another issue`));
+    // Own work that is the base of the stack is continued, not left behind; any other own issue still comes first.
+    const base = own => stackedOn && predecessors.open.some(open => open.number === own.number && open.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
+    blocked.push(...mine.filter(own => !base(own)).map(own => `finish #${own.number} first: it is your open work (${projectItem(own).status.name}); hand it off before starting another issue`));
   } catch (error) { unknown.push(`own open work is unreadable: ${String(error.stderr || error.message).trim()}`); }
   const plain = verdictOf({ blocked, unknown });
   const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;
@@ -657,14 +662,11 @@ function next() {
   // which a new session may take over (check ISSUE --session ID treats a stale claim as expired).
   const status = issue => projectItem(issue)?.status?.name;
   const session = sessionOption(), mine = session ? ownWork(nodes, login, session) : [];
-  const openPr = issue => issue.closedByPullRequestsReferences?.nodes.find(pr => pr.state === 'OPEN' && pr.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
-  const conflict = issue => status(issue) === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY';
-  const abandoned = nodes.filter(issue => ['In progress', 'Automated review', 'Human review'].includes(status(issue)) && !mine.includes(issue) && openPr(issue)
-    && (isStale(issue) || conflict(issue)));
+  const abandoned = nodes.filter(issue => ['In progress', 'Automated review', 'Human review'].includes(status(issue)) && !mine.includes(issue) && openPr(issue) && isStale(issue));
   const work = (issue, note) => `#${issue.number} [${status(issue)}] ${issue.title} (PR #${openPr(issue)?.number ?? '-'}${note ? `, ${note}` : ''})`;
   if (mine.length) console.log(`Finish your own work first (check ISSUE is BLOCKED for a new start meanwhile):\n${mine.map(issue => work(issue)).join('\n')}\n`);
   if (abandoned.length) console.log(`Stale or conflicting work, a new session may take it over (check ISSUE --session ID):\n${abandoned.map(issue => work(issue,
-    conflict(issue) ? 'merge conflicts' : `no activity for ${ago(idleMs(issue))}`)).join('\n')}\n`);
+    conflicting(issue) ? 'merge conflicts' : `no activity for ${ago(idleMs(issue))}`)).join('\n')}\n`);
   for (const issue of startable) console.log(line(issue));
   console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
   if (stackable.length) console.log('\nReady and stackable on an open PR (check ISSUE shows STACKABLE; see docs/CONTRIBUTING.md#stacked-pull-requests):');

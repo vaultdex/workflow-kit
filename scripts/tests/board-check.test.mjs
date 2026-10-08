@@ -595,10 +595,10 @@ test('check of a new issue is BLOCKED with "finish #N first" while the own sessi
 test('check lets a new session take over a claim without activity for staleHours, also with its open PR', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
-  const work = (issueHours, prHours) => {
-    const base = issue('In progress');
+  const work = (issueHours, prHours, status = 'In progress', mergeStateStatus = 'CLEAN') => {
+    const base = issue(status);
     writeIssue({ ...base, updatedAt: hoursAgo(issueHours), projectItems: { nodes: [{ ...base.projectItems.nodes[0], updatedAt: hoursAgo(issueHours) }] },
-      closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', updatedAt: hoursAgo(prHours), repository: { nameWithOwner: 'test/example' }, headRefName: 'claude/1-work' }] } });
+      closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', mergeStateStatus, updatedAt: hoursAgo(prHours), repository: { nameWithOwner: 'test/example' }, headRefName: 'claude/1-work' }] } });
   };
   writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' }, body: 'Agent: claude, Session: OLD',
     html_url: 'https://example.test/c1', created_at: '2026-10-06T10:00:00Z' }]));
@@ -612,4 +612,8 @@ test('check lets a new session take over a claim without activity for staleHours
   assert.equal(run('check', '1').status, 1, 'without a session nothing is taken over');
   work(7, 1);
   assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a push to the PR is activity');
+  work(1, 1, 'Human review', 'DIRTY');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 0, 'a Human-review PR with conflicts is abandoned at once');
+  work(1, 1, 'Human review');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a clean one is not');
 });
