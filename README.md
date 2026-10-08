@@ -287,6 +287,8 @@ and then work in that directory, their relative paths (changed files given to `a
   PR for the current head. A partial PR (`Refs #N`, no closing link) beside exactly one other open PR that closes the issue
   needs no native link: `handoff` runs only the PR gate and leaves the issue status unchanged (`status … "Automated review"` posts
   only the backlink comment), `merge PR` is its gate; two open closing PRs stay unknown.
+  A lower layer of a stack (another open PR has its branch as base) with conflicts passes with `note: stacked: conflicts resolve in the top PR`
+  (`merge TOP --stack`); `sweep` and `next` leave it in Human review too. The top layer stays blocked by conflicts.
   It prints a `note:` (never a refusal) for each open task-list item
   (`- [ ]`) of the issue body without an issue reference (`#N` or `OWNER/REPO#N`) and for a missing or
   malformed `Retro` section of the handoff comment. Both are read as GitHub renders them: checked-off
@@ -322,7 +324,7 @@ and then work in that directory, their relative paths (changed files given to `a
   refusal or a read-back that differs: `ERROR`, exit 2). A layer of a [stack](docs/CONTRIBUTING.md#stacked-pull-requests)
   with an open layer below it is refused (`FAILED`, exit 1): merging it would merge that layer too. `merge TOP --stack` merges
   the whole stack in one run instead: TOP is the top layer, and before anything else every open layer must hold its own gate (a
-  handoff comment for its head, no open thread, no change request, no conflicts, the layer above contains its head, the issues it delivers in Human review, the
+  handoff comment for its head, no open thread, no change request, no conflicts (a layer below the top only gets `note: PR #N stacked: conflicts resolve in the top PR`), the layer above contains its head, the issues it delivers in Human review, the
   `Selbstprüfung` section); `FAILED` names the layer and the reason, and nothing is merged. CI and reviewers count for the top head
   only (it contains every layer), so the stack costs one CI round. The top alone goes to `merge-async` (never a plain `gh pr merge`, which
   would land it in the layer below): GitHub merges every layer below with it, bottom first, and shows each as merged, without retarget.

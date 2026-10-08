@@ -304,6 +304,21 @@ test('handoff lists merge conflicts that GitHub reports only after an undetermin
   assert.doesNotMatch(result.stdout, /WAITING|not determined/);
 });
 
+test('handoff treats a conflict of a lower stack layer as a note, the top layer stays blocked (#405)', t => {
+  const { checkout, run, writeIssue } = handoffFixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'handoff-fixture'), '');
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ mergeStateStatus: 'DIRTY', headRefName: 'claude/1-topic' })));
+  let result = run('handoff', '1', '7', '--interval', '0');
+  assert.equal(result.status, 1, 'no PR builds on it: the top layer');
+  assert.match(result.stdout, /blocker: merge conflicts/);
+  writeFileSync(join(checkout, 'dependents.json'), JSON.stringify([{ number: 8, base: { ref: 'claude/1-topic' } }]));
+  result = run('handoff', '1', '7', '--interval', '0');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /note: stacked: conflicts resolve in the top PR/);
+  assert.match(result.stdout, /HANDOFF #1 PR #7/);
+});
+
 test('handoff refuses an unknown flag before any write', t => {
   handoffFixture(t).refusesUnknownFlag('handoff', '1', '7');
 });

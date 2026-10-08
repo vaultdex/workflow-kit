@@ -172,7 +172,19 @@ function idleMs(issue) {
   return times.length ? Date.now() - Math.max(...times) : undefined;
 }
 const openPr = issue => issue.closedByPullRequestsReferences?.nodes.find(pr => pr?.state === 'OPEN' && pr.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
-const conflicting = issue => projectItem(issue)?.status?.name === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY';
+/** The open PRs that use this branch as their base: a PR with such a dependent is a lower layer of a stack. */
+function dependentPrs(branch) {
+  const dependents = rest(`repos/${project.repository}/pulls?state=open&base=${encodeURIComponent(branch)}&per_page=100`);
+  assert.ok(Array.isArray(dependents), 'The open PRs on the branch are unreadable');
+  return dependents;
+}
+/** A lower stack layer keeps conflicts with its own base: they resolve in the top PR (#405). Read only for a DIRTY PR, so it costs nothing otherwise. */
+const lowerLayer = pr => {
+  if (pr.mergeStateStatus !== 'DIRTY') return false;
+  // An unreadable lookup keeps the conflict as the verdict: a known conflict is never turned into an error.
+  try { return dependentPrs(pr.headRefName).length > 0; } catch { return false; }
+};
+const conflicting = issue => projectItem(issue)?.status?.name === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY' && !lowerLayer(openPr(issue));
 /** Abandoned: no activity for staleHours, or a Human-review PR with conflicts (it is not mergeable, so nobody finishes it). A claim on such an issue has expired. */
 const isStale = issue => idleMs(issue) > staleHours * 3_600_000 || conflicting(issue);
 
@@ -586,13 +598,13 @@ function sweep() {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{id number
       projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
-      closedByPullRequestsReferences(first:10){totalCount nodes{number url mergeStateStatus repository{nameWithOwner}}}}}}}`,
+      closedByPullRequestsReferences(first:10){totalCount nodes{number url mergeStateStatus headRefName repository{nameWithOwner}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open`, ...(after && { after }) });
     for (const issue of search.nodes) {
       if (projectItem(issue)?.status?.name !== 'Human review') continue;
       const linked = issue.closedByPullRequestsReferences;
       assert.ok(linked.totalCount <= linked.nodes.length, `#${issue.number} has more linked PRs than sweep reads; it would be reported clean`);
-      const pr = linked.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
+      const pr = linked.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() && !lowerLayer(node));
       if (!pr) continue;
       plan ??= resolveOption('Status', 'Automated review');
       // The comment first: a failed comment must not leave an issue out of Human review that nobody was told about.
@@ -625,7 +637,7 @@ function next() {
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body updatedAt assignees(first:10){nodes{login}}
       blockedBy(first:100){totalCount nodes{${predecessorFields}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
-      closedByPullRequestsReferences(first:10){nodes{number state updatedAt mergeStateStatus repository{nameWithOwner}}}
+      closedByPullRequestsReferences(first:10){nodes{number state updatedAt mergeStateStatus headRefName repository{nameWithOwner}}}
       projectItems(first:100){nodes{project{id} updatedAt status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open ${blocking}`, ...(after && { after }) });
@@ -1384,7 +1396,10 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   // Conflicts start no workflow, so the wait would never end; the fix is merging the base now.
   // UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
-  if (pr.mergeStateStatus === 'DIRTY' && !pr.isDraft) {
+  // A lower layer of a stack (another open PR is based on it) conflicts with its own base until the top PR merges it: a note, not a blocker (#405).
+  const lower = !pr.isDraft && lowerLayer(pr);
+  if (lower) lines.push('note: stacked: conflicts resolve in the top PR');
+  else if (pr.mergeStateStatus === 'DIRTY' && !pr.isDraft) {
     failed = true;
     reasons.push('merge conflicts');
     lines.push('blocker: merge conflicts');
@@ -1536,13 +1551,13 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
       lines.push(`dismissed stale change request by ${login(review.author)}: all threads are resolved`);
     } else lines.push(`blocker: changes requested by ${login(review.author)}`);
   }
-  if (pr.mergeStateStatus === 'DIRTY') lines.push('blocker: merge conflicts'); // a Draft returned above
+  if (pr.mergeStateStatus === 'DIRTY' && !lower) lines.push('blocker: merge conflicts'); // a Draft returned above
   // ponytail: one fixed "usual duration" for every reviewer; replace when earlier review durations are readable.
   for (const entry of waiting.filter(entry => stalled(entry.since))) lines.push(`stalled: ${entry.text}`);
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, reasons, lines, pr, comments, threads };
+  return { done: failed || !pending.length, failed, reasons, lines, pr, comments, threads, lower };
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
@@ -1859,7 +1874,7 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
   }
   // The snapshot's own DIRTY is already a blocker line of reviews(); a DIRTY that GitHub computed during the re-reads is new.
   if (state === 'DIRTY' && result.pr.mergeStateStatus !== 'DIRTY') reasons.push('merge conflicts: resolve them before ' + action);
-  if (!mergeStates.includes(state)) {
+  if (!mergeStates.includes(state) && !(state === 'DIRTY' && result.lower)) {
     if (!reasons.length) {
       console.log('WAITING\nwaiting: PR mergeability is not determined');
       process.exitCode = 3;
@@ -1945,7 +1960,8 @@ function layerReasons(layer, viewer) {
   if (threads.length) reasons.push(`has ${threads.length} unresolved review thread${threads.length === 1 ? '' : 's'}`);
   assert.equal(pr.latestOpinionatedReviews.nodes.length, pr.latestOpinionatedReviews.totalCount, 'Not every review decision is readable');
   for (const review of pr.latestOpinionatedReviews.nodes.filter(review => review.state === 'CHANGES_REQUESTED')) reasons.push(`has a change request by ${review.author?.login}`);
-  if (pr.mergeStateStatus === 'DIRTY') reasons.push('has merge conflicts');
+  // Below the top, conflicts with the own base resolve when the top merges the layer: a note in merge(), as in handoff (#405).
+  if (pr.mergeStateStatus === 'DIRTY' && layer === number) reasons.push('has merge conflicts');
   reasons.push(...selfReviewReasons(pr.bodyHTML, selfReviewChecks()));
   const { nodes, totalCount } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
     closingIssuesReferences(first:100){totalCount nodes{number}}}}}`, { owner, name, number: layer }).repository.pullRequest.closingIssuesReferences;
@@ -2025,8 +2041,7 @@ function deleteHeadBranch(pr) {
   // With "Automatically delete head branches" GitHub deletes it itself, and a manual delete would answer 422.
   if (repository.delete_branch_on_merge) return `branch kept: ${project.repository} deletes merged head branches itself`;
   if (branch === repository.default_branch) return `branch kept: ${branch} is the default branch`;
-  const dependents = rest(`repos/${project.repository}/pulls?state=open&base=${encodeURIComponent(branch)}&per_page=100`);
-  assert.ok(Array.isArray(dependents), 'The open PRs on the branch are unreadable');
+  const dependents = dependentPrs(branch);
   if (dependents.length) return `branch kept: ${branch} is the base of open PR ${dependents.map(({ number: dependent }) => `#${dependent}`).join(', ')}`;
   try {
     execFileSync(gh.file, ['api', `repos/${project.repository}/git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`, '-X', 'DELETE'], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
@@ -2056,6 +2071,7 @@ async function merge() {
     assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
     // Fail before the CI wait when a layer lacks something.
     const reasons = stackReasons(viewer);
+    for (const layer of stackOrder.slice(0, -1)) if (stackLayers.get(layer)?.pr.mergeStateStatus === 'DIRTY') console.log(`note: PR #${layer} stacked: conflicts resolve in the top PR`);
     if (reasons.length) {
       console.log(['FAILED', ...reasons.map(reason => `blocker: ${reason}`)].join('\n'));
       process.exitCode = 1;
