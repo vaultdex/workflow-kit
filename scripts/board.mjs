@@ -595,6 +595,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
 
 /**
  * Human review means mergeable (docs/parallel-drivers.md): a Human-review issue whose open PR is DIRTY goes back to "Automated review" with a comment.
+ * An open issue whose linked PR of this repository is merged into release/** is commented and closed as completed.
  * ponytail: search cannot filter by Project status, so it reads every open issue (100 per page); UNKNOWN (still computing) waits for the next sweep.
  */
 function sweep() {
@@ -603,13 +604,25 @@ function sweep() {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{id number
       projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
-      closedByPullRequestsReferences(first:10){totalCount nodes{number url mergeStateStatus headRefName repository{nameWithOwner}}}}}}}`,
+      closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number url state merged baseRefName mergeStateStatus headRefName repository{nameWithOwner}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open`, ...(after && { after }) });
     for (const issue of search.nodes) {
-      if (projectItem(issue)?.status?.name !== 'Human review') continue;
       const linked = issue.closedByPullRequestsReferences;
+      const own = linked.nodes.filter(node => node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
+      // GitHub closes an issue only for a merge into the default branch; a merge into release/** closes it here (comment first, then close).
+      // ponytail: reads the first 10 linked PRs; a release PR behind them is missed, never an error.
+      const delivered = own.find(node => node.merged && node.baseRefName.startsWith('release/'));
+      if (delivered) {
+        graphql('mutation($issue:ID!,$body:String!){addComment(input:{subjectId:$issue,body:$body}){clientMutationId}}', { issue: issue.id,
+          body: `Geliefert mit #${delivered.number} in \`${delivered.baseRefName}\`. Der Release-PR nach \`main\` veröffentlicht die Version.` });
+        graphql('mutation($issue:ID!){closeIssue(input:{issueId:$issue,stateReason:COMPLETED}){clientMutationId}}', { issue: issue.id });
+        console.log(`#${issue.number} closed: delivered with PR #${delivered.number} in ${delivered.baseRefName}`);
+        resets++;
+        continue;
+      }
+      if (projectItem(issue)?.status?.name !== 'Human review') continue;
       assert.ok(linked.totalCount <= linked.nodes.length, `#${issue.number} has more linked PRs than sweep reads; it would be reported clean`);
-      const pr = linked.nodes.find(node => node.mergeStateStatus === 'DIRTY' && node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
+      const pr = own.find(node => node.state === 'OPEN' && node.mergeStateStatus === 'DIRTY');
       if (!pr) continue;
       plan ??= resolveOption('Status', 'Automated review');
       // The comment first: a failed comment must not leave an issue out of Human review that nobody was told about.
