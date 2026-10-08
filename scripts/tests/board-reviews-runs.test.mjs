@@ -250,7 +250,7 @@ test('reviews names the cause of a head without pull_request runs and an UNKNOWN
 });
 
 test('the review gate takes localChecks and the reviewer lists from the PR base, not from the checkout (#448)', t => {
-  const { checkout, look, reviews, pr, check } = reviewsFixture(t);
+  const { checkout, runBriefly, look, reviews, pr, check } = reviewsFixture(t);
   const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8'), base = join(checkout, 'base-project.json');
   const local = state => ({ __typename: 'StatusContext', context: 'local-ci', state, description: '12 s auf PC', creator: { login: 'maintainer' } });
   const withLocal = { ...JSON.parse(plain), localChecks: '.github/local-checks.json' };
@@ -260,6 +260,7 @@ test('the review gate takes localChecks and the reviewer lists from the PR base,
   assert.equal(stale.status, 3, stale.stdout + stale.stderr);
   assert.match(stale.stdout, /^waiting: check local-ci$/m);
   assert.equal(readFileSync(join(checkout, 'contents-refs'), 'utf8').trim(), 'release/0.1.1', 'The settings are read from the base of the PR');
+  assert.match(runBriefly(3000, 'wait', '7'), /^WAITING\nwaiting: check local-ci/, 'wait, handoff and merge use the same look');
   assert.equal(reviews(pr({ contexts: [check('COMPLETED'), local('SUCCESS')] })), 0, 'The aggregate on the head completes the review');
   // The reviewer list comes from the base as well.
   writeFileSync(base, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: 'coderabbitai' }));

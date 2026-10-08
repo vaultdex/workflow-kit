@@ -1195,8 +1195,9 @@ const login = user => user?.login?.replace(/\[bot\]$/, '');
 const isBot = user => user?.type === 'Bot';
 // The review gate (`reviews`, so `wait`, `handoff` and `merge`) takes these settings from the target branch of the PR as it is now, never from
 // the checkout: a stale checkout would apply rules the branch has since changed, and merge a PR without the local-ci the branch demands (#448).
+// ponytail: one REST read per look, no cache; cache by base commit if the REST quota ever gets tight.
 let gate = project;
-let optional;
+let optional; // the optionalReviewers set of `gate`, built on first use and dropped with every new `gate`
 function useBaseSettings(pr) {
   assert.ok(pr.baseRefName, 'The PR base is not readable');
   const file = rest(`repos/${project.repository}/contents/.github/workflow-project.json?ref=${encodeURIComponent(pr.baseRefName)}`);
@@ -2400,7 +2401,8 @@ function pausedRound(resetAt, marker) {
   const lines = [];
   let text = `GitHub quota used up until ${untilText(resetAt)}; threads and the verdict are read after it`;
   if (marker) {
-    const checks = [...marker.runs.filter(run => !isOptional(run.app?.slug)).map(run => run.status === 'completed' ? run.conclusion : 'pending'),
+    useBaseSettings({ baseRefName: marker.pull.base.ref }); // no look at the PR has happened yet in this round: the optional list must not come from the checkout
+    const checks =[...marker.runs.filter(run => !isOptional(run.app?.slug)).map(run => run.status === 'completed' ? run.conclusion : 'pending'),
       ...marker.statuses.map(status => status.state)];
     const count = names => checks.filter(result => names.includes(result)).length;
     text += `; checks over REST: ${count(['pending'])} pending, ${count(['failure', 'error', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale'])} failed or cancelled, ${count(['success', 'neutral', 'skipped'])} passed`;

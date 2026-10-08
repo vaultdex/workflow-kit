@@ -12,7 +12,7 @@ class Exit extends Error {
 function api(argv, input, stdout, stderr, exit) {
   const path = argv[2] ?? '';
   if (!path.startsWith('graphql')) {
-    if (fs.existsSync('fail') || fs.existsSync('fail-rest') && !path.includes('/contents/')) exit(1);
+    if (fs.existsSync('fail') || (fs.existsSync('fail-rest') && !path.includes('/contents/'))) exit(1);
     // REST lists (comments, reviews, reactions) come in pages of 100, like GitHub.
     const parts = path.split('?')[0].split('/');
     const backlink = 'backlink-' + parts[4] + '.json';
@@ -184,7 +184,7 @@ function api(argv, input, stdout, stderr, exit) {
       }
       const pr = JSON.parse(fs.readFileSync('pr.json'));
       stdout(JSON.stringify({ number: pr.number, state: pr.state === 'OPEN' ? 'open' : 'closed', merged: pr.state === 'MERGED', draft: pr.isDraft, updated_at: pr.updatedAt ?? 'u',
-        mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid } }));
+        mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid }, base: { ref: pr.baseRefName } }));
       exit(0);
     }
     if (parts[3] === 'commits' && ['check-runs', 'check-suites', 'status'].includes(parts[5])) {
