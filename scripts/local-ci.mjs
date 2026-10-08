@@ -113,7 +113,7 @@ async function checkout(ctx, pr) {
   }
   if (existsSync(join(work, '.git'))) git(work, 'checkout', '--quiet', '--detach', '--force', merge);
   else { mkdirSync(dirname(work), { recursive: true }); git(root, 'worktree', 'prune'); git(root, 'worktree', 'add', '--quiet', '--detach', work, merge); }
-  git(work, 'clean', '-fdq'); // ignorierte Dateien (node_modules) bleiben für den nächsten Lauf
+  git(work, 'clean', '-ffdxq'); // auch Ignoriertes (node_modules) und verschachtelte Repos: der Ordner ist genau der PR-Stand, das Setup stellt Abhängigkeiten wieder her
   return { base: git(work, 'rev-parse', 'HEAD^1'), files: git(work, 'diff', '--name-only', '-z', 'HEAD^1', 'HEAD').split('\0').filter(Boolean) };
 }
 
