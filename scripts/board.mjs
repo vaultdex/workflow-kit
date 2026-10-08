@@ -1869,6 +1869,7 @@ function layerReasons(layer, viewer) {
   const { nodes, totalCount } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
     closingIssuesReferences(first:100){totalCount nodes{number}}}}}`, { owner, name, number: layer }).repository.pullRequest.closingIssuesReferences;
   assert.equal(nodes.length, totalCount, `Not every issue link of PR #${layer} is readable`);
+  assert.ok(nodes.every(Boolean), `An issue link of PR #${layer} is unreadable`);
   for (const { number: issueNumber } of nodes) {
     const status = projectItem(readIssue(false, issueNumber))?.status?.name;
     if (status !== 'Human review') reasons.push(`delivers issue #${issueNumber}, whose status is ${status ?? 'unset'}, not Human review`);
@@ -1886,10 +1887,19 @@ function stackReasons(viewer) {
   const open = members.filter(member => member.state === 'open');
   const closed = members.filter(member => member.state !== 'open' && !member.merged_at);
   if (closed.length) return closed.map(member => `PR #${member.number} in the stack is closed without merge`);
-  if (open.at(-1)?.number !== number) return [`PR #${open.at(-1)?.number} is above PR #${number} in its stack: run merge ${open.at(-1)?.number} --stack for the top layer`];
+  if (!open.some(member => member.number === number)) return [`PR #${number} is not an open layer of its stack`];
+  if (open.at(-1).number !== number) return [`PR #${open.at(-1).number} is above PR #${number} in its stack: run merge ${open.at(-1).number} --stack for the top layer`];
   stackOrder = open.map(member => member.number);
   stackTrunk = stacks[0].base.ref;
-  return stackOrder.flatMap(layer => layerReasons(layer, viewer).map(reason => `PR #${layer} ${reason}`));
+  const reasons = stackOrder.flatMap(layer => layerReasons(layer, viewer).map(reason => `PR #${layer} ${reason}`));
+  // GitHub merges each layer by its own head: a layer pushed after the one above it was built would merge on its own. Same rule as handoff.
+  stackOrder.slice(1).forEach((upper, index) => {
+    const lower = stackOrder[index], heads = [lower, upper].map(layer => stackLayers.get(layer)?.pr.headRefOid);
+    if (!heads.every(Boolean)) return;
+    const { status } = rest(`repos/${project.repository}/compare/${heads[0]}...${heads[1]}`);
+    if (!['ahead', 'identical'].includes(status)) reasons.push(`PR #${upper} does not contain the current head ${heads[0].slice(0, 7)} of PR #${lower} (compare says ${status}): rebase it onto it and push with the lease`);
+  });
+  return reasons;
 }
 
 /** The merge gate: handoff's PR gate plus the stack rule. Merging an upper layer of a stack merges every open layer below it too
@@ -2049,8 +2059,10 @@ async function merge() {
     }
     // Issues close with the merge into the default branch; behind a release branch they stay open until the release.
     for (const issueNumber of issues) {
-      const issue = readIssue(false, issueNumber);
-      console.log(`issue #${issueNumber} (PR #${layer}): ${issue.state.toLowerCase()}, status ${projectItem(issue)?.status?.name ?? 'unset'}`);
+      try {
+        const issue = readIssue(false, issueNumber);
+        console.log(`issue #${issueNumber} (PR #${layer}): ${issue.state.toLowerCase()}, status ${projectItem(issue)?.status?.name ?? 'unset'}`);
+      } catch (error) { console.log(`note: issue #${issueNumber} (PR #${layer}) not read (${String(error.stderr || error.message).trim()})`); }
     }
   }
   dropBranch(result.pr);

@@ -249,7 +249,7 @@ and empty sections.
 Use GitHub's [stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs)
 (public preview) so a dependent issue does not wait for the merge of its predecessor's
 PR. Stack only when `check` says STACKABLE; otherwise the issue stays BLOCKED. Nothing
-obliges you to stack, and humans still merge, the whole stack included, bottom layer first.
+obliges you to stack, and humans still merge, the whole stack included (layer by layer from the bottom, or at once with `board.mjs merge TOP --stack`, step 6).
 No stacks across forks or repositories and none made of several parallel branches.
 There is no local maximum depth: continue at the current tip when the native stack is
 linear and the issue is STACKABLE. Every correction below restarts CI and reviews above

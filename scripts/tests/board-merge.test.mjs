@@ -291,7 +291,9 @@ test('merge --stack gates every layer, merges only the top through merge-async a
   const complete = [handoff(first), handoff(second)];
   const prepare = ({ lower = layer(), comments = complete, members = [5, 7], status = 'Human review' } = {}) => {
     show();
-    json('stacks.json', [{ number: 42, open: true, base: { ref: 'release/0.1.1' }, pull_requests: members.map(number => ({ number, state: 'open' })) }]);
+    // PR 3 is the layer GitHub merged earlier: it is no layer of this merge.
+    json('stacks.json', [{ number: 42, open: true, base: { ref: 'release/0.1.1' },
+      pull_requests: [{ number: 3, state: 'closed', merged_at: '2026-10-08T00:00:00Z' }, ...members.map(number => ({ number, state: 'open' }))] }]);
     json('stack-prs.json', { 5: lower });
     json('issues-comments.json', comments);
     json('issue.json', issue(status));
@@ -314,6 +316,14 @@ test('merge --stack gates every layer, merges only the top through merge-async a
     assert.match(result.stdout, expected, label);
     assert.deepEqual(calls(), [], `${label}: nothing is merged`);
   }
+  // The top was built on an older head of the layer below.
+  prepare();
+  json('stack-compare.json', { status: 'diverged' });
+  const stale = run('merge', '7', '--stack', '--interval', '0');
+  assert.equal(stale.status, 1, stale.stdout + stale.stderr);
+  assert.match(stale.stdout, /^blocker: PR #7 does not contain the current head 1234567 of PR #5 \(compare says diverged\)/m);
+  assert.deepEqual(calls(), []);
+  rmSync(join(checkout, 'stack-compare.json'));
   prepare();
   rmSync(join(checkout, 'stacks.json'));
   assert.match(run('merge', '7', '--stack').stdout, /^blocker: PR #7 is not in a native stack/m);
