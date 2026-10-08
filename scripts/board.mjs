@@ -1409,7 +1409,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
       failed = true;
       reasons.push('no CI run on the head');
       lines.push(`blocker: no pull_request run on the head 10 minutes after the push and the merge state is UNKNOWN; ${readStacks(pr.number).length
-        ? `probably a conflict in a lower layer locks the native stack: ${stackOrderText}`
+        ? `probably a conflict in a layer of the native stack locks it: ${stackOrderText}`
         : 'push an empty commit or push the head again'}`);
     }
   }
@@ -2038,20 +2038,25 @@ function stackSync() {
   const tree = mkdtempSync(join(tmpdir(), 'stack-sync-'));
   run(projectDirectory, 'worktree', 'add', '--detach', tree, `origin/${open[0].head.ref}`);
   let base = `origin/${stacks[0].base.ref}`;
-  for (const layer of open) {
-    run(tree, 'checkout', '--detach', `origin/${layer.head.ref}`);
-    try { run(tree, 'merge', '--no-edit', base); } catch (error) {
-      const files = run(tree, 'diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
-      if (!files.length) throw error;
-      return fail(`merging ${base} into PR #${layer.number} (${layer.head.ref}) conflicts in ${filesText(files)}; resolve and commit in ${tree}, push ${layer.head.ref}, then run stack-sync again`);
+  let keep = false; // only a conflict leaves the worktree, for its resolution
+  try {
+    for (const layer of open) {
+      run(tree, 'checkout', '--detach', `origin/${layer.head.ref}`);
+      try { run(tree, 'merge', '--no-edit', base); } catch (error) {
+        const files = run(tree, 'diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
+        if (!files.length) throw error;
+        keep = true;
+        return fail(`merging ${base} into PR #${layer.number} (${layer.head.ref}) conflicts in ${filesText(files)}; resolve and commit in ${tree}, push ${layer.head.ref}, then run stack-sync again`);
+      }
+      const synced = run(tree, 'rev-parse', 'HEAD') !== run(tree, 'rev-parse', `origin/${layer.head.ref}`);
+      if (synced) run(tree, 'push', 'origin', `HEAD:refs/heads/${layer.head.ref}`);
+      console.log(`PR #${layer.number} ${layer.head.ref}: ${synced ? 'merged and pushed' : 'already up to date'}`);
+      base = run(tree, 'rev-parse', 'HEAD');
     }
-    const synced = run(tree, 'rev-parse', 'HEAD') !== run(tree, 'rev-parse', `origin/${layer.head.ref}`);
-    if (synced) run(tree, 'push', 'origin', `HEAD:refs/heads/${layer.head.ref}`);
-    console.log(`PR #${layer.number} ${layer.head.ref}: ${synced ? 'merged and pushed' : 'already up to date'}`);
-    base = run(tree, 'rev-parse', 'HEAD');
+    console.log(`DONE stack of PR #${number} is synced; CI starts on the pushed heads`);
+  } finally {
+    if (!keep) run(projectDirectory, 'worktree', 'remove', '--force', tree);
   }
-  run(projectDirectory, 'worktree', 'remove', '--force', tree);
-  console.log(`DONE stack of PR #${number} is synced; CI starts on the pushed heads`);
 }
 
 /**

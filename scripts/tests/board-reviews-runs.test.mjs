@@ -213,7 +213,7 @@ test('reviews names the cause of a head without pull_request runs and an UNKNOWN
   assert.equal(outside.status, 1, 'Pushed long ago, no run, UNKNOWN: a blocker, not a silent wait');
   assert.match(outside.stdout, /blocker: .*push an empty commit/, 'Outside a stack: the hint');
   writeFileSync(join(checkout, 'stacks.json'), JSON.stringify([{ number: 1 }]));
-  assert.match(stuckAt(30).stdout, /blocker: .*lower layer locks the native stack.*stack-sync/, 'In a stack: the cause and the command');
+  assert.match(stuckAt(30).stdout, /blocker: .*native stack.*stack-sync/, 'In a stack: the cause and the command');
   writeFileSync(join(checkout, 'runs.json'), JSON.stringify([{ event: 'pull_request' }]));
   assert.equal(stuckAt(30).status, 3, 'A head with a run keeps waiting');
   assert.equal(look({ ...pr({ contexts: [check('IN_PROGRESS')] }), mergeStateStatus: 'UNKNOWN' }).status, 3, 'Running CI keeps waiting');
