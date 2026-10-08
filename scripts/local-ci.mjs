@@ -36,10 +36,11 @@ export function loadConfig(read) {
 }
 
 /** Die Konfiguration von origin/<branch> nach frischem Fetch: nie aus dem eigenen Checkout und nie aus dem PR, dem man nicht traut. */
-export function branchConfig({ git, root }, branch) {
-  try { git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`); } catch { throw new Error(`origin/${branch} ist nicht abrufbar`); }
+export function branchConfig({ git, root }, branch, sha) {
+  // Mit `sha` (die Basis, gegen die gemerged wurde) kein neuer Fetch: Prüfliste und Merge-Stand stammen aus demselben Commit.
+  if (!sha) try { git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`); } catch { throw new Error(`origin/${branch} ist nicht abrufbar`); }
   return loadConfig(path => {
-    try { return git(root, 'show', `origin/${branch}:${path}`); } catch { throw new Error(`${path} fehlt auf origin/${branch}`); }
+    try { return git(root, 'show', `${sha ?? `origin/${branch}`}:${path}`); } catch { throw new Error(`${path} fehlt auf origin/${branch}`); }
   });
 }
 
@@ -155,8 +156,8 @@ export async function checkPullRequest(ctx, pr) {
     let config, env, files, base;
     const aggregate = (result, text) => report(AGGREGATE, result, base ? `${baseMark(base)}: ${text}` : text); // die Basis gehört in jeden Endstand, sonst gälte er nach einem Merge in den Ziel-Branch weiter
     try {
-      config = branchConfig(ctx, pr.base.ref); // bei jedem Durchlauf neu vom Ziel-Branch; fehlt sie dort, wird der PR übersprungen
       ({ base, files } = await checkout(ctx, pr));
+      config = branchConfig(ctx, pr.base.ref, base); // bei jedem Durchlauf neu vom Ziel-Branch, vom Commit des Merge-Stands; fehlt sie dort, wird der PR übersprungen
       env = { ...process.env, BASE_SHA: base, BASE_REF: pr.base.ref, HEAD_REF: pr.head.ref, EVENT: 'pull_request' };
     } catch (error) {
       base ??= error.base;

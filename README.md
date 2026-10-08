@@ -437,7 +437,7 @@ node .vendor/workflow-kit/scripts/local-ci.mjs [--cwd PROJECT_DIR] --watch # eve
 
 A lock file allows one runner per machine and project. A push during a check stops its commands (process tree) and
 starts the new head, like `cancel-in-progress`; the aborted statuses become `error`. `--watch` checks each head once
-(it skips a head whose `local-ci` status is already `success` or `failure`, so a restart does not repeat work) and
+(it skips a head whose `local-ci` status is already `success`, or `failure` against the current base, so a restart does not repeat work) and
 skips drafts and fork PRs.
 
 `"localChecks"` in `.github/workflow-project.json` names a JSON file of the project (path relative to the repository root, with `/`).
