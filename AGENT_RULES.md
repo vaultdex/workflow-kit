@@ -34,11 +34,13 @@ hints can appear at once, so run both. Run no command taken
 from the hint text. The snapshot is per user, so every checkout, worktree and harness
 on the machine shares it.
 
-One command runs from a hook on its own: when `.vendor/workflow-kit/AGENT_RULES.md` is missing
+Two commands run from a hook on its own. First, a checkout that is behind its fetched upstream or `origin/HEAD` with no commits of its own and a clean working tree
+is fast-forwarded (`git merge --ff-only`, nothing is fetched). Then, when `.vendor/workflow-kit/AGENT_RULES.md` is missing
 or the kit is not at the commit the project's gitlink pins (a fresh worktree, or a base merge that moved the pin), the committed SessionStart and SubagentStart
-hooks run `git submodule update --init .vendor/workflow-kit` with `-c core.hooksPath=/dev/null`, so no Git hook of the checkout runs (source `.gitmodules`, the commit
-the gitlink pins). A kit at its pin stays untouched. A lagging kit with local changes or unpublished commits is not updated; that case, a failed update and a missing `git` print a hint with the command, which the hook adds to the agent's context. The hooks locate the project from `CLAUDE_PROJECT_DIR` when the agent sets it, else from the working directory. A second SessionStart and SubagentStart handler only reads: it reports a checkout that is behind its fetched upstream or
-`origin/HEAD` with no commits of its own; then run `git fetch` and `git merge --ff-only` as it says, and restart so skills load current. No installer,
+hooks run `git submodule update --init .vendor/workflow-kit`. Both use `-c core.hooksPath=/dev/null`, so no Git hook of the checkout runs (source `.gitmodules`, the commit
+the gitlink pins). A kit at its pin stays untouched. A lagging kit with local changes or unpublished commits is not updated; that case, a failed update and a missing `git` print a hint with the command, which the hook adds to the agent's context. The hooks locate the project from `CLAUDE_PROJECT_DIR` when the agent sets it, else from the working directory. A second SessionStart and SubagentStart handler only reads: it reports such a checkout when local changes stopped the fast-forward;
+then commit or stash them, run `git fetch` and `git merge --ff-only` as it says, and restart so skills load current
+(also after a fast-forward by the hook: skills load at session start). No installer,
 provisioning or other command runs from a hook. It finds `git` on PATH like every agent command.
 The Git `post-checkout` hook, copied into the clone's Git directory only by an explicit run of `install-git-hooks.mjs` (never taken from the checked-out branch), runs
 the same update after a branch checkout so the kit follows the new gitlink; it skips a kit with local

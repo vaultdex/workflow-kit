@@ -146,7 +146,7 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
     });
   });
 
-  describe(`${kind} hooks report a checkout behind its fetched base, change nothing and never need the network`, { skip: !available && `${shell[kind]} unavailable`, concurrency: true }, () => {
+  describe(`${kind} hooks fast-forward a clean checkout behind its fetched base, warn when changes stop that, and never need the network`, { skip: !available && `${shell[kind]} unavailable`, concurrency: true }, () => {
     for (const [file, key] of variants) test(file, async t => {
       const temp = temporary(t, 'kit-behind ');
       const env = isolatedGit(temp);
@@ -169,24 +169,27 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
         return { up, dir };
       };
       const state = async dir => [await git(dir, 'rev-parse', 'HEAD'), await git(dir, 'rev-parse', 'origin/HEAD'), await git(dir, 'status', '--porcelain')];
+      const dirty = dir => writeFileSync(join(dir, 'notes.txt'), 'mine');
 
-      const commands = new Set(handlers(file, key, 'merge-base --is-ancestor'));
-      assert.ok(commands.size, `${file} carries the stale branch handler`);
-      for (const command of commands) {
+      const [warn, init] = [new Set(handlers(file, key, 'commit(s) behind')), new Set(handlers(file, key))];
+      assert.ok(warn.size && init.size, `${file} carries the stale branch handler and the kit init handler`);
+      for (const command of warn) {
         const trial = cwd => spawn(shell[kind], [...args, command], { cwd, env: { ...env, CLAUDE_PROJECT_DIR: '' } });
         const silent = async (cwd, why) => { const r = await trial(cwd); assert.deepEqual([r.status, r.stdout], [0, ''], why); };
 
         await silent((await scenario(0, 0)).dir, 'an up-to-date checkout is not reported');
         await silent((await scenario(0, 1)).dir, 'a checkout ahead of its base is not reported');
         await silent((await scenario(2, 1)).dir, 'a checkout with commits of its own is not reported');
+        await silent((await scenario(2, 0)).dir, 'a clean checkout is not reported: the init handler fast-forwards it');
 
         const { up, dir } = await scenario(2, 0);
+        await dirty(dir);
         const before = await state(dir);
         let result = await trial(dir);
         assert.equal(result.status, 0, result.stderr);
         assert.match(result.stdout, /\b2\b/, `${file} reports how many commits the checkout is behind`);
         if (file !== '.claude/settings.json') assert.doesNotThrow(() => JSON.parse(result.stdout), `${file}: host JSON`);
-        assert.deepEqual(await state(dir), before, 'the hook changes nothing');
+        assert.deepEqual(await state(dir), before, 'the warning changes nothing');
 
         // A branch without upstream is still compared with the remote's default branch; no remote is contacted.
         await git(dir, 'switch', '--quiet', '-c', 'solo', '--no-track');
@@ -198,6 +201,58 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
         mkdirSync(plain); await git(plain, 'init', '--quiet'); await commit(plain);
         await silent(plain, 'a checkout without remote is left alone');
         await silent(temp, 'a directory outside any repository is left alone');
+      }
+      for (const command of init) {
+        const trial = cwd => spawn(shell[kind], [...args, command], { cwd, env: { ...env, CLAUDE_PROJECT_DIR: '' } });
+        const kept = async ({ dir }, why) => {
+          const before = await state(dir);
+          const result = await trial(dir);
+          assert.deepEqual([result.status, await state(dir)], [0, before], why);
+        };
+        await kept(await scenario(2, 1), 'a checkout with commits of its own is not moved');
+        const changed = await scenario(2, 0);
+        await dirty(changed.dir);
+        await kept(changed, 'a checkout with local changes is not moved');
+
+        // No network and no upstream branch: the last fetched origin/HEAD is enough.
+        const { up, dir } = await scenario(2, 0);
+        await git(dir, 'switch', '--quiet', '-c', 'solo', '--no-track');
+        rename(up, `${up}-gone`);
+        const result = await trial(dir);
+        assert.equal(result.status, 0, result.stderr);
+        const [head, base, status] = await state(dir);
+        assert.deepEqual([head, status], [base, ''], `${file} fast-forwards a clean checkout to the last fetched base`);
+      }
+    });
+  });
+
+  describe(`${kind} hooks move the kit to the pin of the fast-forwarded checkout`, { skip: !available && `${shell[kind]} unavailable`, concurrency: true }, () => {
+    for (const [file, key] of variants) test(file, async t => {
+      const temp = temporary(t, 'kit-follow ');
+      const env = { ...isolatedGit(temp), GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'protocol.file.allow', GIT_CONFIG_VALUE_0: 'always' };
+      const git = async (cwd, ...a) => {
+        const result = await spawn('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...a], { cwd, env });
+        assert.equal(result.status, 0, result.stderr);
+        return result.stdout.trim();
+      };
+      const fixture = async (name, file) => { const dir = join(temp, name); mkdirSync(dir); await git(dir, 'init', '--quiet'); writeFileSync(join(dir, file), 'x'); await git(dir, 'add', '.'); await git(dir, 'commit', '--quiet', '-m', name); return dir; };
+      const kit = await fixture('kit', 'AGENT_RULES.md'), origin = await fixture('origin', 'README.md');
+      await git(origin, 'submodule', '--quiet', 'add', kit.replaceAll('\\', '/'), '.vendor/workflow-kit');
+      await git(origin, 'commit', '--quiet', '-m', 'consumer');
+      const work = join(temp, 'work');
+      await git(temp, 'clone', '--quiet', '--recurse-submodules', origin, work);
+      // The consumer moves its pin to a newer kit commit; the clone only fetches that.
+      await git(kit, 'commit', '--quiet', '--allow-empty', '-m', 'newer');
+      const pin = await git(kit, 'rev-parse', 'HEAD'), inner = join(work, '.vendor/workflow-kit');
+      await git(join(origin, '.vendor/workflow-kit'), 'pull', '--quiet');
+      await git(origin, 'commit', '--quiet', '-am', 'bump the kit');
+      await git(work, 'fetch', '--quiet');
+      assert.notEqual(await git(inner, 'rev-parse', 'HEAD'), pin, 'the kit lags behind the fetched pin');
+
+      for (const command of new Set(handlers(file, key))) {
+        const result = await spawn(shell[kind], [...args, command], { cwd: work, env: { ...env, CLAUDE_PROJECT_DIR: '' } });
+        assert.deepEqual([result.status, result.stdout], [0, ''], result.stderr);
+        assert.deepEqual([await git(work, 'rev-parse', 'HEAD'), await git(inner, 'rev-parse', 'HEAD')], [await git(origin, 'rev-parse', 'HEAD'), pin]);
       }
     });
   });
