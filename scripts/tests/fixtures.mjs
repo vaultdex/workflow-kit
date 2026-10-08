@@ -40,10 +40,18 @@ const kit = fileURLToPath(new URL('../../', import.meta.url));
 
 /** Tests that clone the pinned vendor sources call this first: a fresh clone has them empty, and Git would fail
  * deep inside a test with "does not appear to be a git repository" (#229). One line, no stack trace. */
+const uninitialized = root => execFileSync('git', ['ls-files', '-s', '--', '.vendor'], { cwd: root, encoding: 'utf8' })
+  .split('\n').filter(Boolean).map(line => line.split(/\s+/)[3]).find(path => !existsSync(join(root, path, '.git')));
+
+/** The `skip` option for tests that need the pinned vendor sources: a named reason locally, never in CI (#416),
+ * where a missing submodule must stay red. */
+export const skipWithoutSubmodules = (root = kit) => {
+  const path = !process.env.CI && uninitialized(root);
+  return path ? `${path} nicht initialisiert (git submodule update --init --recursive)` : false;
+};
+
 export function requireSubmodules(root = kit) {
-  const paths = execFileSync('git', ['ls-files', '-s', '--', '.vendor'], { cwd: root, encoding: 'utf8' })
-    .split('\n').filter(Boolean).map(line => line.split(/\s+/)[3]);
-  if (paths.every(path => existsSync(join(root, path, '.git')))) return;
+  if (!uninitialized(root)) return;
   writeSync(2, 'run: git submodule update --init --recursive\n');
   process.exit(1);
 }

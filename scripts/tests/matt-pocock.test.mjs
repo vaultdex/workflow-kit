@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { requireSubmodules } from './fixtures.mjs';
+import { skipWithoutSubmodules } from './fixtures.mjs';
 
-requireSubmodules();
+const skip = skipWithoutSubmodules();
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const upstream = join(kit, '.vendor/matt-pocock-skills');
 const providers = ['.agent', '.agents', '.claude', '.github', '.opencode', '.pi'];
@@ -17,7 +17,7 @@ const files = path => readdirSync(path, { recursive: true }).filter(file => lsta
   .map(file => file.split(sep).join('/')).sort();
 const succeeds = result => assert.equal(result.status, 0, result.stderr);
 
-test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local source changes safely', t => {
+test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local source changes safely', { skip }, t => {
   const base = mkdtempSync(join(tmpdir(), 'matt pocock '));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const consumer = join(base, 'consumer'), fixture = join(base, 'kit'), source = join(fixture, '.vendor/matt-pocock-skills');
