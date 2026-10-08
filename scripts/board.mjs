@@ -1713,7 +1713,7 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
   console.log(result.lines.join('\n'));
   if (!result.done || result.failed) {
     process.exitCode = result.failed || prior.length ? 1 : 3;
-    console.log([result.failed || prior.length ? 'FAILED' : 'WAITING', ...blockers(prior)].join('\n'));
+    console.log([result.failed ? outcome(result)[0] : prior.length ? 'FAILED' : 'WAITING', ...blockers(prior)].join('\n'));
     return;
   }
   if (expectedHead) assert.equal(result.pr.headRefOid, expectedHead, `PR head changed during ${action}`);

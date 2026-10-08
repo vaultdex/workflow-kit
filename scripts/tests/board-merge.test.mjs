@@ -35,6 +35,7 @@ test('merge merges the checked head by its full id only when no review is runnin
     const result = run('merge', '7', '--interval', '0', '--max-minutes', '0.01');
     assert.equal(result.status, status, `${label}: ${result.stdout}${result.stderr}`);
     assert.equal(existsSync(merges), false, `${label}: gh pr merge is never called`);
+    if (label === 'red CI') assert.match(result.stdout, /^FAILED: check CI FAILURE$/m, 'the FAILED line names the red check');
   }
   // An upper layer of a stack is not merged while a layer below is open: that merge would take the lower layer along.
   write(withHead(oid));
