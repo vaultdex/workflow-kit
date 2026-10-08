@@ -180,7 +180,9 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   const sonarOnly = look(pr({ contexts: [sonar] }));
   assert.equal(sonarOnly.status, 0, sonarOnly.stdout + sonarOnly.stderr);
   writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), localChecks: '.github/local-checks.json', optionalReviewers: ['maintainer'] }));
-  assert.match(look(pr({ contexts: [sonar] })).stdout, /^waiting: check local-ci$/m, 'Configured local CI needs its aggregate on this head');
+  const missingLocalCi = look(pr({ contexts: [sonar] }));
+  assert.equal(missingLocalCi.status, 3, missingLocalCi.stdout + missingLocalCi.stderr);
+  assert.match(missingLocalCi.stdout, /^waiting: check local-ci$/m, 'Configured local CI needs its aggregate on this head');
   assert.equal(reviews(pr({ contexts: [sonar, { ...check('COMPLETED'), name: 'local-ci' }] })), 3, 'A same-named check run is no local commit status');
   assert.equal(reviews(pr({ contexts: [sonar, local('PENDING', 'local-ci')] })), 3, 'A pending aggregate waits');
   assert.equal(reviews(pr({ contexts: [sonar, local('FAILURE', 'local-ci')] })), 1, 'A red aggregate fails even if its creator is optional');
