@@ -112,6 +112,20 @@ details. Subagents implement bounded assignments; only the driver claims and
 changes status. If prerequisites change, stop affected edits and repeat the check;
 check again before Human review.
 
+## Kit issues from a project worktree
+
+Do not clone the kit elsewhere: the isolation guard rejects git outside your worktree.
+From the project worktree root, run each step as its own command:
+
+1. `git submodule update --init .vendor/workflow-kit`
+2. `git -C .vendor/workflow-kit fetch origin main`
+3. `git -C .vendor/workflow-kit checkout -b claude/ISSUE-slug origin/main`
+4. Edit, commit and push inside `.vendor/workflow-kit`; open the PR against `vaultdex/workflow-kit`.
+
+Its nested submodules stay empty: tests that need them skip with the reason
+`<submodule> nicht initialisiert` and run fully in CI. Initialize them with
+`git -C .vendor/workflow-kit submodule update --init --recursive` to run them locally.
+
 ## Workflow
 
 | Status | What you do |

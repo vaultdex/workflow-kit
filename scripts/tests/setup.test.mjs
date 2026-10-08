@@ -6,7 +6,7 @@ import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { materialize } from '../provider-links.mjs';
-import { kitCheckout } from './fixtures.mjs';
+import { kitCheckout, skipWithoutSubmodules } from './fixtures.mjs';
 
 const kit = fileURLToPath(new URL('../../', import.meta.url));
 const temporary = (t, name) => {
@@ -15,7 +15,7 @@ const temporary = (t, name) => {
   return path;
 };
 
-test('generated skills and hook sources survive a plain clone without setup', t => {
+test('generated skills and hook sources survive a plain clone without setup', { skip: skipWithoutSubmodules() }, t => {
   const fixture = temporary(t, 'workflow-kit setup ');
   execFileSync('git', ['init', '--quiet', fixture]);
   execFileSync('git', ['-C', fixture, 'config', 'core.filemode', 'false']);
