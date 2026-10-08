@@ -23,6 +23,10 @@ test('sweep sends a Human-review issue with a conflicting PR back to Automated r
     row(4, 'Automated review', [pr('DIRTY')]), row(5, 'In progress', [pr('DIRTY')]), row(6, undefined, [pr('DIRTY')]),
     row(7, 'Human review', [pr('DIRTY', { repository: { nameWithOwner: 'someone/else' } })])]);
   assert.equal(queries().length, 1, 'A clean sweep costs one query');
+  // A lower stack layer (an open PR is based on its branch) conflicts with its own base until the top PR merges it: it stays in Human review (#405).
+  writeFileSync(join(checkout, 'dependents.json'), JSON.stringify([{ number: 71, base: { ref: 'claude/9-lower' } }]));
+  untouched('lower stack layer', [row(9, 'Human review', [pr('DIRTY', { headRefName: 'claude/9-lower' })])]);
+  rmSync(join(checkout, 'dependents.json'));
 
   writeFileSync(join(checkout, 'search.json'), JSON.stringify([row(1, 'Human review', [pr('CLEAN')]), row(2, 'Human review', [pr('DIRTY')]), row(3, 'Automated review', [pr('DIRTY')])]));
   const result = run('sweep');

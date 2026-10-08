@@ -78,8 +78,12 @@ test('next lists the own unfinished work, then abandoned and conflicting work, b
     closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: number + 100, state: 'OPEN', updatedAt: hoursAgo(hours), mergeStateStatus, repository: { nameWithOwner: 'test/example' } }] } });
   writeFileSync(join(checkout, 'backlink-comments-15.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' }, body: 'Agent: claude, Session: S1',
     html_url: 'https://example.test/c15', created_at: '2026-10-06T10:00:00Z' }]));
+  // #16 is a DIRTY lower stack layer (an open PR is based on its branch): no conflicting work (#405).
+  const lower = work(16, 'Human review', 1, 'DIRTY');
+  lower.closedByPullRequestsReferences.nodes[0].headRefName = 'claude/16-lower';
+  writeFileSync(join(checkout, 'dependents.json'), JSON.stringify([{ number: 120, base: { ref: 'claude/16-lower' } }]));
   writeFileSync(join(checkout, 'search.json'), JSON.stringify([{ ...issue('Ready'), number: 10, issueFieldValues: { nodes: [] } }, work(11, 'Automated review', 8), work(12, 'Human review', 1, 'DIRTY'),
-    work(13, 'Human review', 1), work(14, 'In progress', 1), work(15, 'Automated review', 1)]));
+    work(13, 'Human review', 1), work(14, 'In progress', 1), work(15, 'Automated review', 1), lower]));
 
   const result = run('next', '--session', 'S1');
   assert.equal(result.status, 0, result.stdout + result.stderr);
