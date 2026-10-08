@@ -423,6 +423,48 @@ Head: abcdef1
 Before implementation, complete [Start or resume](AGENT_RULES.md#start-or-resume);
 a check alone does not claim work.
 
+## Lokale CI
+
+For a project without Actions minutes, `scripts/local-ci.mjs` runs the PR checks on this machine and reports them as
+commit statuses (REST only, no GraphQL points). **The status comes from this script, not from an agent's claim**;
+the log stays in `<git-common-dir>/local-ci/logs`. Run it in Git Bash (commands go through `bash -c`), only for
+PRs whose code you trust: the checks execute it.
+
+```sh
+node .vendor/workflow-kit/scripts/local-ci.mjs [--cwd PROJECT_DIR] 123    # check PR 123 once (exit 0 green, 1 red)
+node .vendor/workflow-kit/scripts/local-ci.mjs [--cwd PROJECT_DIR] --watch # every minute: new heads of open non-draft PRs of this repository, one after the other
+```
+
+A lock file allows one runner per machine and project. A push during a check stops its commands (process tree) and
+starts the new head, like `cancel-in-progress`; the aborted statuses become `error`. `--watch` checks each head once
+(it skips a head whose `local-ci` status is already `success` or `failure`, so a restart does not repeat work) and
+skips drafts and fork PRs.
+
+`"localChecks"` in `.github/workflow-project.json` names a JSON file of the project (read from the checkout the
+script runs in, so update that checkout to change the checks):
+
+```json
+{
+  "setup": ["node scripts/bootstrap.mjs"],
+  "checks": [{ "context": "Backend domain", "paths": ["backend/domain/**", "!**/*.md"], "run": ["./gradlew :domain:test"], "timeoutMinutes": 30 }],
+  "push": ["node scripts/board.mjs sweep"]
+}
+```
+
+- `paths` work like GitHub's: in order, a later match wins, `!` takes a file back out, `*` stays within a folder,
+  `**` goes below it. A check runs when one changed file of the PR matches.
+- Per PR the script fetches `refs/pull/N/merge` into its own worktree (`<git-common-dir>/local-ci/work`, ignored files such as
+  `node_modules` stay), so `HEAD^1` is the base like in Actions. The commands get `BASE_SHA`, `BASE_REF`, `HEAD_REF` and
+  `EVENT=pull_request` and run one after the other until one fails; `timeoutMinutes` limits all commands of a check.
+- Status flow: `local-ci` (all checks of the head) and every selected check go `pending` at once, then `success` or
+  `failure` with duration and host or the first error line. A check no changed file selects gets **no** status;
+  `local-ci` then says so, which is what `board.mjs` needs to stop waiting for the "first CI check".
+- `setup` runs once per PR before the selected checks (not at all when none is selected); a failed setup fails them.
+- `push` runs in the project checkout whenever `main` or a `release/*` branch moved while `--watch` runs, with
+  `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
+- `board.mjs reviews`, `wait`, `handoff` and `merge` read these statuses like check runs: `pending` waits, `failure` and
+  `error` are red.
+
 ## Project test map
 
 `node .vendor/workflow-kit/scripts/affected-tests.mjs` knows only the kit's tests. A project adds its own map in

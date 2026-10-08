@@ -169,6 +169,12 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   assert.match(optionalEyes.stdout, /^reaction coderabbitai /m, 'The optional 👀 is shown');
   writeFileSync(config, plain);
   assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 0, 'Precondition: unlisted, the same lone status is CI');
+  // Local CI (scripts/local-ci.mjs) reports commit statuses only, no check runs: they decide alone.
+  const local = (state, context = 'Backend domain') => ({ __typename: 'StatusContext', context, state, description: '12 s auf PC', creator: { login: 'maintainer' } });
+  assert.equal(reviews(pr({ contexts: [local('PENDING', 'local-ci'), local('PENDING')] })), 3, 'A pending local status waits');
+  assert.equal(reviews(pr({ contexts: [local('SUCCESS', 'local-ci'), local('FAILURE')] })), 1, 'A failed local status is red');
+  assert.equal(reviews(pr({ contexts: [local('ERROR', 'local-ci')] })), 1, 'An aborted local status is red');
+  assert.equal(reviews(pr({ contexts: [local('SUCCESS', 'local-ci'), local('SUCCESS')] })), 0, 'Local statuses alone are CI');
   assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
