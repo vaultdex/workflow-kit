@@ -143,6 +143,11 @@ test('reviews reads CI checks, check suites and the traces of reviewers on the h
   assert.equal(reviews(pr({ suites: [cancelled, suite('COMPLETED', 1, 1, 'SUCCESS', 11, 'W-Frontend', 'other-app')] })), 1, 'Another app does not replace it');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 0, 1, 'CANCELLED', 12), suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 1, 'An older successful suite does not replace a newer cancelled one');
   assert.equal(reviews(pr({ suites: [suite('COMPLETED', 0, 1, 'CANCELLED'), suite('COMPLETED', 1, 1, 'SUCCESS', 11)] })), 1, 'A suite without a workflow run cannot be ordered and stays a failure');
+  // A pending approval beside a green run of the same workflow replaces nothing and is no failure; alone it still blocks.
+  const approval = suite('COMPLETED', 0, 1, 'ACTION_REQUIRED', 12);
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1, 'SUCCESS', 11), approval] }), {}, '--grace', '0'), 0, 'A pending approval beside a green run of the same workflow is not red');
+  assert.equal(reviews(pr({ suites: [approval] })), 1, 'A pending approval alone is a failure');
+  assert.equal(reviews(pr({ suites: [suite('COMPLETED', 1, 1, 'SUCCESS', 11, 'W-Other'), approval] })), 1, 'A green run of another workflow does not excuse it');
 });
 
 
