@@ -30,8 +30,8 @@ Ein Projekt ohne eine solche Sperre spricht schwere Nachweise weiter ab.
 
 **Flyway-Migrationsnummern.** Legen zwei Driver parallel Migrationen an, können die
 Nummern kollidieren. Die Regel steht im Projekt, nicht im Kit: Vaultdex
-[Flyway-Versionen](https://github.com/vaultdex/Vaultdex/blob/main/CONTRIBUTING.md#flyway-versionen)
-(auf `main` erst mit dem Merge von `release/0.1.1`), mechanisch geprüft von der
+[Flyway-Versionen](https://github.com/vaultdex/Vaultdex/blob/main/docs/contributing/flyway-versionen.md),
+mechanisch geprüft von der
 Repository-CI ([vaultdex/Vaultdex#980](https://github.com/vaultdex/Vaultdex/issues/980)).
 
 **Sonar.** Null offene Sonar-Issues prüft `board.mjs handoff` bereits mechanisch
