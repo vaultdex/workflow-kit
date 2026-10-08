@@ -2093,7 +2093,8 @@ function reviewsForHead() {
 /** Looks again and again until `look` is done and returns that result; returns nothing after printing "still waiting" (exit 4). */
 async function poll(look) {
   const maxMinutes = numberOption('--max-minutes', 9);
-  if (maxMinutes > 0) deadline = Date.now() + maxMinutes * 60_000;
+  // One deadline per run: `merge` polls twice (before and after a base update), and both phases must fit the one tool call.
+  if (maxMinutes > 0 && deadline === Infinity) deadline = Date.now() + maxMinutes * 60_000;
   let shown, quiet = 0;
   // Exit 4: not finished, call the command again (a driver's tool call must end before its 10-minute limit).
   const stillWaiting = resetAt => {
