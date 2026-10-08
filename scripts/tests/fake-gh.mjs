@@ -384,9 +384,9 @@ function api(argv, input, stdout, stderr, exit) {
   else if (query.includes('search(')) {
     // Like GitHub: is:blocked means an open native predecessor; 'truncate' simulates the 1,000-result cap.
     const blocked = / is:blocked$/.test(argv.find(arg => arg.startsWith('q=')));
-    const nodes = JSON.parse(fs.readFileSync('search.json'))
+    const nodes = (fs.existsSync('search.json') ? JSON.parse(fs.readFileSync('search.json')) : [])
       .filter(issue => issue.blockedBy.nodes.some(predecessor => predecessor?.state === 'OPEN') === blocked);
-    data = { search: { issueCount: nodes.length + Number(fs.existsSync('truncate')), pageInfo: { hasNextPage: false }, nodes } };
+    data = { viewer: { login: 'worker' }, search: { issueCount: nodes.length + Number(fs.existsSync('truncate')), pageInfo: { hasNextPage: false }, nodes } };
   }
   else {
     const issue = JSON.parse(fs.readFileSync('issue.json'));

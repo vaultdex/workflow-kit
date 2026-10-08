@@ -80,6 +80,13 @@ The driver completes these steps before implementation, including review fixes:
    UNKNOWN stops dependent edits except for a specifically authorized, documented
    [exception](docs/CONTRIBUTING.md#execution-check). STACKABLE (only an open predecessor
    PR holds the issue) continues as a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests).
+   Finish first: `board.mjs next --session ID` lists your own unfinished issues (assigned to you, your
+   session in the claim, In progress or Automated review) before anything else, and `check` of a new
+   issue is BLOCKED with `finish #N first` until they are handed off (STACKABLE on that very work is
+   allowed). Abandoned work (no push, comment or status change for `staleHours`, default 6; or a Human-review
+   PR with conflicts) is listed by `next` too; its claim has expired, so `check ISSUE --session ID` notes it
+   instead of BLOCKED. Take it over with a claim comment that also says `Takeover of stale claim OLD_SESSION`.
+   Previous assignees stay.
 3. Create the [issue-linked branch](docs/CONTRIBUTING.md#delivery) (on STACKABLE from the
    head of the base PR's branch; else from the `base:` that `check` names, if it does), or
    reuse your existing branch and PR for this issue. Switch to it in your worktree and verify

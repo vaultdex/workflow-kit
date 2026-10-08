@@ -1,0 +1,36 @@
+# Vorlage: hält Human review mergebar (workflow-kit #400). Nach .github/workflows/board-sweep.yml des Projekts kopieren.
+# `board.mjs sweep` setzt jedes Human-review-Issue, dessen offener PR Konflikte hat (DIRTY), mit Kommentar auf Automated review zurück.
+# Es läuft nach jedem Push auf die PR-Basen (ein Merge macht andere PRs konfliktbehaftet) und stündlich als Netz.
+# Voraussetzung: das Secret BOARD_TOKEN, ein Token mit Schreibrecht auf das Project (classic: scope `project`, fine-grained/App:
+# Projects read and write) und auf Issues. Der Standard-GITHUB_TOKEN darf kein Organisations-Project ändern.
+# Passe `branches` an die PR-Basen des Projekts an.
+name: Board sweep
+on:
+  push:
+    branches: [main, 'release/**']
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+# Ein Lauf zur Zeit; ein weiterer Push wartet, statt einen laufenden Sweep abzubrechen.
+concurrency:
+  group: board-sweep
+  cancel-in-progress: false
+jobs:
+  sweep:
+    name: Board sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: node .vendor/workflow-kit/scripts/board.mjs sweep
+        env:
+          GH_TOKEN: ${{ secrets.BOARD_TOKEN }}

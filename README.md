@@ -160,6 +160,16 @@ and then work in that directory, their relative paths (changed files given to `a
   `block`, `sub`, `link`, `body`, `body-replace`, `ready`, `handoff`, `merge`, `sweep`) refuses any flag (`--flag` or `-f`) and any extra word it does not
   take with the usage line (exit 2) before it reads or writes anything. `field` and `status ISSUE "Automated review"` take further words of their own.
 - `sweep` (merge loop or chief session, at their usual rhythm): sets every Human-review issue whose open PR has merge conflicts (DIRTY) back to Automated review with a comment, one line each, else `clean`; see [parallel-drivers.md](docs/parallel-drivers.md).
+  To run it without a person, copy [docs/board-sweep.yml](docs/board-sweep.yml) to `.github/workflows/board-sweep.yml`: it runs `sweep` on every push to
+  the PR bases (`main`, `release/**`; adjust) and hourly. It needs the secret `BOARD_TOKEN` (a token that may write the Project and issues; `GITHUB_TOKEN` cannot).
+  The reset issues then show up in `next` as stale work (below).
+- `next [--session ID]` lists unfinished work before the Ready issues: with a session, your own issues (assigned to the login, in In progress or
+  Automated review, newest claim names your session) under "Finish your own work first"; then abandoned work, a "Stale or conflicting" list of issues in
+  In progress, Automated review or Human review whose open PR had no activity for `"staleHours"` (project file, default 6; 0 or more) or whose
+  Human-review PR has merge conflicts (DIRTY). Activity is the newest update of the issue (comments), its Project item (status) and its open PR
+  (push, comments, reviews), including bots. A claim without activity for `staleHours` has expired: `check ISSUE --session NEW` then notes the stale claim
+  instead of BLOCKED (the open PR and branch of that issue hold nothing either); the new claim comment says `Takeover of stale claim OLD`, the assignees stay.
+  `check ISSUE --session ID` of a new start is BLOCKED with `finish #N first` while you have such an own issue (a resume of it, or a stack on its work, is not).
 - `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open
   predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);
   `next` lists such issues apart, with the base PR; shows the age and open PR of a claim and one line per

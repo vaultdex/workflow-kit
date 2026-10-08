@@ -119,8 +119,8 @@ const baseSetting = () => {
 };
 const baseField = (setting = baseSetting()) => setting ? ` base:fieldValueByName(name:${JSON.stringify(setting.field)}){...on ProjectV2ItemFieldSingleSelectValue{name} ...on ProjectV2ItemFieldTextValue{text}}` : '';
 // Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query.
-const issueFields = predecessor => `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
-  projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}${baseField()}}}
+const issueFields = predecessor => `id number title state body updatedAt repository{nameWithOwner} assignees(first:10){nodes{login}}
+  projectItems(first:100){nodes{id project{id} updatedAt status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}${baseField()}}}
   blockedBy(first:100){totalCount nodes{${predecessor}}}`;
 // The login of the viewer comes along, so a claim check needs no query of its own. Sub-issues (only `check` lists them) are asked
 // for in the number given: each costs three lists, so the first page is short and a longer list is read again at 100.
@@ -130,7 +130,7 @@ const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!
   refs(refPrefix:"refs/heads/",query:$branch,first:20){nodes{name}}
   issue(number:$number){
   ${issueFields(predecessorFields)} bodyHTML
-  closedByPullRequestsReferences(first:100){totalCount nodes{number state repository{nameWithOwner} headRefName}}
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state updatedAt repository{nameWithOwner} headRefName}}
   ${subIssues ? `subIssues(first:${subIssues}){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}` : ''}}}}`;
 /** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
 const named = (label, read) => {
@@ -158,6 +158,20 @@ function loadDeliveries(predecessors) {
   }
 }
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
+
+// "staleHours" in the project file (default 6): after that long without activity a claim has expired and the work counts as abandoned (#400).
+const staleHours = project.staleHours ?? 6;
+/**
+ * Milliseconds since the last activity: the newest of the issue (comments), its Project item (status) and its open PR (push, comments, reviews),
+ * all read with the issue anyway. undefined when GitHub gave no time.
+ * ponytail: PR activity includes bot comments; a PR that a bot keeps touching never goes stale. Cheapest signal, no extra query per issue.
+ */
+function idleMs(issue) {
+  const prs = (issue.closedByPullRequestsReferences?.nodes ?? []).filter(pr => pr?.state === 'OPEN');
+  const times = [issue.updatedAt, projectItem(issue)?.updatedAt, ...prs.map(pr => pr.updatedAt)].map(time => Date.parse(time)).filter(Number.isFinite);
+  return times.length ? Date.now() - Math.max(...times) : undefined;
+}
+const isStale = issue => idleMs(issue) > staleHours * 3_600_000;
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
 function predecessorReasons({ totalCount, nodes }) {
@@ -376,7 +390,9 @@ function claimReasons(issue, session) {
   }
   const notes = [], blocked = [];
   const about = ({ agent, session: id, comment }) => `${agent ? `Agent ${agent}, ` : ''}${id ? `Session ${id}` : 'no session named'}, ${comment.created_at}, ${comment.html_url}`;
-  if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
+  // A claim without activity for staleHours has expired: the new session takes it over and says so in its claim comment.
+  if (holder && session && holder.session !== session && isStale(issue)) notes.push(`stale claim of another session (${about(holder)}), no activity for ${ago(idleMs(issue))}: write "Takeover of stale claim ${holder.session ?? 'unknown'}" in your claim comment`);
+  else if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
   else if (holder && !session) notes.push(`newest claim: ${about(holder)}; pass --session ID to compare it with yours`);
   if (legacy) notes.push(`claim without Agent/Session field, session unknown: ${legacy.html_url}`);
   return { blocked, notes, claim: holder ?? (legacy && { session: undefined, comment: legacy }) };
@@ -394,6 +410,34 @@ function workReasons(issue, session) {
   const branches = (issue.branches ?? []).map(branch => branch.name).filter(branch => new RegExp(`^[\\w.-]+/${issue.number}-`).test(branch) && !heads.has(branch));
   return [...prs.map(pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName})` : ''} closes this issue; ${own}`),
     ...branches.map(branch => `branch ${branch} belongs to this issue; ${own}`)];
+}
+
+/**
+ * Unfinished work of the caller: rows (number, assignees, projectItems) in In progress or Automated review that are assigned to the login
+ * and whose newest claim names SESSION. The login is shared by all agents, so only the claim tells sessions apart (one comment read per candidate).
+ */
+function ownWork(rows, login, session) {
+  return rows.filter(row => ['In progress', 'Automated review'].includes(projectItem(row)?.status?.name)
+    && row.assignees.nodes.some(assignee => assignee.login.toLowerCase() === login.toLowerCase())
+    && claimReasons({ ...row, viewer: { login } }, session).claim?.session === session);
+}
+
+/** The open issues assigned to the login, for `check` (one paged search); `next` already holds all open issues. */
+function assignedIssues(login) {
+  const rows = [];
+  for (let after; ;) {
+    const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:30,after:$after){
+      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title assignees(first:10){nodes{login}}
+      projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
+    { q: `repo:${project.repository} is:issue is:open assignee:${login}`, ...(after && { after }) });
+    rows.push(...search.nodes);
+    if (!search.pageInfo.hasNextPage) {
+      assert.ok(rows.length >= search.issueCount, `Search returned ${rows.length} of ${search.issueCount} issues of ${login}; the own work would be incomplete`);
+      return rows;
+    }
+    assert.ok(search.pageInfo.endCursor && search.pageInfo.endCursor !== after, 'Search pagination did not advance');
+    after = search.pageInfo.endCursor;
+  }
 }
 
 /** Base PR of the issue the last check() judged STACKABLE; handoff compares it with the PR's base branch. */
@@ -472,7 +516,8 @@ function check(issue = readIssue(), claims, currentPrNumber) {
     blocked.push(...found.blocked);
     notes.push(...found.notes);
     claim = found.claim;
-    if (!claims.session || claim?.session !== claims.session) blocked.push(...workReasons(issue, claims.session));
+    // Abandoned work (no activity for staleHours) may be taken over: its PR and branch hold nothing then.
+    if ((!claims.session || claim?.session !== claims.session) && !(claims.session && isStale(issue))) blocked.push(...workReasons(issue, claims.session));
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;
@@ -493,6 +538,12 @@ function check(issue = readIssue(), claims, currentPrNumber) {
     // A definitive refusal stays BLOCKED, whatever else is unreadable: a retry cannot lift it.
     } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
   }
+  // Finish first: another issue of the caller in In progress or Automated review holds a new start (not a resume, not a stack on that very work).
+  if (claims?.session && !blocked.length && !unknown.length && claim?.session !== claims.session) try {
+    const login = issue.viewer.login, mine = ownWork(assignedIssues(login), login, claims.session).filter(own => own.number !== issue.number);
+    const stacksOnOwn = stackedOn && predecessors.open.some(open => open.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() && mine.some(own => own.number === open.number));
+    if (!stacksOnOwn) blocked.push(...mine.map(own => `finish #${own.number} first: it is your open work (${projectItem(own).status.name}); hand it off before starting another issue`));
+  } catch (error) { unknown.push(`own open work is unreadable: ${String(error.stderr || error.message).trim()}`); }
   const plain = verdictOf({ blocked, unknown });
   const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;
   console.log(`${project.repository}#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
@@ -561,15 +612,19 @@ function next() {
   // Advanced issue search understands -is:blocked (open native predecessors). Separate searches keep blocked issues
   // from crowding unblocked ones out of the 1,000-result search cap; read every page of both before sorting. A page costs by its size, not by its hits
   // (4 lists per issue), so it is short: a repository with few open issues pays one point per search.
+  // The open PRs (state, update time, merge state) and the update times tell abandoned work from live work (#400); the viewer finds the own.
   const nodes = [];
+  let login;
   for (const blocking of ['-is:blocked', 'is:blocked']) for (let after, read = 0; ;) {
-    const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:30,after:$after){
-      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body assignees(first:10){nodes{login}}
+    const { search, viewer } = graphql(`query($q:String!,$after:String){viewer{login} search(query:$q,type:ISSUE_ADVANCED,first:30,after:$after){
+      issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body updatedAt assignees(first:10){nodes{login}}
       blockedBy(first:100){totalCount nodes{${predecessorFields}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
-      projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
+      closedByPullRequestsReferences(first:10){nodes{number state updatedAt mergeStateStatus repository{nameWithOwner}}}
+      projectItems(first:100){nodes{project{id} updatedAt status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open ${blocking}`, ...(after && { after }) });
+    login = viewer.login;
     nodes.push(...search.nodes);
     read += search.nodes.length;
     if (!search.pageInfo.hasNextPage) {
@@ -598,6 +653,18 @@ function next() {
   loadDeliveries(candidates.flatMap(issue => issue.predecessors.open));
   const stackable = candidates.map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
   const held = ready.filter(issue => issue.reasons.length && !stackable.some(candidate => candidate.number === issue.number));
+  // Unfinished work comes first: the own (finish it before a new start), then work that nobody moves (a stale PR, a Human-review PR with conflicts),
+  // which a new session may take over (check ISSUE --session ID treats a stale claim as expired).
+  const status = issue => projectItem(issue)?.status?.name;
+  const session = sessionOption(), mine = session ? ownWork(nodes, login, session) : [];
+  const openPr = issue => issue.closedByPullRequestsReferences?.nodes.find(pr => pr.state === 'OPEN' && pr.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
+  const conflict = issue => status(issue) === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY';
+  const abandoned = nodes.filter(issue => ['In progress', 'Automated review', 'Human review'].includes(status(issue)) && !mine.includes(issue) && openPr(issue)
+    && (isStale(issue) || conflict(issue)));
+  const work = (issue, note) => `#${issue.number} [${status(issue)}] ${issue.title} (PR #${openPr(issue)?.number ?? '-'}${note ? `, ${note}` : ''})`;
+  if (mine.length) console.log(`Finish your own work first (check ISSUE is BLOCKED for a new start meanwhile):\n${mine.map(issue => work(issue)).join('\n')}\n`);
+  if (abandoned.length) console.log(`Stale or conflicting work, a new session may take it over (check ISSUE --session ID):\n${abandoned.map(issue => work(issue,
+    conflict(issue) ? 'merge conflicts' : `no activity for ${ago(idleMs(issue))}`)).join('\n')}\n`);
   for (const issue of startable) console.log(line(issue));
   console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
   if (stackable.length) console.log('\nReady and stackable on an open PR (check ISSUE shows STACKABLE; see docs/CONTRIBUTING.md#stacked-pull-requests):');
@@ -2332,7 +2399,7 @@ function sub() {
 
 const commands = { next, sweep, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
   reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, ready, link, body, 'body-replace': bodyReplace };
-const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next | sweep | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
+const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next [--session ID] | sweep | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | new --from FILE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
@@ -2373,6 +2440,10 @@ if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFini
   console.error('reviewerGraceMinutes in .github/workflow-project.json must be a number of minutes, 0 or more (0 turns the grace off); omit the field for the default');
   process.exit(2);
 }
+if (['next', 'check'].includes(command) && !(Number.isFinite(staleHours) && staleHours >= 0)) {
+  console.error('staleHours in .github/workflow-project.json must be a number of hours, 0 or more; omit the field for the default of 6');
+  process.exit(2);
+}
 // Only numbers and plain names reach gh, so no argument can smuggle in options.
 if (command === 'ready' && Number.isSafeInteger(number) && !/^[0-9a-f]{7,40}$/i.test(value ?? '')) {
   console.error(`ready needs a commit id of 7 to 40 characters (git rev-parse HEAD) or --local, not ${value ? `"${value}"` : 'nothing'}`);
@@ -2387,6 +2458,7 @@ if (!commands[command] || (!['next', 'sweep', 'new', 'quota-wait'].includes(comm
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && !(process.argv.length > 5 && process.argv.slice(4).every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text))))
   // A misspelled flag must not silently turn the session check off.
+  || (command === 'next' && process.argv.length > 3 && !(process.argv.length === 5 && process.argv[3] === '--session' && /^\w[\w.-]*$/.test(process.argv[4])))
   || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^\w[\w.-]*$/.test(process.argv[5])))
   || (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
   // sleep(NaN) would wait forever.
