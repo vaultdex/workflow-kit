@@ -295,7 +295,8 @@ and then work in that directory, their relative paths (changed files given to `a
   blocker ends `FAILED` (exit 1), an undetermined merge state `WAITING` (exit 3), and nothing is merged. If the base moved and `changed on both sides` lists files, it first
   merges the base into the PR branch (`PUT pulls/N/update-branch` with the checked head as `expected_head_sha`),
   waits for the new head and its CI the same way, checks the gates again and merges that head; a base that moved without
-  an overlap does not hold the merge. If GitHub refuses that update with 403 (a PR with stacked children), `merge` ends
+  an overlap does not hold the merge. The same update runs when the only red check is one listed in `"updateBranchChecks"`
+  (check names, for example `["Restart CI after retarget"]`; `wait` and `handoff` still end `FAILED`, naming `board.mjs merge N`). If GitHub refuses that update with 403 (a PR with stacked children), `merge` ends
   `FAILED` (exit 1) and tells you to run `git merge origin/<base>` in the PR's worktree, push once and call `merge` again;
   it never pushes for you. Then it runs `gh pr merge --merge
   --match-head-commit <full head id>` once (a push after the check makes gh refuse; a refusal of a PR with stacked children ("part of a stack", "asynchronous merge REST API" or HTTP 403)
