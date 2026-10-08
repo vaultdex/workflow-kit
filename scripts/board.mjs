@@ -441,13 +441,17 @@ function baseLines(issue, stacked) {
   if (!value) return [`note: the Project field ${setting.field} is empty; no base branch to name`];
   const branch = setting.pattern.replace('{value}', () => value), remote = `origin/${branch}`;
   const git = externalTool('git', process.cwd(), projectDirectory);
-  const ok = (...args) => { try { execFileSync(git.file, ['-C', projectDirectory, ...args], { env: git.env, stdio: 'ignore' }); return true; } catch { return false; } };
+  // Git's exit code: 0 yes, 1 the expected "no", anything else is git failing (no checkout, no git) and says nothing about the base.
+  const exit = (...args) => { try { execFileSync(git.file, ['-C', projectDirectory, ...args], { env: git.env, stdio: 'ignore' }); return 0; } catch (error) { return error.status ?? -1; } };
   const lines = [`base: ${branch} (${setting.field})`];
-  if (!ok('rev-parse', '--verify', '--quiet', `refs/remotes/${remote}`)) lines.push(`note: ${remote} is not known in this checkout; run git fetch origin`);
+  let code = exit('check-ref-format', `refs/heads/${branch}`); // --branch would die with 128 instead of 1
+  if (code === 1) return [...lines, `note: ${branch} is not a valid branch name; fix the value of ${setting.field}`];
+  if (code === 0) code = exit('rev-parse', '--verify', '--quiet', `refs/remotes/${remote}`);
+  if (code === 1) return [...lines, `note: ${remote} is not known in this checkout; run git fetch origin`];
   // A stack starts from its base PR's branch, and an issue that has a branch was started: HEAD is not the base's business then.
-  else if (!stacked && !(issue.branches ?? []).some(ref => new RegExp(`^[\\w.-]+/${issue.number}-`).test(ref.name)) && !ok('merge-base', '--is-ancestor', `refs/remotes/${remote}`, 'HEAD')) {
-    lines.push(`note: HEAD is not on ${remote}; create the branch from there (git fetch origin, then git switch -c <branch> ${remote})`);
-  }
+  if (code === 0 && !stacked && !(issue.branches ?? []).some(ref => new RegExp(`^[\\w.-]+/${issue.number}-`).test(ref.name))) code = exit('merge-base', '--is-ancestor', `refs/remotes/${remote}`, 'HEAD');
+  if (code === 1) lines.push(`note: HEAD is not on ${remote}; create the branch from there (git fetch origin, then git switch -c <branch> ${remote})`);
+  else if (code) lines.push(`note: git could not check ${remote} (exit ${code}); no advice on the base`);
   return lines;
 }
 

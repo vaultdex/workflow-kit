@@ -532,6 +532,11 @@ test('baseBranch names the base from a Project field and warns, without a verdic
 
   writeIssue(withField({ name: '9.9.9' }));
   assert.deepEqual(baseLines(), ['base: release/9.9.9 (Zielrelease)', 'note: origin/release/9.9.9 is not known in this checkout']);
+  writeIssue(withField({ text: '0.1.1 LTS' }));
+  assert.deepEqual(baseLines(), ['base: release/0.1.1 LTS (Zielrelease)', 'note: release/0.1.1 LTS is not a valid branch name']);
+  writeIssue(withField({ name: '0.1.1' }));
+  writeFileSync(join(checkout, '.git/HEAD'), 'garbage');
+  assert.deepEqual(baseLines().map(line => line.replace(/\(exit \d+\)/, '(exit N)')), ['base: release/0.1.1 (Zielrelease)', 'note: git could not check origin/release/0.1.1 (exit N)'], 'A git failure is no advice about the base');
   writeIssue(withField(null));
   assert.deepEqual(baseLines(), ['note: the Project field Zielrelease is empty']);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ ...setting, baseBranch: { field: 'Zielrelease' } }));
