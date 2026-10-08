@@ -236,6 +236,37 @@ test('ohne slots läuft ein PR nach dem anderen im Ordner work, wie bisher', asy
   assert.deepEqual(['work', 'work-1'].map(name => existsSync(join(f.dir, `${name}.gestartet`))), [true, false]);
 });
 
+test('mit slots 2 wartet ein fälliger push, bis die laufenden Prüfungen fertig sind: kein Fetch der Plätze im Projekt-Checkout währenddessen', async t => {
+  const f = fixture(t, { push: ['test -e ../work-1.fertig && echo ok > pushed.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1', 'touch "$PWD.fertig"'], timeoutMinutes: 1 }] });
+  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: 'a'.repeat(40) } }];
+  const ctx = { ...f.ctx, slots: 2, pollMs: 1 }, api = ctx.api;
+  ctx.api = (method, path, fields) => { if (path.startsWith('pulls?') && f.posts.length) f.server.refs = [{ ref: 'refs/heads/main', object: { sha: 'b'.repeat(40) } }]; return api(method, path, fields); };
+  await watch(ctx, { rounds: 3 });
+  assert.equal(readFileSync(join(f.root, 'pushed.txt'), 'utf8').trim(), 'ok');
+});
+
+test('ein PR belegt nie zwei Plätze: ein neuer Head während des Laufs wird von follow geprüft, nicht zusätzlich gestartet', async t => {
+  const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1'], timeoutMinutes: 1 }] });
+  f.ctx.git(f.root, 'checkout', '-q', 'feature');
+  writeFileSync(join(f.root, 'backend/z.txt'), 'z');
+  f.ctx.git(f.root, 'add', '-A');
+  f.ctx.git(f.root, 'commit', '-qm', 'neuer Head');
+  const pushed = { ...f.pr, head: { ...f.pr.head, sha: f.ctx.git(f.root, 'rev-parse', 'HEAD') } };
+  f.ctx.git(f.root, 'checkout', '-q', 'main');
+  const ctx = { ...f.ctx, slots: 2, pollMs: 1 }, api = ctx.api;
+  let pushing = false; // der Push kommt, wenn der erste Lauf schon läuft
+  ctx.api = (method, path, fields) => {
+    if (path.startsWith('pulls?') && f.posts.length && !pushing) {
+      pushing = true;
+      f.ctx.git(f.root, 'push', '-q', 'origin', 'feature:refs/pull/1/head');
+      f.server.pulls = [f.server.current = pushed];
+    }
+    return api(method, path, fields);
+  };
+  await watch(ctx, { rounds: 3 });
+  assert.deepEqual(f.summary().filter(line => line.startsWith('local-ci')), ['local-ci: pending', 'local-ci: error', 'local-ci: pending', 'local-ci: success']);
+});
+
 test('slots muss eine ganze Zahl ab 1 sein, fehlt es, gilt 1', () => {
   const read = slots => path => path.endsWith('workflow-project.json') ? '{"localChecks":"c.json"}' : JSON.stringify({ checks: [], ...slots === undefined ? {} : { slots } });
   assert.equal(loadConfig(read()).slots, 1);

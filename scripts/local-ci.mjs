@@ -222,7 +222,7 @@ const finished = (ctx, sha, base) => {
 };
 
 /** `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat; die erste Beobachtung löst nichts aus. */
-async function pushed(ctx, heads) {
+async function pushed(ctx, heads, idle) {
   const moved = [];
   for (const prefix of ['main', 'release/']) {
     for (const { ref, object } of ctx.api('GET', `git/matching-refs/heads/${prefix}`)) {
@@ -232,6 +232,7 @@ async function pushed(ctx, heads) {
       heads.set(branch, object.sha);
     }
   }
+  if (moved.length) await idle(); // die Befehle laufen im Projekt-Checkout: kein Platz holt dort gleichzeitig (Fetch) ab, wie bisher
   for (const { branch, before, after } of moved) {
     let commands;
     try { commands = branchConfig(ctx, branch).push; } catch (error) { console.error(`push ${branch}: übersprungen, ${error.message}`); continue; }
@@ -250,11 +251,13 @@ async function pushed(ctx, heads) {
  * Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head, oder neuer Basis nach rotem Endstand, genau einmal.
  * Bis zu `ctx.slots` PRs laufen gleichzeitig (Standard 1: einer nach dem anderen im Ordner `work`), jeder auf einem Platz mit eigenem
  * Arbeitsordner `work-1`, `work-2`, …; ein PR belegt nie zwei Plätze. `checkout()` hat kein `await`: die Git-Aufrufe im gemeinsamen
- * Projekt-Checkout (Fetch, FETCH_HEAD, Worktree anlegen) laufen so nie ineinander.
+ * Projekt-Checkout (Fetch, FETCH_HEAD, Worktree anlegen) laufen so nie ineinander. Die `push`-Befehle laufen im selben Checkout und
+ * warten deshalb, bis alle Plätze frei sind; neue PRs starten erst danach.
  */
 export async function watch(ctx, { rounds = Infinity } = {}) {
   const heads = new Map(), done = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
-  const slotFree = async () => { while (busy.size >= slots) await Promise.race([...busy.values()].map(({ task }) => task)); };
+  const waitUntil = async free => { while (busy.size > slots - free) await Promise.race([...busy.values()].map(({ task }) => task)); };
+  const slotFree = () => waitUntil(1), idle = () => waitUntil(slots);
   const start = pr => {
     const slot = [...Array(slots).keys()].find(index => !busy.has(index));
     const task = follow({ ...ctx, work: slots > 1 ? `${ctx.work}-${slot + 1}` : ctx.work }, pr)
@@ -264,7 +267,7 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
   };
   for (let round = 0; round < rounds; round++) {
     try {
-      await pushed(ctx, heads).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
+      await pushed(ctx, heads, idle).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
       const bases = new Map(); // aktueller SHA je Ziel-Branch, einmal pro Runde
       for (const pr of ctx.api('GET', 'pulls?state=open&per_page=100').filter(pr => !pr.draft && pr.head.repo?.full_name === ctx.repository)) {
         try { if (!bases.has(pr.base.ref)) bases.set(pr.base.ref, ctx.api('GET', `git/ref/heads/${pr.base.ref}`).object.sha); } catch (error) {
@@ -298,15 +301,16 @@ async function main() {
   // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
-  const slots = mode === '--watch' ? loadConfig(path => readFileSync(join(root, path), 'utf8')).slots : 1; // einmal beim Start aus dem eigenen Checkout; ein neuer Wert gilt nach Neustart
   const ctx = {
-    bash, repository, root, slots, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000,
+    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000,
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
     api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
   lock(join(dir, 'lock'));
-  if (mode === '--watch') await watch(ctx);
-  else process.exitCode = (await follow(ctx, ctx.api('GET', `pulls/${mode}`))).ok ? 0 : 1;
+  if (mode === '--watch') {
+    ctx.slots = branchConfig(ctx, 'main').slots; // einmal beim Start von origin/main wie die Prüfliste, nicht aus dem eigenen Checkout; ein neuer Wert gilt nach Neustart
+    await watch(ctx);
+  } else process.exitCode = (await follow(ctx, ctx.api('GET', `pulls/${mode}`))).ok ? 0 : 1;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
