@@ -824,7 +824,7 @@ function applyFields(issue, plans) {
 
 /** Flags of `new`; unknown or repeated single flags are errors, never ignored. */
 function newOptions(args) {
-  const given = {}, single = ['--title', '--body-file', '--milestone', '--priority', '--agent', '--session'];
+  const given = {}, single = ['--title', '--body-file', '--milestone', '--priority', '--agent', '--session', '--status'];
   for (let index = 0; index < args.length; index++) {
     const flag = args[index];
     if (flag === '--start') { given[flag] = [true]; continue; }
@@ -834,14 +834,14 @@ function newOptions(args) {
     (given[flag] ??= []).push(text);
   }
   for (const flag of single) assert.ok((given[flag]?.length ?? 0) <= 1, `new: ${flag} may appear once`);
-  const [title, bodyFile, milestone, priority, agent, session] = single.map(flag => given[flag]?.[0]);
+  const [title, bodyFile, milestone, priority, agent, session, status] = single.map(flag => given[flag]?.[0]);
   const start = Boolean(given['--start']);
   const fields = (given['--field'] ?? []).map(pair => {
     const split = pair.indexOf('=');
     assert.ok(split > 0 && split < pair.length - 1, `new: --field wants NAME=VALUE, got "${pair}"`);
     return [pair.slice(0, split), pair.slice(split + 1)];
   });
-  return { title, bodyFile, milestone, priority, agent, session, start, fields, labels: given['--label'] ?? [] };
+  return { title, bodyFile, milestone, priority, agent, session, status, start, fields, labels: given['--label'] ?? [] };
 }
 
 /**
@@ -998,12 +998,13 @@ function create() {
   const args = process.argv.slice(3);
   if (args[0] === '--from') return createMany(args.slice(1));
   const options = newOptions(args);
-  const { agent, session, start } = options;
+  const { agent, session, start, status } = options;
   if (start) {
     assert.ok(['claude', 'codex'].includes(agent) && /^\w[\w.-]*$/.test(session ?? ''), 'new: --start needs --agent claude|codex and --session ID (the claim comment)');
   } else assert.ok(!agent && !session, 'new: --agent and --session belong to --start');
-  // Status is set by the command: Backlog, or Ready then In progress with --start.
-  const plan = named('new', () => planNew(options, start ? 'Ready' : 'Backlog'));
+  assert.ok(!(start && status), 'new: --status and --start exclude each other (--start sets Ready, then In progress)');
+  // Status is set by the command: Backlog, --status (checked against the Project options by planFields), or Ready then In progress with --start.
+  const plan = named('new', () => planNew(options, start ? 'Ready' : status ?? 'Backlog'));
   const progress = start ? planFields([['Status', 'In progress']]) : [];
   let viewer;
   if (start) {
@@ -1910,7 +1911,8 @@ function handoffPr(issueId, viewer, expectedHead, prior, partial) {
   const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => {
     const reasons = [];
     const comment = findHandoffComment(comments, viewer, pr.headRefOid);
-    if (!comment) reasons.push(`post the handoff comment on PR #${value} for the current head: a "## Übergabe" heading and a "Head: ${pr.headRefOid.slice(0, 7)}" line (README: Handoff comment)`);
+    if (!comment) reasons.push(`post the handoff comment on the PR #${value} (not on the issue) for the current head: a "## Übergabe" heading and a "Head: ${pr.headRefOid.slice(0, 7)}" line (README: Handoff comment).\n`
+      + `Write the file, then run: gh pr comment ${value} --repo ${project.repository} --body-file <file>\nTemplate:\n## Übergabe\n\n<Ergebnis in einem Satz>\n\nHead: ${pr.headRefOid.slice(0, 7)}\n\n### Retro\n\n- Keine Funde`);
     else if (!expectedHead) { // noted once, on the first pass
       // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
       const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
@@ -2198,7 +2200,6 @@ async function merge() {
   assert.equal(state, 'MERGED', `Merge read-back shows #${number} as ${state}${asynchronous ? '; merge-async was accepted and may still land: read the PR before merging again' : ''}`);
   console.log(`MERGED #${number} head ${headRefOid} merge commit ${mergeCommit?.oid}`);
   // The layers below: GitHub marks each as merged with the top; one line per layer, its issues and head branch (the top's goes below).
-  let defaultBranch;
   for (const layer of stack ? stackOrder : []) {
     const { pr, issues } = stackLayers.get(layer);
     if (layer !== number) {
@@ -2207,15 +2208,10 @@ async function merge() {
       if (lower.state !== 'MERGED') process.exitCode = 2;
       else dropBranch(pr);
     }
-    // Behind a release branch the issues stay open until the release (the project's workflow closes them). On the default branch GitHub should close them
-    // with the merge; a layer's issue that is still open after a short re-read (#397) is closed here, with a pointer to the merged PR.
+    // Whatever the trunk is: GitHub or the project's workflow closes the issues of a PR merged into the trunk, but not those of the upper layers (their base was a layer branch, #418).
+    // A layer's issue that is still open after a short re-read (#397) is closed here, with a pointer to the merged PR.
     for (const issueNumber of issues) {
       try {
-        if (stackTrunk !== (defaultBranch ??= rest(`repos/${project.repository}`).default_branch)) {
-          const issue = readIssue(false, issueNumber);
-          console.log(`issue #${issueNumber} (PR #${layer}): ${issue.state.toLowerCase()}, status ${projectItem(issue)?.status?.name ?? 'unset'}`);
-          continue;
-        }
         const path = `repos/${project.repository}/issues/${issueNumber}`;
         let open;
         for (let read = 1; (open = rest(path).state !== 'closed') && read < 5; read++) sleep(numberOption('--interval', 3));
@@ -2484,12 +2480,12 @@ function sub() {
 const commands = { next, sweep, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
   reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, 'stack-sync': stackSync, ready, link, body, 'body-replace': bodyReplace };
 const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next [--session ID] | sweep | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
-  + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
+  + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--status S] [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
   + ' | new --from FILE'
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
   + ' | quota-wait [--max-minutes N]'
-  + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS]'
+  + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] (needs the comment "## Übergabe" with "Head: <sha>" on the PR, not the issue: gh pr comment PR --body-file FILE)'
   + ' | merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
   + ' | stack-sync TOP'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
@@ -2503,7 +2499,7 @@ if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
 // included); any other argument is a mistake that must not reach a write. `field` and `status ISSUE "Automated review"` check their own trailing words.
 const writeArgs = { sweep: { words: 0 }, status: { words: 2 }, priority: { words: 2 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2 },
   body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
-  new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1 } },
+  new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1, '--status': 1 } },
   ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1 } },
   merge: { words: 1, flags: { '--stack': 0, '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } }, 'stack-sync': { words: 1 } };
 function refusesArguments() {

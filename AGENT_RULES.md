@@ -88,7 +88,8 @@ The driver completes these steps before implementation, including review fixes:
    allowed). Abandoned work (no push, comment or status change for `staleHours`, default 6; or a Human-review
    PR with conflicts) is listed by `next` too; its claim has expired, so `check ISSUE --session ID` notes it
    instead of BLOCKED. Take it over with a claim comment that also says `Takeover of stale claim OLD_SESSION`.
-   Previous assignees stay.
+   Previous assignees stay. A subagent uses its own agent id as `--session`, never the parent's `CLAUDE_CODE_SESSION_ID`
+   (otherwise `check` says `finish #N first` for the parent's claim).
 3. Create the [issue-linked branch](docs/CONTRIBUTING.md#delivery) (on STACKABLE from the
    head of the base PR's branch; else from the `base:` that `check` names, if it does), or
    reuse your existing branch and PR for this issue. Switch to it in your worktree and verify

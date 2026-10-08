@@ -181,13 +181,13 @@ and then work in that directory, their relative paths (changed files given to `a
   `origin/<base>` (that last one only for an issue with no branch yet and no stack); no fetch, never a verdict), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
-- `new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]`:
+- `new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--status S] [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]`:
   create an issue with its required metadata in one call and print one line, `NEW URL | milestone | labels |
   Status | Priority | …`, of the values read back. Title, body file, an open milestone, one label that exists
   (the REST API would create an unknown one), a Priority and every field named in the optional
   `"requiredFields"` of `.github/workflow-project.json` (for example `["Size"]`) are required; `Status`
   and `Priority` are not `--field` values. Everything is validated against the Project and repository before
-  the issue exists, so a missing or invalid value creates nothing (`ERROR - reason`, exit 2). The Status is Backlog;
+  the issue exists, so a missing or invalid value creates nothing (`ERROR - reason`, exit 2). The Status is Backlog, or the Project option given by `--status S` (e.g. `Ready`; not together with `--start`);
   `--start` (only under a human start request, [Starting work](docs/CONTRIBUTING.md#starting-work)) assigns the
   authenticated user, sets Ready, posts `Agent: …, Session: …`, reads the claim back and ends on In progress; it
   refuses a body whose `Wartet bis:` line holds the issue. A failure after the issue exists names its URL and
@@ -334,9 +334,8 @@ and then work in that directory, their relative paths (changed files given to `a
   would land it in the layer below): GitHub merges every layer below with it, bottom first, and shows each as merged, without retarget.
   A trunk that gained commits under files the stack changes ends `FAILED` with the manual way (`git merge origin/<trunk>` in the top layer,
   push once, run again), because `update-branch` of the top would only merge the layer below. The output has a `MERGED #N …` line per
-  layer (`NOT MERGED (STATE) #N …` and exit 2 when GitHub left one open), `issue #N (PR #L): STATE, status S` per delivered issue
-  (merge writes no status: behind a release branch the issue stays open until the release). On a stack based on the default branch the
-  issue is read again for about 15 s; one that is still open is closed as completed with a comment naming the merged PR (`issue #N (PR #L): closed`, #397). After the merge it deletes the head branch (every layer's with `--stack`, lower layers first; `branch deleted: …`) unless the repository's setting "Automatically delete head branches" does it,
+  layer (`NOT MERGED (STATE) #N …` and exit 2 when GitHub left one open), `issue #N (PR #L): closed` per delivered issue
+  (merge writes no status). Whatever the stack's trunk is (#418), each issue is read again for about 15 s; one that is still open is closed as completed with a comment naming the merged PR (#397). After the merge it deletes the head branch (every layer's with `--stack`, lower layers first; `branch deleted: …`) unless the repository's setting "Automatically delete head branches" does it,
   the branch is not of this repository, is the default branch or is the base of another open PR (a stack: GitHub would close
   that PR); it prints `branch kept: …` with the reason. A failed or already done delete is a `note:` or `branch gone:` line,
   never an error of the merge. Without `--stack` it does not read the issue, claims or the [handoff comment](#handoff-comment).
