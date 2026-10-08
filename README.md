@@ -481,6 +481,8 @@ which is untrusted, and not from its own checkout either (only the `repository` 
 - `push` runs in the project checkout whenever `main` or a `release/*` branch moved while `--watch` runs (its list comes from
   `origin/<that branch>`; a branch without the config is skipped), with
   `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
+  The runner stores each branch head in `heads.json` next to its work folders once that branch's `push` is done, so a branch that
+  moved while the runner was off is caught up at the next `--watch` start; without the file the first look is the baseline.
 - With `localChecks` configured, `board.mjs reviews`, `wait`, `handoff` and `merge` require the head's `local-ci` commit
   status: missing or `pending` waits, `failure` and `error` are red, and only `success` passes.
   `localChecks`, `awaitApps`, `optionalReviewers` and `updateBranchChecks` are read from `.github/workflow-project.json` on the

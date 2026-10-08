@@ -221,17 +221,24 @@ const finished = (ctx, sha, base) => {
   return status?.state === 'success' || (status?.state === 'failure' && !!status.description?.startsWith(baseMark(base)));
 };
 
-/** `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat; die erste Beobachtung löst nichts aus. */
-async function pushed(ctx, heads, idle) {
+/**
+ * `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat; die erste Beobachtung löst nichts aus.
+ * `saved` sind die Heads, deren push-Aufgabe erledigt ist (Datei `ctx.headsFile`): nach einem Neustart zählt der Vergleich damit,
+ * nicht die erste Beobachtung. Ein Head wird erst nach der Aufgabe gespeichert, eine abgebrochene läuft beim nächsten Start nochmal.
+ */
+async function pushed(ctx, heads, saved, idle) {
   const moved = [];
+  const save = () => ctx.headsFile && writeFileSync(ctx.headsFile, JSON.stringify(Object.fromEntries(saved)));
   for (const prefix of ['main', 'release/']) {
     for (const { ref, object } of ctx.api('GET', `git/matching-refs/heads/${prefix}`)) {
       const branch = ref.slice('refs/heads/'.length);
       if (branch !== 'main' && !branch.startsWith('release/')) continue;
       if (heads.has(branch) && heads.get(branch) !== object.sha) moved.push({ branch, before: heads.get(branch), after: object.sha });
+      if (!heads.has(branch)) saved.set(branch, object.sha);
       heads.set(branch, object.sha);
     }
   }
+  save();
   if (moved.length) await idle(); // die Befehle laufen im Projekt-Checkout: kein Platz holt dort gleichzeitig (Fetch) ab, wie bisher
   for (const { branch, before, after } of moved) {
     let commands;
@@ -244,6 +251,8 @@ async function pushed(ctx, heads, idle) {
       const { code } = await shell(command, { cwd: ctx.root, env, log, timeoutMs: 30 * 60_000, state: {}, bash: ctx.bash });
       if (code) { console.error(`push ${branch}: "${command}" endete mit ${code} (${log})`); break; }
     }
+    saved.set(branch, after);
+    save();
   }
 }
 
@@ -255,7 +264,9 @@ async function pushed(ctx, heads, idle) {
  * warten deshalb, bis alle Plätze frei sind; neue PRs starten erst danach.
  */
 export async function watch(ctx, { rounds = Infinity } = {}) {
-  const heads = new Map(), done = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
+  let known = {};
+  try { known = JSON.parse(readFileSync(ctx.headsFile, 'utf8')); } catch { /* erster Start oder keine Datei: die erste Beobachtung ist die Ausgangslage */ }
+  const heads = new Map(Object.entries(known)), saved = new Map(heads), done = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
   const waitUntil = async free => { while (busy.size > slots - free) await Promise.race([...busy.values()].map(({ task }) => task)); };
   const slotFree = () => waitUntil(1), idle = () => waitUntil(slots);
   const start = pr => {
@@ -267,7 +278,7 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
   };
   for (let round = 0; round < rounds; round++) {
     try {
-      await pushed(ctx, heads, idle).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
+      await pushed(ctx, heads, saved, idle).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
       const bases = new Map(); // aktueller SHA je Ziel-Branch, einmal pro Runde
       for (const pr of ctx.api('GET', 'pulls?state=open&per_page=100').filter(pr => !pr.draft && pr.head.repo?.full_name === ctx.repository)) {
         try { if (!bases.has(pr.base.ref)) bases.set(pr.base.ref, ctx.api('GET', `git/ref/heads/${pr.base.ref}`).object.sha); } catch (error) {
@@ -302,7 +313,7 @@ async function main() {
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
   const ctx = {
-    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000,
+    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), headsFile: join(dir, 'heads.json'), pollMs: 60_000,
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
     api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
