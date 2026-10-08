@@ -139,7 +139,7 @@ Its nested submodules stay empty: tests that need them skip with the reason
 | Backlog | Nothing without a human request; propose, don't implement. |
 | Ready | Complete [Start or resume](#start-or-resume). |
 | In progress | Implement on the issue-linked branch; the PR stays Draft. Complete [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks) immediately after creating it. |
-| Automated review | PR ready; wait for CI and every non-optional reviewer with a trace on the head ([review loop](docs/CONTRIBUTING.md#review-loop)); fix or link each finding; run the retro before handoff (drivers: at most 3 friction lines instead). |
+| Automated review | PR ready; wait for CI and every non-optional reviewer with a trace on the head ([review loop](docs/CONTRIBUTING.md#review-loop)); fix or link each finding (open Sonar issues first: a project with `localCiAfterApps` starts the local CI only at 0 open Sonar issues); run the retro before handoff (drivers: at most 3 friction lines instead). |
 | Human review | Hand off. A human accepts and merges. |
 | Done | Merged and accepted. |
 
