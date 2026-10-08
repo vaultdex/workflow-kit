@@ -109,9 +109,18 @@ function graphql(query, variables = {}, tolerate) {
 // base of a stack through the native closing links (manual ones included). They are read by loadDeliveries, only where a stack is judged.
 const predecessorFields = 'id number state stateReason repository{nameWithOwner}';
 const deliveryFields = `closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number state isDraft isCrossRepository repository{nameWithOwner} baseRefName headRefName headRefOid}}`;
+// "baseBranch": {"field": "Zielrelease", "pattern": "release/{value}"} names the branch an issue starts from (#385); `check` reads the field with the issue.
+const baseSetting = () => {
+  const setting = project.baseBranch;
+  if (setting === undefined) return;
+  assert.ok(typeof setting?.field === 'string' && setting.field.trim() && typeof setting.pattern === 'string' && setting.pattern.includes('{value}'),
+    'baseBranch must be {"field": "<Project field>", "pattern": "<branch name containing {value}>"}');
+  return setting;
+};
+const baseField = () => baseSetting() ? ` base:fieldValueByName(name:${JSON.stringify(baseSetting().field)}){...on ProjectV2ItemFieldSingleSelectValue{name} ...on ProjectV2ItemFieldTextValue{text}}` : '';
 // Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query.
 const issueFields = predecessor => `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
-  projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
+  projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}${baseField()}}}
   blockedBy(first:100){totalCount nodes{${predecessor}}}`;
 // The login of the viewer comes along, so a claim check needs no query of its own. Sub-issues (only `check` lists them) are asked
 // for in the number given: each costs three lists, so the first page is short and a longer list is read again at 100.
@@ -423,6 +432,25 @@ const ago = ms => {
   return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
 };
 
+/** The base the Project field names and whether HEAD stands on it; local git only, no fetch. Information only, never a verdict. */
+function baseLines(issue) {
+  const setting = baseSetting();
+  if (!setting) return [];
+  const found = projectItem(issue)?.base;
+  const value = (found?.name ?? found?.text ?? '').trim();
+  if (!value) return [`note: the Project field ${setting.field} is empty; no base branch to name`];
+  const branch = setting.pattern.replace('{value}', () => value), remote = `origin/${branch}`;
+  const git = externalTool('git', process.cwd(), projectDirectory);
+  const ok = (...args) => { try { execFileSync(git.file, ['-C', projectDirectory, ...args], { env: git.env, stdio: 'ignore' }); return true; } catch { return false; } };
+  const lines = [`base: ${branch} (${setting.field})`];
+  if (!ok('rev-parse', '--verify', '--quiet', `refs/remotes/${remote}`)) lines.push(`note: ${remote} is not known in this checkout; run git fetch origin`);
+  // An issue that has a branch already was started: its HEAD is that branch's business.
+  else if (!(issue.branches ?? []).some(ref => new RegExp(`^[\\w.-]+/${issue.number}-`).test(ref.name)) && !ok('merge-base', '--is-ancestor', `refs/remotes/${remote}`, 'HEAD')) {
+    lines.push(`note: HEAD is not on ${remote}; create the branch from there (git fetch origin, then git switch -c <branch> ${remote})`);
+  }
+  return lines;
+}
+
 /** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
 function check(issue = readIssue(), claims, currentPrNumber) {
   let current = currentIssuePr(issue);
@@ -466,6 +494,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
     ? `stack base: PR #${stackedOn.number} is already merged into ${stackedOn.baseRefName}: no stack, work on ${stackedOn.baseRefName}; see docs/CONTRIBUTING.md#stacked-pull-requests`
     : `stack base: PR #${stackedOn.number}${stackedOn.stackNumber ? ` in stack #${stackedOn.stackNumber}` : ''} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
   for (const note of notes) console.log(`note: ${note}`);
+  if (claims) for (const line of baseLines(issue)) console.log(line);
   if (claim) {
     const linked = issue.closedByPullRequestsReferences;
     const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => refOf(pr.repository, pr.number));

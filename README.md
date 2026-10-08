@@ -163,7 +163,9 @@ and then work in that directory, their relative paths (changed files given to `a
 - `next`, `check ISSUE [--session ID]` (exit 0 STARTABLE, 1 BLOCKED, 2 UNKNOWN, 4 STACKABLE: only an open
   predecessor PR holds the issue, see [Stacked pull requests](docs/CONTRIBUTING.md#stacked-pull-requests);
   `next` lists such issues apart, with the base PR; shows the age and open PR of a claim and one line per
-  native sub-issue; information only), `status ISSUE "STATUS"`, `priority ISSUE High`,
+  native sub-issue; information only; with `"baseBranch": {"field": "Zielrelease", "pattern": "release/{value}"}` it
+  also prints `base: release/0.1.1 (Zielrelease)` from that Project field and a `note:` when `HEAD` does not descend
+  from the local `origin/<base>` or that branch is unknown; no fetch, never a verdict), `status ISSUE "STATUS"`, `priority ISSUE High`,
   `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
 - `new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]`:
