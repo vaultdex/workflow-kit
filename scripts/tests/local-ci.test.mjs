@@ -176,6 +176,11 @@ test('vor jedem Lauf ist der Arbeitsordner genau der PR-Stand: eine ignorierte D
 
 test('fehlt die Konfiguration auf dem Ziel-Branch, meldet local-ci das klar und die Schleife prüft den nächsten PR', async t => {
   const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }] });
+  f.ctx.git(f.root, 'checkout', '-q', '--orphan', 'leer'); // release/9 gibt es, aber ohne .github (ein fehlender Branch gälte als nicht abrufbar und wartet)
+  f.ctx.git(f.root, 'rm', '-rfq', '.');
+  f.ctx.git(f.root, 'commit', '-q', '--allow-empty', '-m', 'leer');
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'leer:refs/heads/release/9');
+  f.ctx.git(f.root, 'checkout', '-q', '-f', 'main');
   f.server.pulls = [{ ...f.pr, number: 2, base: { ref: 'release/9' } }, f.pr];
   await watch({ ...f.ctx, pollMs: 1 }, { rounds: 1 });
   assert.deepEqual(f.summary(), ['local-ci: pending', 'local-ci: failure', 'local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
@@ -338,4 +343,57 @@ test('localCiAfterApps: der Läufer nimmt den PR erst, wenn Sonar für den Head 
   assert.deepEqual(await round(f), ['local-ci: pending'], 'Befunde offen: kein Lauf');
   f.server.checkRuns = sonar('[0 New issues](x)');
   assert.deepEqual(await round(f),['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
+});
+
+/** Ein Projekt, dessen main `localCiAfterApps` mit Sonar als awaitApp einschaltet; `sonarRuns(Zusammenfassung, Ergebnis)` ist die Antwort der Check-Runs. */
+function afterAppsFixture(t, checks) {
+  const f = fixture(t, { checks });
+  writeFileSync(join(f.root, '.github/workflow-project.json'), JSON.stringify({ repository: 'o/r', localChecks: '.github/local-checks.json', awaitApps: ['sonarqubecloud'], localCiAfterApps: true }));
+  f.ctx.git(f.root, 'commit', '-qam', 'warten');
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
+  return f;
+}
+const sonarRuns = (summary, conclusion = 'success') => [{ app: { slug: 'sonarqubecloud' }, status: 'completed', conclusion, details_url: 'https://sonarcloud.io/dashboard?id=o_r&pullRequest=1', output: { summary } }];
+
+test('localCiAfterApps: eine übersprungene Sonar-Analyse und ein einmaliger Fetchfehler beim Lesen der Einstellung geben die CI nicht frei', async t => {
+  const f = afterAppsFixture(t, [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }]);
+  f.server.checkRuns = sonarRuns('[0 New issues](x)', 'skipped');
+  await watch({ ...f.ctx, pollMs: 1 }, { rounds: 2 });
+  assert.deepEqual(f.summary(), ['local-ci: pending'], 'übersprungen: zwei Runden, ein Status, kein Lauf');
+
+  f.server.checkRuns = sonarRuns('[0 New issues](x)');
+  f.posts.length = 0;
+  let failed = false; // der Fetch der Einstellung scheitert in der ersten Runde, danach klappt er
+  const git = (cwd, ...args) => { if (args[0] === 'fetch' && !failed) { failed = true; throw new Error('Netz weg'); } return f.ctx.git(cwd, ...args); };
+  await watch({ ...f.ctx, git, pollMs: 1 }, { rounds: 2 });
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success'], 'Fetchfehler: erst gemeldet und gewartet, dann geprüft');
+});
+
+test('localCiAfterApps: ein Folgehead nach einem Push-Abbruch wartet wie der erste und läuft nach Sonar 0 genau einmal', async t => {
+  const f = afterAppsFixture(t, [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1'], timeoutMinutes: 1 }]);
+  f.ctx.git(f.root, 'checkout', '-q', 'feature');
+  writeFileSync(join(f.root, 'backend/z.txt'), 'z');
+  f.ctx.git(f.root, 'add', '-A');
+  f.ctx.git(f.root, 'commit', '-qm', 'neuer Head');
+  const pushed = { ...f.pr, head: { ...f.pr.head, sha: f.ctx.git(f.root, 'rev-parse', 'HEAD') } };
+  f.ctx.git(f.root, 'checkout', '-q', 'main');
+  const ctx = { ...f.ctx, slots: 2, pollMs: 1 }, api = ctx.api;
+  let pushing = false; // der Push kommt, wenn der erste Lauf schon läuft; der neue Head hat nur eine übersprungene Analyse
+  ctx.api = (method, path, fields) => {
+    if (path.startsWith('pulls?') && f.posts.length && !pushing) {
+      pushing = true;
+      f.ctx.git(f.root, 'push', '-q', 'origin', 'feature:refs/pull/1/head');
+      f.server.pulls = [f.server.current = pushed];
+    }
+    if (path.includes('/check-runs?')) return { check_runs: sonarRuns('[0 New issues](x)', path.includes(pushed.head.sha) ? 'skipped' : 'success') };
+    return api(method, path, fields);
+  };
+  await watch(ctx, { rounds: 3 });
+  assert.deepEqual(f.summary().filter(line => line.startsWith('local-ci')), ['local-ci: pending', 'local-ci: error', 'local-ci: pending'], 'alter Lauf beendet, neuer Head wartet');
+  assert.equal(f.posts.filter(post => post.sha === pushed.head.sha && post.context === 'Backend').length, 0, 'der Prüfbefehl des neuen Heads lief nicht');
+
+  f.posts.length = 0;
+  ctx.api = (method, path, fields) => path.includes('/check-runs?') ? { check_runs: sonarRuns('[0 New issues](x)') } : api(method, path, fields);
+  await watch(ctx, { rounds: 1 });
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
 });

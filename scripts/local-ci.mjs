@@ -37,15 +37,13 @@ export function loadConfig(read) {
   return { repository: project.repository, checks, setup, push, slots, riskPaths };
 }
 
-/** Die Einstellung `localCiAfterApps` vom Ziel-Branch: ohne sie (oder ohne lesbare Datei, das meldet dann der Lauf selbst) null, der PR startet wie bisher. */
-const waitSettings = (ctx, branch) => {
-  try {
-    return branchConfig(ctx, branch, undefined, read => {
-      const { localCiAfterApps, awaitApps = [] } = JSON.parse(read('.github/workflow-project.json'));
-      return localCiAfterApps ? { apps: awaitApps } : null;
-    });
-  } catch { return null; }
-};
+/** Die Einstellung `localCiAfterApps` vom Ziel-Branch: ohne sie (oder ohne die Datei dort, das meldet dann der Lauf selbst) null, der PR startet wie bisher. Ein Fetch- oder Lesefehler wirft: Er gilt nicht als ausgeschaltete Einstellung. */
+const waitSettings = (ctx, branch) => branchConfig(ctx, branch, undefined, read => {
+  let text;
+  try { text = read('.github/workflow-project.json'); } catch { return null; }
+  const { localCiAfterApps, awaitApps = [] } = JSON.parse(text);
+  return localCiAfterApps ? { apps: awaitApps } : null;
+});
 
 /** Warum der Head noch nicht dran ist (Text für den Status), oder null: die `apps` sind für ihn fertig und SonarCloud meldet 0 offene Befunde. */
 export async function waitReason(ctx, pr, { apps }) {
@@ -53,7 +51,7 @@ export async function waitReason(ctx, pr, { apps }) {
   const waiting = apps.filter(app => !runs.some(run => run.app?.slug === app && run.status === 'completed'));
   if (waiting.length) return `wartet auf ${waiting.join(', ')}`;
   const sonar = runs.find(run => run.app?.slug === 'sonarqubecloud' && run.status === 'completed' && run.conclusion !== 'skipped');
-  if (!sonar) return null;
+  if (!sonar) return 'wartet auf die Sonar-Analyse'; // fehlt oder übersprungen: kein Nachweis
   const { origin, searchParams } = new URL(sonar.details_url ?? 'invalid:');
   if (!['https://sonarcloud.io', 'https://sonarqube.us'].includes(origin) || !searchParams.get('id') || searchParams.get('pullRequest') !== String(pr.number)) throw new Error('der Sonar-Check verlinkt nicht die Analyse dieses PRs');
   let open;
@@ -246,11 +244,11 @@ export async function checkPullRequest(ctx, pr) {
   return { ok, next: newHead() };
 }
 
-/** Prüft den PR und, wenn währenddessen ein neuer Head kommt, auch diesen. */
-export async function follow(ctx, pr) {
+/** Prüft den PR und, wenn währenddessen ein neuer Head kommt, auch diesen, sofern `hold(head)` keinen Grund zum Warten meldet (dann holt `watch` ihn in einer späteren Runde). */
+export async function follow(ctx, pr, hold) {
   for (let result; ; pr = result.next) {
     result = await checkPullRequest(ctx, pr);
-    if (!result.next) return result;
+    if (!result.next || await hold?.(result.next)) return result;
   }
 }
 
@@ -314,9 +312,22 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
   const heads = new Map(Object.entries(known)), saved = new Map(heads), done = new Map(), waiting = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
   const waitUntil = async free => { while (busy.size > slots - free) await Promise.race([...busy.values()].map(({ task }) => task)); };
   const slotFree = () => waitUntil(1), idle = () => waitUntil(slots);
+  // Einstellung `localCiAfterApps`: bis Sonar für den Head fertig ist und 0 Befunde offen sind, nimmt der Läufer den PR nicht, auch nicht als Folgehead in `follow`
+  const hold = async (pr, settings = new Map()) => {
+    let reason = null;
+    try {
+      if (!settings.has(pr.base.ref)) settings.set(pr.base.ref, waitSettings(ctx, pr.base.ref));
+      reason = settings.get(pr.base.ref) && await waitReason(ctx, pr, settings.get(pr.base.ref));
+    } catch (error) { reason = `Wartebedingung nicht lesbar: ${error.message.split('\n')[0]}`; }
+    if (reason) { // ein Status je Head und Grund, kein Aufruf je Runde
+      if (waiting.get(pr.number) !== `${pr.head.sha} ${reason}`) ctx.api('POST', `statuses/${pr.head.sha}`, { state: 'pending', context: AGGREGATE, description: reason.slice(0, 140) });
+      waiting.set(pr.number, `${pr.head.sha} ${reason}`);
+    }
+    return reason;
+  };
   const start = pr => {
     const slot = [...Array(slots).keys()].find(index => !busy.has(index));
-    const task = follow({ ...ctx, work: slots > 1 ? `${ctx.work}-${slot + 1}` : ctx.work }, pr)
+    const task = follow({ ...ctx, work: slots > 1 ? `${ctx.work}-${slot + 1}` : ctx.work }, pr, hold)
       .catch(error => console.error(`#${pr.number}: ${error.message}`)) // ein Läuferfehler hält die anderen Plätze nicht auf
       .finally(() => busy.delete(slot));
     busy.set(slot, { number: pr.number, task });
@@ -333,16 +344,7 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
         const base = bases.get(pr.base.ref), key = `${pr.head.sha} ${base}`;
         // läuft der PR noch (`follow` holt einen neuen Head selbst), startet er nicht ein zweites Mal auf einem anderen Platz
         if ([...busy.values()].some(({ number }) => number === pr.number) || done.get(pr.number) === key || finished(ctx, pr.head.sha, base)) continue;
-        let reason = null; // Einstellung `localCiAfterApps`: bis Sonar für den Head fertig ist und 0 Befunde offen sind, nimmt der Läufer den PR nicht
-        try {
-          if (!settings.has(pr.base.ref)) settings.set(pr.base.ref, waitSettings(ctx, pr.base.ref));
-          reason = settings.get(pr.base.ref) && await waitReason(ctx, pr, settings.get(pr.base.ref));
-        } catch (error) { reason = `Wartebedingung nicht lesbar: ${error.message.split('\n')[0]}`; }
-        if (reason) { // ein Status je Head und Grund, kein Aufruf je Runde
-          if (waiting.get(pr.number) !== `${pr.head.sha} ${reason}`) ctx.api('POST', `statuses/${pr.head.sha}`, { state: 'pending', context: AGGREGATE, description: reason.slice(0, 140) });
-          waiting.set(pr.number, `${pr.head.sha} ${reason}`);
-          continue;
-        }
+        if (await hold(pr, settings)) continue;
         done.set(pr.number, key); // ponytail: ein Läuferfehler wiederholt Head und Basis nicht; ein neuer Push, eine neue Basis oder `local-ci.mjs PR` prüft erneut
         await slotFree();
         start(pr);
