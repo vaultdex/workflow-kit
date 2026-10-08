@@ -1,11 +1,11 @@
 // Lokale CI (README, "Lokale CI"): führt die PR-Prüfungen eines Projekts auf diesem Rechner aus und meldet sie als
 // Commit-Status. Der Status stammt von diesem Skript, kein Agent behauptet ihn. Nur REST, keine GraphQL-Punkte.
-// Aufruf, in Git Bash: local-ci.mjs [--cwd DIR] PR | --watch
+// Aufruf: local-ci.mjs [--cwd DIR] PR | --watch
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { enterCwd, externalTool, projectRoot } from './checkout-root.mjs';
 
@@ -67,10 +67,19 @@ const killTree = child => {
   } catch { /* der Prozess ist schon weg */ }
 };
 
+/** Windows: das bash.exe von Git for Windows (`<git-root>/bin/bash.exe`, aus `git --exec-path` abgeleitet), nie das erste `bash` im PATH:
+ * aus PowerShell ist das WSL ohne node. Fehlt es, bricht der Start ab, bevor ein Status gemeldet wird. */
+export function gitBash(execPath, platform = process.platform) {
+  if (platform !== 'win32') return 'bash';
+  const bash = win32.resolve(execPath, '..', '..', '..', 'bin', 'bash.exe');
+  assert.ok(existsSync(bash), `Git Bash fehlt (${bash}); installiere Git for Windows`);
+  return bash;
+}
+
 /** Ein Befehl über `bash -c`; Ausgabe an das Protokoll. `state.child` ist der laufende Prozess, den ein Abbruch beendet. */
-function shell(command, { cwd, env, log, timeoutMs, state }) {
+function shell(command, { cwd, env, log, timeoutMs, state, bash = 'bash' }) {
   return new Promise(done => {
-    const child = spawn('bash', ['-c', command], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true });
+    const child = spawn(bash, ['-c', command], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true });
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => appendFileSync(log, chunk)); // ein gemeinsamer Dateihandle für beide Ströme bricht unter Windows ab
     state.child = child;
     let timedOut = false;
@@ -155,7 +164,7 @@ export async function checkPullRequest(ctx, pr) {
       for (const [index, command] of commands.entries()) {
         if (state.aborted) return null; // der Abbruch kam zwischen zwei Befehlen, als kein Prozess lief
         appendFileSync(log, `$ ${command}\n`);
-        const { code, timedOut } = await shell(command, { cwd: work, env, log, timeoutMs: end - Date.now(), state });
+        const { code, timedOut } = await shell(command, { cwd: work, env, log, timeoutMs: end - Date.now(), state, bash: ctx.bash });
         if (state.aborted) return null;
         const step = `Befehl ${index + 1}/${commands.length}`;
         if (timedOut) return ['failure', `Zeitlimit ${minutes} min bei ${step}`];
@@ -212,7 +221,7 @@ async function pushed(ctx, heads) {
     const log = join(ctx.logs, `push-${branch.replace(/[^\w.-]+/g, '-')}.log`);
     writeFileSync(log, '');
     for (const command of commands) {
-      const { code } = await shell(command, { cwd: ctx.root, env, log, timeoutMs: 30 * 60_000, state: {} });
+      const { code } = await shell(command, { cwd: ctx.root, env, log, timeoutMs: 30 * 60_000, state: {}, bash: ctx.bash });
       if (code) { console.error(`push ${branch}: "${command}" endete mit ${code} (${log})`); break; }
     }
   }
@@ -246,8 +255,9 @@ async function main() {
   const { repository } = JSON.parse(readFileSync(join(root, '.github/workflow-project.json'), 'utf8')); // nur die Identität des Projekts; die Prüfliste kommt pro PR vom Ziel-Branch
   // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
+  const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
   const ctx = {
-    repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000, mergeWaitMs: 10_000, mergeAttempts: 6,
+    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 60_000, mergeWaitMs: 10_000, mergeAttempts: 6,
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
     api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
