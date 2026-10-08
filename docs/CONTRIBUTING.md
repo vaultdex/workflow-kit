@@ -233,7 +233,10 @@ the PR or changing its body or base, verify the delivered issue in
 the issue with `board.mjs link ISSUE PR` (or GitHub's Development sidebar); the
 command reads the connection back. This connection closes
 the issue only when merged into the default branch; keep the project's release
-rules for references and completion.
+rules for references and completion. A part that must go to another base (for
+example tooling to `main`) is a separate PR with `Refs #N` and no closing link; the
+board commands accept it beside the one PR that closes the issue and never move the
+issue to Human review or Done for it.
 
 Write the PR in [simple German](#einfache-sprache): **Was wurde geändert und warum?**
 starts with the result in one plain sentence, then the reason and the benefit, with

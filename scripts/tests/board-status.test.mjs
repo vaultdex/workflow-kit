@@ -61,6 +61,23 @@ test('Automated review sets the missing native link and backlink itself and refu
 });
 
 
+test('Automated review for a Refs PR beside the closing PR posts only the backlink and never links natively (#398)', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue('In progress'), closedByPullRequestsReferences: { totalCount: 1, nodes: [
+    { number: 8, state: 'OPEN', repository: { nameWithOwner: 'test/example' } }] } });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: false, linkPages: [[]],
+    url: 'https://github.com/test/example/pull/7', body: 'Refs #1' })));
+  writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0 }));
+  writeFileSync(join(checkout, 'backlink-comments-1.json'), '[]');
+  const result = run('status', '1', 'Automated review', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const writes = readFileSync(join(checkout, 'mutations'), 'utf8');
+  assert.equal(/addCloseIssueReferences/.test(writes), false, 'A partial PR is not linked as a second closing PR');
+  assert.equal(readFileSync(join(checkout, 'comment-writes'), 'utf8').split('\n').filter(Boolean).length, 1, 'but its backlink comment is written');
+  assert.match(writes, /updateProjectV2ItemFieldValue/);
+});
+
+
 test('In progress requires a startable issue assigned to the authenticated user before any mutation', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const mutations = join(checkout, 'mutations');

@@ -71,6 +71,17 @@ test('merge merges the checked head by its full id only when no review is runnin
   }
 });
 
+test('merge takes a Refs PR beside the closing PR of its issue through the gate (#398)', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const oid = 'abcdef1' + '0'.repeat(33), commit = handoffPr().commits.nodes[0].commit;
+  writeIssue({ ...issue('Human review'), closedByPullRequestsReferences: { totalCount: 1, nodes: [
+    { number: 8, state: 'OPEN', repository: { nameWithOwner: 'test/example' } }] } });
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ linkPages: [[]], headRefOid: oid, commits: { nodes: [{ commit: { ...commit, oid } }] } })));
+  const result = run('merge', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^MERGED #7 /m);
+});
+
 /** A checkout whose PR 7 is ready to merge from the branch `claude/7-topic` of this repository; `calls` is what merge did, in order. */
 function mergeFixture(t) {
   const { checkout, run } = fixture(t);

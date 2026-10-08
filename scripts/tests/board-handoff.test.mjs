@@ -132,6 +132,38 @@ test('handoff blocks unlinked, unsafe and unreadable delivery before writing Hum
 });
 
 
+test('handoff passes a Refs PR beside the one closing PR through its own gate and leaves the issue status alone (#398)', t => {
+  const { checkout, run, writeIssue } = handoffFixture(t);
+  const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
+  const link = (number, state = 'OPEN') => ({ number, state, repository: { nameWithOwner: 'test/example' } });
+  const links = (...nodes) => ({ closedByPullRequestsReferences: { totalCount: nodes.length, nodes } });
+  const attempt = (task, pr = handoffPr({ linkPages: [[]] })) => {
+    writeIssue({ ...ready, ...task });
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr));
+    return run('handoff', '1', '7', '--interval', '0');
+  };
+
+  const partial = attempt(links(link(8)));
+  assert.equal(partial.status, 0, partial.stdout + partial.stderr);
+  assert.match(partial.stdout, /HANDOFF #1 PR #7 head abcdef1234 \(partial PR/);
+  assert.equal(existsSync(join(checkout, 'mutations')), false, 'The issue status is not written while PR 8 is open');
+
+  // The PR gate still holds for the partial PR.
+  assert.equal(attempt(links(link(8)), handoffPr({ linkPages: [[]], mergeStateStatus: 'DIRTY' })).status, 1);
+  writeFileSync(join(checkout, 'issues-comments.json'), '[]');
+  const uncommented = attempt(links(link(8)));
+  assert.equal(uncommented.status, 1);
+  assert.match(uncommented.stdout, /post the handoff comment/);
+
+  // Two open closing PRs stay unknown, and so does a PR that nothing links.
+  const two = attempt(links(link(8), link(9)));
+  assert.equal(two.status, 2, two.stdout + two.stderr);
+  assert.match(two.stdout, /multiple open PRs/);
+  assert.equal(attempt(links(link(8, 'MERGED'))).status, 2);
+  assert.equal(existsSync(join(checkout, 'mutations')), false);
+});
+
+
 test('handoff rechecks issue prerequisites after review and link reads, before mutation', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
   const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
