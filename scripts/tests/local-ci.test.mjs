@@ -43,6 +43,7 @@ function fixture(t, config, prConfig) {
   git(dir, 'init', '--bare', '-b', 'main', origin);
   git(dir, 'init', '-b', 'main', root);
   mkdirSync(join(root, '.github'));
+  writeFileSync(join(root, '.gitignore'), 'ignoriert\n');
   writeFileSync(join(root, '.github/workflow-project.json'), JSON.stringify({ repository: 'o/r', localChecks: '.github/local-checks.json' }));
   writeFileSync(join(root, '.github/local-checks.json'), JSON.stringify(config));
   git(root, 'add', '-A');
@@ -118,6 +119,15 @@ test('die Prüfliste kommt vom Ziel-Branch auf origin, weder aus dem PR noch aus
   f.posts.length = 0;
   assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Neu: pending', 'Neu: success', 'local-ci: success']);
+});
+
+test('vor jedem Lauf ist der Arbeitsordner genau der PR-Stand: eine ignorierte Datei des vorigen Laufs ist weg', async t => {
+  const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['touch ignoriert'], timeoutMinutes: 1 }] });
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
+  assert.ok(existsSync(join(f.ctx.work, 'ignoriert')));
+  f.publish({ checks: [] });
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
+  assert.ok(!existsSync(join(f.ctx.work, 'ignoriert')));
 });
 
 test('fehlt die Konfiguration auf dem Ziel-Branch, meldet local-ci das klar und die Schleife prüft den nächsten PR', async t => {
