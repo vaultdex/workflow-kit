@@ -9,7 +9,7 @@ test('wait ends at once on merge conflicts of a non-draft PR and ignores every o
   const noCi = mergeStateStatus => look({ ...pr({ contexts: [] }), isDraft: false, mergeStateStatus });
   const conflicted = noCi('DIRTY');
   assert.equal(conflicted.status, 1, 'Merge conflicts end the wait at once, however little CI there is');
-  assert.match(conflicted.stdout, /^FAILED$/m);
+  assert.match(conflicted.stdout, /^FAILED: merge conflicts$/m);
   assert.match(conflicted.stdout, /^blocker: merge conflicts$/m);
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(noCi('DIRTY').status, 1, 'A later read failure keeps the known conflict verdict');

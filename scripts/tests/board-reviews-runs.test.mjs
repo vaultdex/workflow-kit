@@ -187,7 +187,9 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   for (const file of ['issues-comments', 'issues-reactions', 'pulls-comments']) writeFileSync(join(checkout, `${file}.json`), '[]');
   assert.equal(run('wait', '7').status, 0, 'wait returns once the head is done');
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr({ contexts: [check('COMPLETED', 'FAILURE')] })));
-  assert.equal(run('wait', '7').status, 1, 'wait ends as FAILED on red CI');
+  const red = run('wait', '7');
+  assert.equal(red.status, 1, 'wait ends as FAILED on red CI');
+  assert.match(red.stdout, /^FAILED: check CI FAILURE$/m, 'the FAILED line names the red check');
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(pr({ contexts: [check('IN_PROGRESS')] })));
   const waitBriefly = (...args) => runBriefly(3000, 'wait', '7', ...args);
   assert.match(waitBriefly(), /^WAITING\nwaiting: check CI/, 'A background wait shows what it waits for');

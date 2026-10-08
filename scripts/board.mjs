@@ -1151,7 +1151,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   isOptional(); // a malformed "optionalReviewers" fails here, whatever the head looks like
   const lines = [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`];
   // Closed without merge ends the wait but is never a delivery.
-  if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', lines, pr };
+  if (pr.state !== 'OPEN') return { done: true, failed: pr.state === 'CLOSED', reasons: ['PR closed without merge'], lines, pr };
   const { commit } = pr.commits.nodes[0];
   assert.equal(commit.oid, pr.headRefOid, 'Head commit not readable');
   // CI starts on push, so the first check suite dates the push. Before that the commit date is a
@@ -1166,6 +1166,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const stalled = since => now - since > stallMinutes * 60_000; // false for Infinity
   const waiting = [];
   let failed = false;
+  const reasons = []; // short causes for the FAILED line; the detail lines stay in `lines`
   const contexts = commit.statusCheckRollup?.contexts ?? { totalCount: 0, nodes: [] };
   assert.equal(contexts.nodes.length, contexts.totalCount, 'Not every check is readable');
   // The usual Draft-then-Ready sequence starts a second workflow run on the same commit and cancels the first, so the
@@ -1200,7 +1201,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // CI never stalls: a running check is not success however long it takes.
     if (pending) { waiting.push({ text: `check ${label}`, since: Infinity }); continue; }
     const result = check.conclusion ?? check.state;
-    if (!passed.has(result)) failed = true;
+    if (!passed.has(result)) { failed = true; reasons.push(`check ${label} ${result}`); }
     // Descriptions carry results such as "Review rate limited" behind a green state.
     lines.push(`check ${label}: ${result}${check.title || check.description ? ` (${check.title || check.description})` : ''}`);
   }
@@ -1227,6 +1228,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     // A workflow that fails to start (STARTUP_FAILURE) completes its suite without any run to show it.
     else if (!passed.has(suite.conclusion)) {
       failed = true;
+      reasons.push(`check suite ${suite.app.slug} ${suite.conclusion}`);
       lines.push(`check suite ${suite.app.slug}: ${suite.conclusion}`);
     }
   }
@@ -1255,16 +1257,18 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // A Draft skips the guarded CI jobs, so its green checks prove nothing: never DONE, whatever the checks say.
   if (pr.isDraft) {
     failed = true;
+    reasons.push('PR is still Draft');
     lines.push(`blocker: PR is still Draft; run board.mjs ready ${pr.number} --local`);
   }
   // Conflicts start no workflow, so the wait would never end; the fix is merging the base now.
   // UNKNOWN (GitHub computes the state late after a push) or BEHIND are no conflict.
   if (pr.mergeStateStatus === 'DIRTY' && !pr.isDraft) {
     failed = true;
+    reasons.push('merge conflicts');
     lines.push('blocker: merge conflicts');
   }
   // A known CI failure or conflict is the verdict; later review reads must not turn it into ERROR.
-  if (failed) return { done: true, failed, lines, pr };
+  if (failed) return { done: true, failed, reasons, lines, pr };
   // A pull_request run skipped while the PR was still Draft (the usual `!draft` job guard) executed nothing, so it says
   // nothing about the Ready head. Ready normally starts a fresh run; until the workflow has an executed run created after
   // Ready, its path is missing, not green. An executed Draft run does not exempt the workflow (an unguarded job next to a
@@ -1416,7 +1420,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   const pending = waiting.filter(entry => !stalled(entry.since));
   for (const entry of pending) lines.push(`waiting: ${entry.text}`);
   // A known failure ends the wait at once: the fix starts now, whatever else is still running.
-  return { done: failed || !pending.length, failed, lines, pr, comments, threads };
+  return { done: failed || !pending.length, failed, reasons, lines, pr, comments, threads };
 }
 
 /** Native PR connections, including manual links on a non-default base; refs and branches do not count. */
@@ -1970,7 +1974,7 @@ function ready() {
   console.log(`READY #${number} head ${pr.headRefOid}`);
 }
 // Waiting is over either way; FAILED keeps a red head from reading as a finished review.
-const outcome = ({ failed }) => failed ? ['FAILED', 1] : ['DONE', 0];
+const outcome = ({ failed, reasons = [] }) => failed ? [['FAILED', ...reasons.length ? [reasons.join('; ')] : []].join(': '), 1] : ['DONE', 0];
 
 /** Print one review snapshot with the same verdict and exit status as the background wait. */
 function reviewsOnce() {
@@ -1985,7 +1989,7 @@ function mergeState() {
   const pull = rest(`repos/${project.repository}/pulls/${number}`);
   const open = pull.state === 'open';
   // Closed without merge is the end of the wait, but never a delivery.
-  return { done: !open, failed: !open && !pull.merged, lines: [`#${pull.number} ${open ? 'OPEN' : pull.merged ? 'MERGED' : 'CLOSED'}`, ...open ? ['waiting: human merge'] : []] };
+  return { done: !open, failed: !open && !pull.merged, reasons: ['PR closed without merge'], lines: [`#${pull.number} ${open ? 'OPEN' : pull.merged ? 'MERGED' : 'CLOSED'}`, ...open ? ['waiting: human merge'] : []] };
 }
 
 /** What the last query cost and what is left, so a driver sees the shared quota without a command of its own. */
