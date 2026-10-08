@@ -127,6 +127,18 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
         assert.equal(await head(lag.inner), lag.old);
         rename(`${kit}-gone`, kit);
 
+        // A .git file that points nowhere (aborted first clone): with other files in the folder the hook only reports,
+        // with nothing but the .git file it clears it, and an empty modules remnant, and loads the pin again.
+        lag = await stale();
+        rmSync(join(lag.dir, '.git/modules'), { recursive: true });
+        result = await trial(lag.dir);
+        assert.notEqual(result.stdout.trim(), '', 'a kit with a dangling .git and other files is reported');
+        assert.ok(existsSync(join(lag.inner, 'AGENT_RULES.md')));
+        for (const name of ['AGENT_RULES.md', '.githooks']) rmSync(join(lag.inner, name), { recursive: true });
+        mkdirSync(join(lag.dir, '.git/modules'));
+        result = await trial(lag.dir);
+        assert.deepEqual([result.status, result.stdout, await head(lag.inner)], [0, '', lag.pin], `${file} repairs a dangling .git`);
+
         // The agent's project directory wins over the hook's working directory.
         const away = await clone();
         result = await trial(temp, { CLAUDE_PROJECT_DIR: away });
