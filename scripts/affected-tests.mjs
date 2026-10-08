@@ -25,6 +25,7 @@ const NOT_BOARD = /^(?!board-).*\.test\.mjs$/;
 export const TABLE = [
   [/^scripts\/(board|quota)\.mjs$|^scripts\/tests\/(board-(fixture|runner|worker)|fake-gh)\.mjs$/, [BOARD]],
   [/^scripts\/quota-sample\.mjs$/, ['quota-sample.test.mjs']],
+  [/^scripts\/local-ci\.mjs$/, ['local-ci.test.mjs']],
   [/^scripts\/affected-tests\.mjs$/, ['affected-tests.test.mjs']],
   [/^scripts\/checkout-root\.mjs$/, [ALL]],
   [/^scripts\/provider-links\.mjs$/, [NOT_BOARD]],
