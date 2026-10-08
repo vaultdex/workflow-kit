@@ -4,6 +4,19 @@ Read once per task with the project's AGENTS.md. Follow the harness's instructio
 hierarchy and the project's contracts. Links resolve inside this pinned kit; read
 details only for the current step.
 
+## Session start
+
+At the start of each agent session, before fetching, pulling or switching branches,
+run `git config --local --bool --get submodule.recurse` in the project repository.
+If unset or false, run `git config --local submodule.recurse true`. Read back
+`git config --bool --get submodule.recurse`; it must print `true`. Report read/write
+errors or a disabling worktree override and stop affected Git operations; preserve
+the override. This is an agent command, not a hook or a full bootstrap.
+The clone-local setting is shared by its worktrees and also affects checkout,
+switch and push (on-demand submodule pushes unless `push.recurseSubmodules` overrides
+it). New submodules still need `git submodule update --init`. Preserve local changes;
+never force a submodule update.
+
 ## Hard rules
 
 - Humans accept and merge. Never merge, enable auto-merge or set Done before a
