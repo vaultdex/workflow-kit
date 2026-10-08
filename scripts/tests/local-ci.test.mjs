@@ -204,6 +204,21 @@ test('watch prüft einen neuen Head genau einmal, überspringt Drafts und Forks 
   assert.equal(readFileSync(join(f.root, 'pushed.txt'), 'utf8').trim(), `main ${'a'.repeat(40)} ${'b'.repeat(40)} push`);
 });
 
+test('watch holt nach einem Neustart die push-Aufgabe nach, wenn sich main dazwischen bewegt hat; ohne Datei löst der erste Start nichts aus', async t => {
+  const f = fixture(t, { push: ['echo "$BEFORE_SHA $AFTER_SHA" >> pushed.txt'], checks: [] });
+  const ctx = { ...f.ctx, pollMs: 1, headsFile: join(f.root, '..', 'heads.json') };
+  const main = sha => { f.server.refs = [{ ref: 'refs/heads/main', object: { sha: sha.repeat(40) } }]; };
+  f.server.pulls = [];
+  main('a');
+  await watch(ctx, { rounds: 1 });
+  assert.ok(!existsSync(join(f.root, 'pushed.txt')), 'erster Start ohne Datei: nur Ausgangslage');
+  main('b'); // der Läufer ist aus
+  await watch(ctx, { rounds: 1 });
+  main('c');
+  await watch(ctx, { rounds: 1 });
+  assert.equal(readFileSync(join(f.root, 'pushed.txt'), 'utf8'), `${'a'.repeat(40)} ${'b'.repeat(40)}\n${'b'.repeat(40)} ${'c'.repeat(40)}\n`);
+});
+
 /** Drei offene PRs mit demselben Head; jede Prüfung legt eine Datei neben ihrem Arbeitsordner an und wartet bei `barrier` auf die der anderen. */
 function threePullRequests(t, barrier) {
   const run = ['touch "$PWD.gestartet"', ...barrier ? ['for i in $(seq 100); do test -e ../work-1.gestartet && test -e ../work-2.gestartet && exit 0; sleep 0.1; done; exit 1'] : []];
