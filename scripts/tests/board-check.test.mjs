@@ -495,7 +495,7 @@ test('baseBranch names the base from a Project field and warns, without a verdic
   const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: checkout, encoding: 'utf8', env: isolatedGit(dirname(checkout)) }).trim();
   const setting = { repository: 'test/example', id: 'P1', baseBranch: { field: 'Zielrelease', pattern: 'release/{value}' } };
   const withField = (base, extra) => ({ ...issue(), projectItems: { nodes: [{ ...issue().projectItems.nodes[0], base }] }, ...extra });
-  const baseLines = () => run('check', '1', '--session', 'S1').stdout.split('\n').filter(line => /^(base|note): /.test(line));
+  const baseLines = () => run('check', '1', '--session', 'S1').stdout.split('\n').filter(line => /^(base|note): /.test(line)).map(line => line.split(';')[0]); // what is named, not the advice after it
 
   writeIssue(withField({ name: '0.1.1' }));
   const plain = run('check', '1', '--session', 'S1').stdout;
@@ -519,16 +519,21 @@ test('baseBranch names the base from a Project field and warns, without a verdic
   git('checkout', '-q', '--orphan', 'elsewhere');
   git('commit', '--allow-empty', '-q', '-m', 'unrelated');
   const warned = run('check', '1', '--session', 'S1');
-  assert.deepEqual(baseLines(), ['base: release/0.1.1 (Zielrelease)', 'note: HEAD is not on origin/release/0.1.1; create the branch from there (git fetch origin, then git switch -c <branch> origin/release/0.1.1)']);
+  assert.deepEqual(baseLines(), ['base: release/0.1.1 (Zielrelease)', 'note: HEAD is not on origin/release/0.1.1']);
   assert.equal(warned.status, 0, 'A warning is no BLOCKED');
+  const stackedPr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'release/0.1.1', headRefName: 'claude/5-base', headRefOid: 'ba5e0001' };
+  writeIssue(withField({ name: '0.1.1' }, { blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null, [stackedPr], { number: 2, repository: { nameWithOwner: 'test/example' } })] } }));
+  assert.equal(run('check', '1', '--session', 'S1').status, 4);
+  assert.deepEqual(baseLines().filter(line => line.includes('HEAD')), [], 'A stack starts on its base PR, not on the base branch');
+  writeIssue(withField({ name: '0.1.1' }));
   writeFileSync(join(checkout, 'branches.json'), JSON.stringify(['claude/1-started']));
   assert.ok(!baseLines().some(line => line.includes('HEAD is not on')), 'An issue with a branch is not told to branch again');
   rmSync(join(checkout, 'branches.json'));
 
   writeIssue(withField({ name: '9.9.9' }));
-  assert.deepEqual(baseLines(), ['base: release/9.9.9 (Zielrelease)', 'note: origin/release/9.9.9 is not known in this checkout; run git fetch origin']);
+  assert.deepEqual(baseLines(), ['base: release/9.9.9 (Zielrelease)', 'note: origin/release/9.9.9 is not known in this checkout']);
   writeIssue(withField(null));
-  assert.deepEqual(baseLines(), ['note: the Project field Zielrelease is empty; no base branch to name']);
+  assert.deepEqual(baseLines(), ['note: the Project field Zielrelease is empty']);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ ...setting, baseBranch: { field: 'Zielrelease' } }));
   assert.equal(run('check', '1', '--session', 'S1').status, 2, 'A malformed setting is unknown, never silently ignored');
 });

@@ -81,8 +81,8 @@ The driver completes these steps before implementation, including review fixes:
    [exception](docs/CONTRIBUTING.md#execution-check). STACKABLE (only an open predecessor
    PR holds the issue) continues as a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests).
 3. Create the [issue-linked branch](docs/CONTRIBUTING.md#delivery) (on STACKABLE from the
-   head of the base PR's branch; else from the `base:` that `check` names, if it does), or reuse your
-   existing branch and PR for this issue. Switch to it in your worktree and verify
+   head of the base PR's branch; else from the `base:` that `check` names, if it does), or
+   reuse your existing branch and PR for this issue. Switch to it in your worktree and verify
    `git branch --show-current` before editing; preserve unrelated work.
 4. Assign yourself: `gh issue edit ISSUE --add-assignee "@me"`.
 5. Record the verdict, your session and branch in the issue, with the line

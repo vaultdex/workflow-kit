@@ -117,7 +117,7 @@ const baseSetting = () => {
     'baseBranch must be {"field": "<Project field>", "pattern": "<branch name containing {value}>"}');
   return setting;
 };
-const baseField = () => baseSetting() ? ` base:fieldValueByName(name:${JSON.stringify(baseSetting().field)}){...on ProjectV2ItemFieldSingleSelectValue{name} ...on ProjectV2ItemFieldTextValue{text}}` : '';
+const baseField = (setting = baseSetting()) => setting ? ` base:fieldValueByName(name:${JSON.stringify(setting.field)}){...on ProjectV2ItemFieldSingleSelectValue{name} ...on ProjectV2ItemFieldTextValue{text}}` : '';
 // Everything the verdict reads; sub-issues carry the same fields, so their verdict needs no further query.
 const issueFields = predecessor => `id number title state body repository{nameWithOwner} assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}${baseField()}}}
@@ -433,7 +433,7 @@ const ago = ms => {
 };
 
 /** The base the Project field names and whether HEAD stands on it; local git only, no fetch. Information only, never a verdict. */
-function baseLines(issue) {
+function baseLines(issue, stacked) {
   const setting = baseSetting();
   if (!setting) return [];
   const found = projectItem(issue)?.base;
@@ -444,8 +444,8 @@ function baseLines(issue) {
   const ok = (...args) => { try { execFileSync(git.file, ['-C', projectDirectory, ...args], { env: git.env, stdio: 'ignore' }); return true; } catch { return false; } };
   const lines = [`base: ${branch} (${setting.field})`];
   if (!ok('rev-parse', '--verify', '--quiet', `refs/remotes/${remote}`)) lines.push(`note: ${remote} is not known in this checkout; run git fetch origin`);
-  // An issue that has a branch already was started: its HEAD is that branch's business.
-  else if (!(issue.branches ?? []).some(ref => new RegExp(`^[\\w.-]+/${issue.number}-`).test(ref.name)) && !ok('merge-base', '--is-ancestor', `refs/remotes/${remote}`, 'HEAD')) {
+  // A stack starts from its base PR's branch, and an issue that has a branch was started: HEAD is not the base's business then.
+  else if (!stacked && !(issue.branches ?? []).some(ref => new RegExp(`^[\\w.-]+/${issue.number}-`).test(ref.name)) && !ok('merge-base', '--is-ancestor', `refs/remotes/${remote}`, 'HEAD')) {
     lines.push(`note: HEAD is not on ${remote}; create the branch from there (git fetch origin, then git switch -c <branch> ${remote})`);
   }
   return lines;
@@ -494,7 +494,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
     ? `stack base: PR #${stackedOn.number} is already merged into ${stackedOn.baseRefName}: no stack, work on ${stackedOn.baseRefName}; see docs/CONTRIBUTING.md#stacked-pull-requests`
     : `stack base: PR #${stackedOn.number}${stackedOn.stackNumber ? ` in stack #${stackedOn.stackNumber}` : ''} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
   for (const note of notes) console.log(`note: ${note}`);
-  if (claims) for (const line of baseLines(issue)) console.log(line);
+  if (claims) for (const line of baseLines(issue, stackedOn)) console.log(line);
   if (claim) {
     const linked = issue.closedByPullRequestsReferences;
     const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => refOf(pr.repository, pr.number));
