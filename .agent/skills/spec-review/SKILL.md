@@ -35,8 +35,10 @@ that apply before step 1. `board.mjs` is the kit's `scripts/board.mjs`.
 3. **Verdict per point.** Check each listed point against the review ref: presence with `file:line`,
    absence with one `git grep` per pattern over the whole result. Done when every point carries a verdict and its proof.
 
-4. **Open work to tickets.** Each **deviates** or **open** verdict without a matching open sub-issue becomes a
-   new issue via `board.mjs new` (required fields per the project's tracker doc), then `board.mjs sub SPEC NEW`.
+4. **Open work to tickets.** Each **deviates** or **open** verdict without a matching open sub-issue first gets
+   a search of open issues (`gh issue list --search "<finding words>"`): an unlinked match from an earlier run is linked with
+   `board.mjs sub SPEC N`. Otherwise it becomes a new issue via `board.mjs new` (required fields per the project's
+   tracker doc), then `board.mjs sub SPEC NEW`.
    A deviation that needs a human decision gets `needs-human-input`.
    Done when every gap has an open sub-issue, read back from the sub-issues API.
 
