@@ -103,6 +103,8 @@ function api(argv, input, stdout, stderr, exit) {
     if (parts[3] === 'pulls' && parts[5] === 'merge-async' && argv.includes('PUT')) {
       // merge-async answers 202 and merges in the background: merge-async-late shows the merge from the second read on, merge-async-fails is GitHub refusing.
       fs.appendFileSync('calls', 'merge-async\n');
+      // Like GitHub for a stacked PR (#492): no version header, no endpoint.
+      if (!argv.includes('X-GitHub-Api-Version: 2026-03-10')) { stderr('gh: Not Found (HTTP 404)\n'); exit(1); }
       fs.appendFileSync('async-merges', argv.filter(arg => /^(merge_action|merge_method|sha)=/.test(arg)).join(' ') + '\n');
       if (fs.existsSync('merge-async-fails')) { stderr('gh: Forbidden (HTTP 403)\n'); exit(1); }
       const merged = { state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } };
