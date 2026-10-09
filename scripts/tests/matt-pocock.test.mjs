@@ -51,6 +51,13 @@ test('all pinned Matt Pocock skills survive a fresh checkout, rerun and local so
   expected.set('retro/SKILL.md', expected.get('retro/SKILL.md').replace(flag, ''));
   expected.set('implement/SKILL.md', expected.get('implement/SKILL.md')
     .replace(', and the full test suite once at the end.', ', and leave the full test suite to CI (run it once at the end only if CI does not).'));
+  // Only a human closes a spec (#508): implement-spec's PR closes the tickets only, chief-of-staff states the rule. The checks fail when upstream moves the sentence.
+  expected.set('implement-spec/SKILL.md', expected.get('implement-spec/SKILL.md')
+    .replace(' marked as closing the spec and tickets.', ' marked as closing the tickets, never the spec (only a human closes a spec: `AGENT_RULES.md`, Hard rules).'));
+  expected.set('chief-of-staff/SKILL.md', expected.get('chief-of-staff/SKILL.md').replace('All work should be done in subagents. Protect your context window.\n',
+    'All work should be done in subagents. Protect your context window.\n\nNo agent closes a spec or sets it to Done or Human review, a subagent and you included: only a human accepts a spec (`AGENT_RULES.md`, Hard rules).\n'));
+  assert.match(expected.get('implement-spec/SKILL.md'), /closing the tickets, never the spec/, 'upstream still has the sentence implement-spec adapts');
+  assert.match(expected.get('chief-of-staff/SKILL.md'), /No agent closes a spec/, 'upstream still has the paragraph chief-of-staff adapts');
   write(join(consumer, '.agents/skills/ask-matt/LOCAL.md'), 'Keep my local work\n');
   write(join(consumer, '.agents/skills/project-custom/SKILL.md'), 'Keep unrelated skill\n');
   write(join(consumer, '.agents/skills/retired-skill/SKILL.md'), 'Retired upstream skill\n');

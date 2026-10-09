@@ -32,6 +32,8 @@ whose `git reset --hard` aborted with `could not reset submodule index` and left
   human merged. One exception, decided by the maintainer
   ([#244](https://github.com/vaultdex/workflow-kit/issues/244)): the Renovate bot merges
   its own dependency PRs of this kit once their CI is green. It binds the bot, never an agent.
+- Agents document the acceptance of a spec (an issue with the label `spec`, `"specLabel"` in the project file) in a comment on the spec;
+  closing it and its status Done or Human review stay with a human; `board.mjs` refuses those statuses and never closes a spec.
 - Never force-push, rewrite shared history, reset, stash or discard work you don't
   own, or bypass branch protection, required checks or spending limits. One exception:
   `--force-with-lease` on your own upper layer of a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests),

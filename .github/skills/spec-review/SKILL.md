@@ -54,4 +54,5 @@ that apply before step 1. `board.mjs` is the kit's `scripts/board.mjs`.
 
 7. **Report on the spec.** One comment on the spec in plain language: verdict table with proofs, the decisions
    from step 5 with their outcome, new sub-issues, path of the HTML report. When all sub-issues are closed and
-   no gap is left, continue with the project's spec acceptance handoff.
+   no gap is left, continue with the project's spec acceptance handoff, which proves the acceptance in a comment on the spec.
+   The spec itself stays open: only a human closes it or sets Done (`AGENT_RULES.md`, Hard rules).

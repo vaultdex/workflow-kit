@@ -134,6 +134,7 @@ const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!
   issue(number:$number){
   ${issueFields(predecessorFields)} bodyHTML
   closedByPullRequestsReferences(first:100){totalCount nodes{number state updatedAt mergeStateStatus repository{nameWithOwner} headRefName}}
+  labels(first:20){nodes{name}}
   ${subIssues ? `subIssues(first:${subIssues}){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}` : ''}}}}`;
 /** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
 const named = (label, read) => {
@@ -161,6 +162,12 @@ function loadDeliveries(predecessors) {
   }
 }
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
+
+// "specLabel" in the project file (default "spec") marks a spec. Only a human closes a spec or sets it to Done or Human review (AGENT_RULES.md, Hard rules).
+const specLabel = project.specLabel === undefined ? 'spec' : project.specLabel;
+assert.ok(typeof specLabel === 'string' && specLabel.trim(), 'specLabel in .github/workflow-project.json must be a label name; omit the field for "spec"');
+const isSpec = issue => Boolean(issue.labels?.nodes?.some(label => label?.name?.toLowerCase() === specLabel.toLowerCase()));
+const specRefusal = (issueNumber, what) => `BLOCKED: #${issueNumber} is a spec (label "${specLabel}"); ${what}. Only a human closes a spec or sets Done or Human review; record the acceptance in a comment on the spec (AGENT_RULES.md, Hard rules).`;
 
 // "staleHours" in the project file (default 6): after that long without activity a claim has expired and the work counts as abandoned (#400).
 const staleHours = project.staleHours === undefined ? 6 : project.staleHours;
@@ -633,7 +640,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
 
 /**
  * Human review means mergeable (docs/parallel-drivers.md): a Human-review issue whose open PR is DIRTY goes back to "Automated review" with a comment.
- * An open issue whose linked PR of this repository is merged into release/** is commented and closed as completed.
+ * An open issue (never a spec) whose linked PR of this repository is merged into release/** is commented and closed as completed.
  * ponytail: search cannot filter by Project status, so it reads every open issue (100 per page); UNKNOWN (still computing) waits for the next sweep.
  */
 function sweep() {
@@ -642,6 +649,7 @@ function sweep() {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:100,after:$after){
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{id number
       projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
+      labels(first:20){nodes{name}}
       closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number url state merged baseRefName mergeStateStatus headRefName repository{nameWithOwner}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open`, ...(after && { after }) });
     for (const issue of search.nodes) {
@@ -649,7 +657,8 @@ function sweep() {
       const own = linked.nodes.filter(node => node.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
       // GitHub closes an issue only for a merge into the default branch; a merge into release/** closes it here (comment first, then close).
       // ponytail: reads the first 10 linked PRs; a release PR behind them is missed, never an error.
-      const delivered = own.find(node => node.merged && node.baseRefName.startsWith('release/'));
+      // A spec stays open until a human accepts it, however many of its tickets are delivered.
+      const delivered = !isSpec(issue) && own.find(node => node.merged && node.baseRefName.startsWith('release/'));
       if (delivered) {
         graphql('mutation($issue:ID!,$body:String!){addComment(input:{subjectId:$issue,body:$body}){clientMutationId}}', { issue: issue.id,
           body: `Geliefert mit #${delivered.number} in \`${delivered.baseRefName}\`. Der Release-PR nach \`main\` veröffentlicht die Version.` });
@@ -789,6 +798,7 @@ function resolveOption(fieldName, optionName) {
 
 /** Guards of a transition; a refusal throws. They print (backlinks), so run them only after every pair is valid. */
 function guardOption(issue, { fieldName, option }) {
+  if (fieldName === 'Status' && ['Done', 'Human review'].includes(option.name) && isSpec(issue)) throw new Error(specRefusal(issue.number, `Status ${option.name} is refused`));
   if (fieldName === 'Status' && option.name === 'In progress') {
     // Assignment first, so a missing assignment is named even when the issue is also blocked.
     const { viewer } = graphql('query{viewer{login}}');
@@ -1138,7 +1148,7 @@ function createMany([file, ...extra]) {
 
 // Reviewers run unreliably, so only traces on the current head count (docs/CONTRIBUTING.md#review-loop).
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-  number state isDraft createdAt headRefName headRefOid baseRefName mergeStateStatus reviewDecision isCrossRepository headRepository{nameWithOwner}${project.selfReview === undefined ? '' : ' bodyHTML'}
+  number state isDraft createdAt headRefName headRefOid baseRefName mergeStateStatus reviewDecision isCrossRepository headRepository{nameWithOwner} body${project.selfReview === undefined ? '' : ' bodyHTML'}
   readyEvents:timelineItems(last:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   firstReadyEvents:timelineItems(first:1,itemTypes:[READY_FOR_REVIEW_EVENT]){nodes{...on ReadyForReviewEvent{createdAt}}}
   convertEvents:timelineItems(last:1,itemTypes:[CONVERT_TO_DRAFT_EVENT]){nodes{...on ConvertToDraftEvent{createdAt}}}
@@ -1760,6 +1770,7 @@ function linkIssue(issueNumber, prNumber) {
   assert.ok(issue?.id, 'Issue identity is unreadable');
   // The backlink comment belongs on an open issue (the guard requires one); refuse before any write instead of half-way.
   assert.equal(issue.state, 'OPEN', `#${issueNumber} is not an open issue`);
+  assert.ok(!isSpec(issue), specRefusal(issueNumber, `a PR must not close it, so it is not linked natively (use "Refs #${issueNumber}")`));
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     pullRequest(number:$number){id number state url headRefOid}}}`, { owner, name, number: prNumber }).repository;
   assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${prNumber} is not an open pull request of ${project.repository}`);
@@ -1968,6 +1979,8 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
     reasons.push(`resolve review blockers and threads before ${action}`);
   }
   reasons.push(...selfReviewReasons(result.pr.bodyHTML, checks), ...extra(result));
+  // Handoff and merge alike: a PR text edited after the handoff must not close a spec either.
+  for (const specNumber of closedSpecs(result.pr.body)) reasons.push(specRefusal(specNumber, `the text of PR #${prNumber} closes it; write "Refs #${specNumber}" instead`));
   const undetermined = state => !state || state === 'UNKNOWN';
   let state = result.pr.mergeStateStatus;
   for (let read = 1; undetermined(state) && read < mergeReads; read++) {
@@ -1993,6 +2006,23 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
     return;
   }
   return result;
+}
+
+/**
+ * The issues of this repository that the PR text closes with a keyword ("Closes #N", "Fixes owner/repo#N") and that carry the spec label.
+ * ponytail: only the first number after a keyword counts ("Closes #5, #6" names #5); a link or a native closing link made by hand is not read.
+ */
+function closedSpecs(prText) {
+  const numbers = new Set();
+  for (const [, repository, issueNumber] of String(prText ?? '').matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+((?:[\w.-]+\/[\w.-]+)?)#(\d+)/gi)) {
+    if (!repository || repository.toLowerCase() === project.repository.toLowerCase()) numbers.add(Number(issueNumber));
+  }
+  return [...numbers].filter(issueNumber => {
+    try { return isSpec({ labels: { nodes: rest(`repos/${project.repository}/issues/${issueNumber}`).labels } }); } catch (error) {
+      if (/\b404\b|Not Found/.test(String(error.stderr))) return false; // no such issue: nothing to protect
+      throw error;
+    }
+  });
 }
 
 /** Read all PR gates and native links, optionally requiring the previously checked head; `prior`: see finishedPr. */
@@ -2074,7 +2104,8 @@ function layerReasons(layer, viewer) {
   assert.equal(nodes.length, totalCount, `Not every issue link of PR #${layer} is readable`);
   assert.ok(nodes.every(Boolean), `An issue link of PR #${layer} is unreadable`);
   for (const { number: issueNumber } of nodes) {
-    const status = projectItem(readIssue(false, issueNumber))?.status?.name;
+    const linked = readIssue(false, issueNumber), status = projectItem(linked)?.status?.name;
+    if (isSpec(linked)) reasons.push(`delivers spec #${issueNumber}, which only a human closes (AGENT_RULES.md, Hard rules): unlink it and write "Refs #${issueNumber}"`);
     if (status !== 'Human review') reasons.push(`delivers issue #${issueNumber}, whose status is ${status ?? 'unset'}, not Human review`);
   }
   stackLayers.set(layer, { pr, issues: nodes.map(issue => issue.number) });

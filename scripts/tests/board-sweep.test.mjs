@@ -45,6 +45,10 @@ test('sweep sends a Human-review issue with a conflicting PR back to Automated r
   const mutations = readFileSync(join(checkout, 'mutations'), 'utf8');
   assert.ok(mutations.indexOf('addComment') < mutations.indexOf('closeIssue') && mutations.includes('stateReason:COMPLETED'));
 
+  // A spec is never closed by the sweep, whatever PR was delivered (the project's own label counts too).
+  rmSync(join(checkout, 'mutation-targets'), { force: true });
+  untouched('a delivered spec', [{ ...row(9, 'Human review', [merged()]), labels: { nodes: [{ name: 'Spec' }] } }]);
+
   // A list that is cut off (more linked PRs than read, more open issues than the search returns) never ends as "clean".
   const cut = { ...row(8, 'Human review', [pr('CLEAN')]) };
   cut.closedByPullRequestsReferences.totalCount = 11;

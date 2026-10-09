@@ -56,7 +56,7 @@ test('field sets several fields in one call: every pair is validated first, then
 test('field, status and priority report failures as one ERROR line, and issue failures name the repository', t => {
   const { checkout, run, writeIssue } = fixture(t);
   writeIssue(issue());
-  for (const args of [['field', '1', 'Colour', 'Red'], ['priority', '1', 'Urgent'], ['status', '1', 'Done']]) {
+  for (const args of [['field', '1', 'Colour', 'Red'], ['priority', '1', 'Urgent'], ['status', '1', 'Finished']]) {
     const result = run(...args);
     assert.equal(result.status, 2, result.stdout + result.stderr);
     assert.match(result.stdout, /^ERROR - /);
