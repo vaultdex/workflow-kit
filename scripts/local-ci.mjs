@@ -129,10 +129,16 @@ export function gitBash(execPath, platform = process.platform) {
   return bash;
 }
 
-/** Ein Befehl über `bash -c`; Ausgabe an das Protokoll. `state.child` ist der laufende Prozess, den ein Abbruch beendet. */
-function shell(command, { cwd, env, log, timeoutMs, state, bash = 'bash' }) {
+/** Ein Befehl über `bash -c`; Ausgabe an das Protokoll. `state.child` ist der laufende Prozess, den ein Abbruch beendet.
+ * Nennt `.node-version` des Arbeitsordners eine Version und gibt es `fnm`, läuft der Befehl mit ihr (fnm 1.39 hat kein `--install-if-missing` für exec: `fnm install` ist erneut aufgerufen folgenlos); ohne fnm bleibt es bei der Version des Läufers, mit Hinweis im Protokoll. */
+function shell(command, { cwd, env, log, timeoutMs, state, bash = 'bash', fnm }) {
   return new Promise(done => {
-    const child = spawn(bash, ['-c', command], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true });
+    const file = join(cwd, '.node-version'), version = existsSync(file) ? readFileSync(file, 'utf8').trim() : '';
+    if (version && !fnm) appendFileSync(log, `Hinweis: .node-version nennt ${version}, aber fnm fehlt; es gilt die Node-Version des Läufers\n`);
+    const args = version && fnm
+      ? ['-c', 'fnm=$1 v=$2; "$fnm" install "$v" && "$fnm" exec --using="$v" -- "$BASH" -c "$3"', 'bash', fnm, version, command]
+      : ['-c', command];
+    const child = spawn(bash, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true });
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => appendFileSync(log, chunk)); // ein gemeinsamer Dateihandle für beide Ströme bricht unter Windows ab
     state.child = child;
     let timedOut = false;
@@ -239,7 +245,7 @@ export async function checkPullRequest(ctx, pr) {
       for (const [index, command] of commands.entries()) {
         if (state.aborted) return null; // der Abbruch kam zwischen zwei Befehlen, als kein Prozess lief
         appendFileSync(log, `$ ${command}\n`);
-        const { code, timedOut } = await shell(command, { cwd: work, env, log, timeoutMs: end - Date.now(), state, bash: ctx.bash });
+        const { code, timedOut } = await shell(command, { cwd: work, env, log, timeoutMs: end - Date.now(), state, bash: ctx.bash, fnm: ctx.fnm });
         if (state.aborted) return null;
         const step = `Befehl ${index + 1}/${commands.length}`;
         if (timedOut) return ['failure', `Zeitlimit ${minutes} min bei ${step}`];
@@ -335,7 +341,7 @@ async function pushed(ctx, heads, saved, idle) {
       const log = join(ctx.logs, `push-${key.replace(/[^\w.-]+/g, '-')}.log`);
       writeFileSync(log, '');
       for (const command of commands) {
-        const { code } = await shell(command, { cwd: work, env, log, timeoutMs: 30 * 60_000, state: {}, bash: ctx.bash });
+        const { code } = await shell(command, { cwd: work, env, log, timeoutMs: 30 * 60_000, state: {}, bash: ctx.bash, fnm: ctx.fnm });
         if (code) { console.error(`push ${key}: "${command}" endete mit ${code} (${log})`); break; }
       }
     }
@@ -416,8 +422,9 @@ async function main() {
   // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
+  const fnm = spawnSync('fnm', ['--version'], { stdio: 'ignore' }).status === 0 ? 'fnm' : undefined; // ohne fnm bleibt es bei der Node-Version des Läufers
   const ctx = {
-    bash, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), headsFile: join(dir, 'heads.json'), pollMs: 60_000, sonarToken: process.env.SONAR_TOKEN,
+    bash, fnm, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), headsFile: join(dir, 'heads.json'), pollMs: 60_000, sonarToken: process.env.SONAR_TOKEN,
     git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
     api: (method, path, fields = {}, repo = repository) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repo}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
