@@ -44,6 +44,12 @@ function api(argv, input, stdout, stderr, exit) {
       stdout(JSON.stringify({ body_html: found?.body_html }));
       exit(0);
     }
+    if (parts[3] === 'issues' && parts[5] === 'events') {
+      // The events of an issue (events-N.json, default none): the sweep looks for a reopen after the merge.
+      const file = `events-${parts[4]}.json`;
+      stdout(fs.existsSync(file) ? fs.readFileSync(file) : '[]');
+      exit(0);
+    }
     if (parts[3] === 'issues' && parts.length === 5 && argv.includes('PATCH')) {
       const issue = JSON.parse(fs.readFileSync(backlink));
       if (argv.includes('state=closed')) {

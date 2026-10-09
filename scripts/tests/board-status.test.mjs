@@ -120,6 +120,21 @@ test('In progress requires a startable issue assigned to the authenticated user 
   assert.equal(run('status', '1', 'Ready').status, 0, 'Returning blocked work to Ready does not require assignment');
 });
 
+test('An open issue a human reopened leaves Done for In progress with a note; a closed one stays blocked (#510)', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const mutations = join(checkout, 'mutations');
+  const done = changes => ({ ...issue('Done'), assignees: { nodes: [{ login: 'worker' }] }, ...changes });
+  writeIssue(done({ state: 'CLOSED' }));
+  assert.notEqual(run('status', '1', 'In progress').status, 0, 'a closed issue in Done stays blocked');
+  assert.equal(existsSync(mutations), false);
+  writeIssue(done());
+  const result = run('status', '1', 'In progress');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^note: #1 is open again and was Done; it moves to In progress$/m);
+  assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 1);
+  writeIssue(done({ assignees: { nodes: [] } }));
+  assert.notEqual(run('status', '1', 'In progress').status, 0, 'the assignment is still required');
+});
 
 test('Automated review requires the declared open PR and every issue backlink before mutating status', t => {
   const { checkout, run, writeIssue } = fixture(t);

@@ -231,7 +231,8 @@ and then work in that directory, their relative paths (changed files given to `a
   of `body` apply. No match or several matches are refused with the reason (exit 1, nothing
   written; several matches are listed by line); an empty `--from` text, unreadable files and API
   errors exit 2.
-- `link ISSUE PR`: connect the issue natively to the PR (the GraphQL
+- `link ISSUE PR [--refs]` (`--refs`: only the backlink comment, no native link; `handoff ISSUE PR --refs` then
+  skips the native-link requirement like a partial PR): connect the issue natively to the PR (the GraphQL
   `addCloseIssueReferences` mutation behind a closing keyword, which acts only on the
   default branch) and read `closingIssuesReferences` back. A Draft PR works; an existing
   connection is a success without a write; the read-back after the write is repeated up to

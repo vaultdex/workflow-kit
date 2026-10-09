@@ -170,6 +170,13 @@ test('handoff passes a Refs PR beside the one closing PR through its own gate an
   assert.match(partial.stdout, /HANDOFF #1 PR #7 head abcdef1234 \(partial PR/);
   assert.equal(existsSync(join(checkout, 'mutations')), false, 'The issue status is not written while PR 8 is open');
 
+  // --refs does the same for a PR that only names the issue, with no native link at all (#510); without it the missing link blocks.
+  assert.match(attempt({}).stdout, /PR #7 is not natively linked to issue #1/);
+  const refs = run('handoff', '1', '7', '--refs', '--interval', '0');
+  assert.equal(refs.status, 0, refs.stdout + refs.stderr);
+  assert.match(refs.stdout, /HANDOFF #1 PR #7 head abcdef1234 \(partial PR/);
+  assert.equal(existsSync(join(checkout, 'mutations')), false, 'The issue status is not written for a Refs PR');
+
   // The PR gate still holds for the partial PR.
   assert.equal(attempt(links(link(8)), handoffPr({ linkPages: [[]], mergeStateStatus: 'DIRTY' })).status, 1);
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');

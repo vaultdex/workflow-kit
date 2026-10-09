@@ -68,6 +68,18 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   assert.equal(mutations() + commentWrites(), 0, 'and is refused before any write');
   writeIssue(issue('In progress'));
 
+  // --refs only names the issue: the backlink comment, no native link (#510), also for a spec.
+  for (const labels of [undefined, { nodes: [{ name: 'spec' }] }]) {
+    prepare();
+    writeIssue({ ...issue('In progress'), labels });
+    result = run('link', '1', '7', '--refs');
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /^#1 is named by PR #7 \(Refs, no native link\)$/m);
+    assert.equal(mutations(), 0, 'no native link is written');
+    assert.equal(commentWrites(), 1, 'the backlink comment is');
+  }
+  writeIssue(issue('In progress'));
+
   prepare();
   writeFileSync(join(checkout, 'fail'), '');
   assert.equal(run('link', '1', '7').status, 2, 'An API error is ERROR');
