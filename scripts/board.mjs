@@ -171,7 +171,7 @@ const staleHours = project.staleHours === undefined ? 6 : project.staleHours;
  */
 function idleMs(issue) {
   const prs = openPrs(issue);
-  const times =[issue.updatedAt, projectItem(issue)?.updatedAt, ...prs.map(pr => pr.updatedAt)].map(time => Date.parse(time)).filter(Number.isFinite);
+  const times = [issue.updatedAt, projectItem(issue)?.updatedAt, ...prs.map(pr => pr.updatedAt)].map(time => Date.parse(time)).filter(Number.isFinite);
   return times.length ? Date.now() - Math.max(...times) : undefined;
 }
 const openPr = issue => issue.closedByPullRequestsReferences?.nodes.find(pr => pr?.state === 'OPEN' && pr.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
@@ -693,10 +693,10 @@ function next() {
   // A claim, an open PR or a branch holds an issue as in `check` (#497): read for the issues that would start or stack otherwise (REST only: the comments, one branch list).
   let branches;
   for (const issue of ready.filter(issue => !issue.reasons.length || heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors))) try {
-    branches ??= restAll(`repos/${project.repository}/branches`).map(({ name }) => ({ name }));
+    branches ??= restAll(`repos/${project.repository}/branches`);
     issue.reasons.push(...startReasons({ ...issue, branches, viewer: { login } }, sessionOption()).blocked);
   } catch (error) { issue.reasons.push(`claim comments or branches are unreadable: ${String(error.stderr || error.message).trim()}`); }
-  const line =issue => `#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`
+  const line = issue => `#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`
     + ` (assignees: ${issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none'})`;
   const startable = ready.filter(issue => !issue.reasons.length);
   // Held only by open predecessors that one open PR delivers: stackable on that PR.

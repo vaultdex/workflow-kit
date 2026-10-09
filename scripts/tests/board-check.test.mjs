@@ -627,7 +627,6 @@ test('check lets a new session take over a claim without activity for staleHours
   assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a clean one is not');
 });
 
-
 test('check and next let a new session take over a claim without PR and branch once the claim itself is older than staleHours', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
