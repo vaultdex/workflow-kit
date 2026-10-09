@@ -62,11 +62,12 @@ function fixture(t, config, prConfig) {
   const head = git(root, 'rev-parse', 'HEAD');
   git(root, 'push', '-q', 'origin', 'feature:refs/pull/1/head', 'feature', 'main');
   git(root, 'checkout', 'main');
-  const posts = [];
+  const posts = [], comments = [];
   const pr = { number: 1, state: 'open', draft: false, head: { sha: head, ref: 'feature', repo: { full_name: 'o/r' } }, base: { ref: 'main' } };
   const server = { pulls: [pr], current: pr, refs: [] };
   const api = (method, path, fields, repo) => {
     if (repo === 'o/kit') return { object: { sha: server.kit } }; // main des Kits
+    if (path.endsWith('/comments')) { comments.push(fields.body); return {}; }
     if (method === 'POST') { posts.push({ ...fields, sha: path.split('/')[1] }); return {}; }
     if (path.startsWith('pulls?')) return server.pulls;
     if (path.startsWith('pulls/')) return path === `pulls/${server.current.number}` ? server.current : server.pulls.find(({ number }) => path === `pulls/${number}`) ?? server.current;
@@ -94,7 +95,7 @@ function fixture(t, config, prConfig) {
     git(root, 'push', '-q', 'origin', 'main');
     return git(root, 'rev-parse', 'HEAD');
   };
-  return { ctx, git, pr, posts, server, base, root, dir, publish, advance, summary: () => posts.map(({ context, state }) => `${context}: ${state}`) };
+  return { ctx, git, pr, posts, comments, server, base, root, dir, publish, advance, summary: () => posts.map(({ context, state }) => `${context}: ${state}`) };
 }
 
 test('wählt nach den geänderten Dateien, meldet pending vor dem Ergebnis und gibt die Umgebung der Actions-CI weiter', async t => {
@@ -122,6 +123,27 @@ test('ohne betroffene Prüfung bleibt es bei einem grünen local-ci; ein fehlges
   assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, false);
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'Backend: failure', 'local-ci: failure']);
   assert.ok(!existsSync(join(f.ctx.work, 'gelaufen')));
+});
+
+test('baseRecheck: bei rotem PR läuft er einmal an der Basis, "Basis rot" nennt nur die dort weiter roten Tests, in Status und Kommentar; ohne Wert oder ohne rote Tests läuft er nicht', async t => {
+  const f = fixture(t, { checks: [] });
+  const check = run => ({ context: 'Backend', paths: ['backend/**'], run: [run], timeoutMinutes: 1 });
+  const red = check('printf "A\\nB\\n" >> "$LOCAL_CI_RED_TESTS"; exit 1');
+  const recheck = 'test ! -e backend/x.txt && echo A > "$LOCAL_CI_BASE_RED_TESTS"; touch gelaufen'; // an der Basis fehlt die Datei des PRs; A bleibt rot, B nicht
+  const last = () => f.posts.findLast(post => post.context === 'local-ci').description;
+  f.publish({ checks: [red], baseRecheck: recheck });
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, false);
+  assert.match(last(), /^Basis \w{12}: Basis rot: A; 1 von 1 rot: Backend$/);
+  assert.equal(f.comments.length, 1);
+  assert.match(f.comments[0], /^Basis rot: A\n/);
+  assert.ok(existsSync(join(f.ctx.work, 'gelaufen')));
+  f.publish({ checks: [check('exit 1')], baseRecheck: recheck }); // rot ohne gemeldete Tests: kein Lauf an der Basis
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, false);
+  assert.ok(!existsSync(join(f.ctx.work, 'gelaufen')));
+  f.publish({ checks: [red] }); // ohne baseRecheck ändert sich nichts
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, false);
+  assert.match(last(), /^Basis \w{12}: 1 von 1 rot: Backend$/);
+  assert.equal(f.comments.length, 1);
 });
 
 test('.node-version des geprüften Stands wählt die Node-Version über fnm; ohne Datei ändert sich nichts, ohne fnm bleibt es bei der des Läufers mit Hinweis', async t => {
