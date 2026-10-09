@@ -270,7 +270,7 @@ const kitRepository = ({ git, root }) => {
 
 /**
  * `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat, und `kitPush`, wenn sich main des Kits bewegt hat
- * (dann auf main des Projekts); die erste Beobachtung löst nichts aus. Die Befehle laufen nach `setup` in einem eigenen Worktree auf
+ * (dann auf main des Projekts); die erste Beobachtung löst nichts aus. Die Befehle laufen ohne `setup` (kein `npm ci`; nur das Kit-Submodul wird geholt) in einem eigenen Worktree auf
  * dem neuen Stand, nie im alten Stand des Läufer-Checkouts: bei `push` ist das `AFTER_SHA`, bei `kitPush` origin/main des Projekts
  * (dort ist `AFTER_SHA` der SHA im Kit, kein Commit des Projekts).
  * `saved` sind die Heads, deren Aufgabe erledigt ist (Datei `ctx.headsFile`): nach einem Neustart zählt der Vergleich damit,
@@ -304,14 +304,17 @@ async function pushed(ctx, heads, saved, idle) {
     try {
       config = branchConfig(ctx, branch); // frischer Fetch von origin/<branch>
       commands = kit ? config.kitPush : config.push;
-      if (commands.length) worktreeAt(ctx, work, kit ? ctx.git(ctx.root, 'rev-parse', `refs/remotes/origin/${branch}`) : after);
+      if (commands.length) {
+        worktreeAt(ctx, work, kit ? ctx.git(ctx.root, 'rev-parse', `refs/remotes/origin/${branch}`) : after);
+        if (kitRepository(ctx)) ctx.git(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // die Skripte brauchen das Kit, kein `setup` (npm ci blockierte alle Plätze)
+      }
     } catch (error) { console.error(`push ${key}: übersprungen, ${error.message}`); continue; }
     if (commands.length) {
       const env = { ...process.env, BRANCH: branch, BEFORE_SHA: before, AFTER_SHA: after, EVENT: kit ? 'kit' : 'push' };
       mkdirSync(ctx.logs, { recursive: true });
       const log = join(ctx.logs, `push-${key.replace(/[^\w.-]+/g, '-')}.log`);
       writeFileSync(log, '');
-      for (const command of [...config.setup, ...commands]) {
+      for (const command of commands) {
         const { code } = await shell(command, { cwd: work, env, log, timeoutMs: 30 * 60_000, state: {}, bash: ctx.bash });
         if (code) { console.error(`push ${key}: "${command}" endete mit ${code} (${log})`); break; }
       }

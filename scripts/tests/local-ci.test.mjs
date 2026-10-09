@@ -224,9 +224,19 @@ test('watch prüft einen neuen Head genau einmal, überspringt Drafts und Forks 
 });
 
 test('watch führt kitPush auf main des Projekts aus, wenn sich main des Kits bewegt; die erste Beobachtung löst nichts aus', async t => {
-  const f = fixture(t, { kitPush: ['echo "$BRANCH $EVENT $BEFORE_SHA $AFTER_SHA $(git rev-parse HEAD)" >> ../kit.txt'], checks: [] });
+  // setup (npm ci im Projekt) läuft hier nicht, das Kit-Submodul ist aber da
+  const f = fixture(t, { setup: ['exit 1'], kitPush: ['echo "$BRANCH $EVENT $BEFORE_SHA $AFTER_SHA $(git rev-parse HEAD) $(cat .vendor/workflow-kit/kitfile)" >> ../kit.txt'], checks: [] });
+  const kit = join(f.dir, 'kit');
+  mkdirSync(kit);
+  f.ctx.git(kit, 'init', '-q', '-b', 'main');
+  writeFileSync(join(kit, 'kitfile'), 'kit');
+  f.ctx.git(kit, 'add', '-A');
+  f.ctx.git(kit, 'commit', '-qm', 'kit');
+  f.ctx.git(f.root, 'config', '--global', 'url.' + kit.replaceAll('\\', '/') + '.insteadOf', 'https://github.com/o/kit.git'); // das Submodul kommt vom lokalen Ordner
+  f.ctx.git(f.root, 'config', '--global', 'protocol.file.allow', 'always');
   writeFileSync(join(f.root, '.gitmodules'), '[submodule ".vendor/workflow-kit"]\n\tpath = .vendor/workflow-kit\n\turl = https://github.com/o/kit.git\n');
-  f.ctx.git(f.root, 'add', '-A');
+  f.ctx.git(f.root, 'update-index', '--add', '--cacheinfo', `160000,${f.ctx.git(kit, 'rev-parse', 'HEAD')},.vendor/workflow-kit`);
+  f.ctx.git(f.root, 'add', '.gitmodules');
   f.ctx.git(f.root, 'commit', '-qm', 'kit');
   f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
   const main = f.ctx.git(f.root, 'rev-parse', 'HEAD'), ctx = { ...f.ctx, pollMs: 1, headsFile: join(f.dir, 'heads.json') };
@@ -236,7 +246,7 @@ test('watch führt kitPush auf main des Projekts aus, wenn sich main des Kits be
   assert.ok(!existsSync(join(f.dir, 'kit.txt')), 'erste Beobachtung: nur Ausgangslage');
   f.server.kit = 'b'.repeat(40);
   await watch(ctx, { rounds: 1 });
-  assert.equal(readFileSync(join(f.dir, 'kit.txt'), 'utf8').trim(), `main kit ${'a'.repeat(40)} ${'b'.repeat(40)} ${main}`);
+  assert.equal(readFileSync(join(f.dir, 'kit.txt'), 'utf8').trim(), `main kit ${'a'.repeat(40)} ${'b'.repeat(40)} ${main} kit`);
 });
 
 test('watch holt nach einem Neustart die push-Aufgabe nach, wenn sich main dazwischen bewegt hat; ohne Datei löst der erste Start nichts aus', async t => {
