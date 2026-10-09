@@ -120,6 +120,10 @@ const killTree = child => {
   } catch { /* der Prozess ist schon weg */ }
 };
 
+/** Vor jedem Git-Aufruf des Läufers. Ohne `submodule.recurse=false` (im Clone oft `true`) checkt `checkout` in den Arbeitsordnern
+ * auch das Kit-Submodul aus und scheitert nach einem Pin-Bump mit "failed to unpack tree object"; das Kit holt `submodule update --init`. */
+export const gitOptions = ['-c', 'core.longpaths=true', '-c', 'submodule.recurse=false'];
+
 /** Windows: das bash.exe von Git for Windows (`<git-root>/bin/bash.exe`, aus `git --exec-path` abgeleitet), nie das erste `bash` im PATH:
  * aus PowerShell ist das WSL ohne node. Fehlt es, bricht der Start ab, bevor ein Status gemeldet wird. */
 export function gitBash(execPath, platform = process.platform) {
@@ -425,7 +429,7 @@ async function main() {
   const fnm = spawnSync('fnm', ['--version'], { stdio: 'ignore' }).status === 0 ? 'fnm' : undefined; // ohne fnm bleibt es bei der Node-Version des Läufers
   const ctx = {
     bash, fnm, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), headsFile: join(dir, 'heads.json'), pollMs: 60_000, sonarToken: process.env.SONAR_TOKEN,
-    git: (cwd, ...args) => exec(git, ['-c', 'core.longpaths=true', ...args], { cwd }).trim(),
+    git: (cwd, ...args) => exec(git, [...gitOptions, ...args], { cwd }).trim(),
     api: (method, path, fields = {}, repo = repository) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repo}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
   lock(join(dir, 'lock'));
