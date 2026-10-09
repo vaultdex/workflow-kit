@@ -30,7 +30,9 @@ export function loadConfig(read) {
   const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
   const { checks, setup = [], push = [], kitPush = [], slots = 1, riskPaths, baseRecheck } = JSON.parse(read(project.localChecks));
-  assert.ok(Number.isInteger(slots) && slots >= 1, SLOTS_MESSAGE);  assert.ok(riskPaths === undefined || riskPaths.every?.(path => typeof path === 'string'), 'localChecks: "riskPaths" muss eine Liste von Pfaden sein');
+  assert.ok(Number.isInteger(slots) && slots >= 1, SLOTS_MESSAGE);
+  assert.ok(riskPaths === undefined || riskPaths.every?.(path => typeof path === 'string'), 'localChecks: "riskPaths" muss eine Liste von Pfaden sein');
+  assert.ok(baseRecheck === undefined || typeof baseRecheck === 'string', 'localChecks: "baseRecheck" muss ein Befehl (Text) sein');
   for (const check of checks) {
     assert.ok(check.context && check.paths?.every?.(path => typeof path === 'string') && check.run?.length && check.timeoutMinutes > 0,
       `localChecks: "${check.context}" braucht context, paths, run und timeoutMinutes`);
@@ -278,14 +280,15 @@ export async function checkPullRequest(ctx, pr) {
         const minutes = Math.max(...selected.map(check => check.timeoutMinutes));
         const ready = config.setup.length ? await run('setup-base', config.setup, 60) : ['success'];
         if (ready?.[0] === 'success') await run('base-recheck', [config.baseRecheck], minutes);
-        baseRed = red.filter(test => readFileSync(baseRedFile, 'utf8').split(/\r?\n/).includes(test));
+        const still = readFileSync(baseRedFile, 'utf8').split(/\r?\n/);
+        baseRed = red.filter(test => still.includes(test));
       }
     }
     if (!state.aborted) {
       ok = !failed.length;
       const summary = ok ? `${selected.length} Prüfungen grün in ${took()} auf ${host}` : `${failed.length} von ${selected.length} rot: ${failed.join(', ')}`;
       aggregate(ok ? 'success' : 'failure', baseRed.length ? `Basis rot: ${baseRed.join(', ')}; ${summary}` : summary);
-      if (baseRed.length) try { api('POST', `issues/${pr.number}/comments`, { body: `Basis rot: ${baseRed.join(', ')}\n\nDiese Tests sind schon am Kopf von ${pr.base.ref} (${base.slice(0, 12)}) rot. Der Fehler kommt nicht von diesem PR.` }); } catch { /* nur ein Hinweis */ }
+      if (baseRed.length) try { api('POST', `issues/${pr.number}/comments`, { body: `Basis rot: ${baseRed.join(', ')}\n\nDiese Tests sind schon am Kopf von ${pr.base.ref} (${base.slice(0, 12)}) rot, sie stammen nicht von diesem PR. Weitere rote Prüfungen stehen im Status.` }); } catch { /* nur ein Hinweis */ }
     }
   } finally {
     clearInterval(watcher);
