@@ -431,18 +431,42 @@ function claimReasons(issue, session) {
 function workReasons(issue, session) {
   const own = session ? `no claim of session ${session}` : 'pass --session ID to prove it is yours';
   const prs = openPrs(issue);
-  // An abandoned PR (see isStale) may be taken over with --session; a branch has no activity signal and keeps holding the issue.
+  // An abandoned PR (see isStale) may be taken over with --session.
   const mayTake = session && prs.length && isStale(issue);
   const heads = new Set(prs.map(pr => pr.headRefName));
-  const branches = workBranches(issue).filter(branch => !heads.has(branch));
-  return [...(mayTake ? [] : prs).map(pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName})` : ''} closes this issue; ${own}`),
-    ...branches.map(branch => `branch ${branch} belongs to this issue; ${own}`)];
+  const blocked = (mayTake ? [] : prs).map(pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName})` : ''} closes this issue; ${own}`), notes = [];
+  // A branch without an open PR (#504): without own commits it holds nothing, without a commit for staleHours it is orphaned (a note), else it holds.
+  for (const branch of workBranches(issue).filter(branch => !heads.has(branch))) {
+    const { ahead, idle } = branchWork(issue, branch), agent = branch.split('/')[0];
+    if (!ahead) continue;
+    if (idle !== undefined && isStale(issue, idle)) notes.push(`orphaned branch ${branch} (agent ${agent}): no open PR, no commit for ${ago(idle)}; write "Takeover of orphaned branch ${branch}" in your claim comment and continue on it or branch anew`);
+    else blocked.push(`branch ${branch} (agent ${agent}${idle === undefined ? '' : `, last commit ${ago(idle)} ago`}) belongs to this issue; ${own}`);
+  }
+  return { blocked, notes };
+}
+
+let defaultBranch;
+/**
+ * Own commits of a branch against the issue's base and the age of its newest commit: one REST compare. The commits come oldest first, one page of 100:
+ * with more, `idle` is undefined (that many commits are active work). A compare that fails (no base) is an error of the caller: `check` is UNKNOWN, `next` holds that issue.
+ * ponytail: one compare per found branch, also per Ready issue in `next`, uncached; cache by branch if `next` gets slow.
+ * ponytail: over 100 commits the age is unknown and the branch holds; read the last page of the compare if that bites.
+ */
+function branchWork(issue, branch) {
+  const ref = name => name.split('/').map(encodeURIComponent).join('/');
+  const base = baseOf(issue).branch || (defaultBranch ??= rest(`repos/${project.repository}`).default_branch);
+  const { ahead_by: ahead, commits = [] } = rest(`repos/${project.repository}/compare/${ref(base)}...${ref(branch)}?per_page=100`);
+  assert.ok(Number.isSafeInteger(ahead), `The comparison of ${branch} with ${base} is unreadable`);
+  const newest = ahead && commits.length === ahead ? Date.parse(commits.at(-1).commit.committer.date) : NaN;
+  return { ahead, idle: Number.isFinite(newest) ? Date.now() - newest : undefined };
 }
 
 /** What the claim comments and the work on an issue hold against a start by SESSION: one rule for `check` and `next`. */
 function startReasons(issue, session) {
   const found = claimReasons(issue, session);
-  return { ...found, blocked: [...found.blocked, ...session && found.claim?.session === session ? [] : workReasons(issue, session)] };
+  if (session && found.claim?.session === session) return found;
+  const work = workReasons(issue, session);
+  return { ...found, blocked: [...found.blocked, ...work.blocked], notes: [...found.notes, ...work.notes] };
 }
 
 /**
@@ -512,14 +536,18 @@ const ago = ms => {
   return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
 };
 
+/** The base branch the Project field names for the issue (empty without a setting or a value). */
+function baseOf(issue) {
+  const setting = baseSetting(), found = projectItem(issue)?.base, value = (found?.name ?? found?.text ?? '').trim();
+  return { setting, value, branch: setting && value && (Object.hasOwn(setting.values ?? {}, value) ? setting.values[value] : setting.pattern.replace('{value}', () => value)) };
+}
+
 /** The base the Project field names and whether HEAD stands on it; local git only, no fetch. Information only, never a verdict. */
 function baseLines(issue, stacked) {
-  const setting = baseSetting();
+  const { setting, value, branch } = baseOf(issue);
   if (!setting) return [];
-  const found = projectItem(issue)?.base;
-  const value = (found?.name ?? found?.text ?? '').trim();
   if (!value) return [`note: the Project field ${setting.field} is empty; no base branch to name`];
-  const branch = Object.hasOwn(setting.values ?? {}, value) ? setting.values[value] : setting.pattern.replace('{value}', () => value), remote = `origin/${branch}`;
+  const remote = `origin/${branch}`;
   const git = externalTool('git', process.cwd(), projectDirectory);
   // Git's exit code: 0 yes, 1 the expected "no", anything else is git failing (no checkout, no git) and says nothing about the base.
   const exit = (...args) => { try { execFileSync(git.file, ['-C', projectDirectory, ...args], { env: git.env, stdio: 'ignore' }); return 0; } catch (error) { return error.status ?? -1; } };
@@ -549,7 +577,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
     blocked.push(...found.blocked);
     notes.push(...found.notes);
     claim = found.claim;
-  } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
+  } catch (error) { unknown.push(`claim comments or branches are unreadable: ${String(error.stderr || error.message).trim()}`); }
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;
   const heldOnlyByOpen = heldOnlyByOpenPredecessors(blocked, predecessors);
@@ -666,7 +694,7 @@ function next() {
       blockedBy(first:100){totalCount nodes{${predecessorFields}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
       closedByPullRequestsReferences(first:10){nodes{number state updatedAt mergeStateStatus headRefName repository{nameWithOwner}}}
-      projectItems(first:100){nodes{project{id} updatedAt status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}
+      projectItems(first:100){nodes{project{id} updatedAt status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}${baseField()}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open ${blocking}`, ...(after && { after }) });
     login = viewer.login;
