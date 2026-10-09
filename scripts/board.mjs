@@ -170,8 +170,8 @@ const staleHours = project.staleHours === undefined ? 6 : project.staleHours;
  * ponytail: PR activity includes bot comments, so a PR that a bot keeps touching never goes stale; replace with the newest commit date of the PR head if that bites.
  */
 function idleMs(issue) {
-  const prs = (issue.closedByPullRequestsReferences?.nodes ?? []).filter(pr => pr?.state === 'OPEN');
-  const times = [issue.updatedAt, projectItem(issue)?.updatedAt, ...prs.map(pr => pr.updatedAt)].map(time => Date.parse(time)).filter(Number.isFinite);
+  const prs = openPrs(issue);
+  const times =[issue.updatedAt, projectItem(issue)?.updatedAt, ...prs.map(pr => pr.updatedAt)].map(time => Date.parse(time)).filter(Number.isFinite);
   return times.length ? Date.now() - Math.max(...times) : undefined;
 }
 const openPr = issue => issue.closedByPullRequestsReferences?.nodes.find(pr => pr?.state === 'OPEN' && pr.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
@@ -191,7 +191,11 @@ const conflictLine = pr => {
 };
 const conflicting = issue => projectItem(issue)?.status?.name === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY';
 /** Abandoned: no activity for staleHours, or a Human-review PR with conflicts (it is not mergeable, so nobody finishes it). A claim on such an issue has expired. */
-const isStale = issue => idleMs(issue) > staleHours * 3_600_000 || conflicting(issue);
+const isStale = (issue, idle = idleMs(issue)) => idle > staleHours * 3_600_000 || conflicting(issue);
+const openPrs = issue => (issue.closedByPullRequestsReferences?.nodes ?? []).filter(pr => pr?.state === 'OPEN');
+const workBranches = issue => (issue.branches ?? []).map(branch => branch.name).filter(name => new RegExp(`^[\\w.-]+/${issue.number}-`).test(name));
+/** How long a claim has been idle. Without an open PR and a branch nothing shows work, so only the claim comment's own age counts: board changes by others do not renew it (#497). */
+const claimIdleMs = (issue, holder) => openPrs(issue).length || workBranches(issue).length ? idleMs(issue) : Date.now() - Date.parse(holder.comment.created_at);
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
 function predecessorReasons({ totalCount, nodes }) {
@@ -411,7 +415,8 @@ function claimReasons(issue, session) {
   const notes = [], blocked = [];
   const about = ({ agent, session: id, comment }) => `${agent ? `Agent ${agent}, ` : ''}${id ? `Session ${id}` : 'no session named'}, ${comment.created_at}, ${comment.html_url}`;
   // A claim without activity for staleHours has expired: the new session takes it over and says so in its claim comment.
-  if (holder && session && holder.session !== session && isStale(issue)) notes.push(`stale claim of another session (${about(holder)}), no activity for ${ago(idleMs(issue))}: write "Takeover of stale claim ${holder.session ?? 'unknown'}" in your claim comment`);
+  const idle = holder && claimIdleMs(issue, holder);
+  if (holder && session && holder.session !== session && isStale(issue, idle)) notes.push(`stale claim of another session (${about(holder)}), no activity for ${ago(idle)}: write "Takeover of stale claim ${holder.session ?? 'unknown'}" in your claim comment`);
   else if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
   else if (holder && !session) notes.push(`newest claim: ${about(holder)}; pass --session ID to compare it with yours`);
   if (legacy) notes.push(`claim without Agent/Session field, session unknown: ${legacy.html_url}`);
@@ -425,13 +430,19 @@ function claimReasons(issue, session) {
  */
 function workReasons(issue, session) {
   const own = session ? `no claim of session ${session}` : 'pass --session ID to prove it is yours';
-  const prs = (issue.closedByPullRequestsReferences?.nodes ?? []).filter(pr => pr?.state === 'OPEN');
+  const prs = openPrs(issue);
   // An abandoned PR (see isStale) may be taken over with --session; a branch has no activity signal and keeps holding the issue.
   const mayTake = session && prs.length && isStale(issue);
   const heads = new Set(prs.map(pr => pr.headRefName));
-  const branches = (issue.branches ?? []).map(branch => branch.name).filter(branch => new RegExp(`^[\\w.-]+/${issue.number}-`).test(branch) && !heads.has(branch));
+  const branches = workBranches(issue).filter(branch => !heads.has(branch));
   return [...(mayTake ? [] : prs).map(pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName})` : ''} closes this issue; ${own}`),
     ...branches.map(branch => `branch ${branch} belongs to this issue; ${own}`)];
+}
+
+/** What the claim comments and the work on an issue hold against a start by SESSION: one rule for `check` and `next`. */
+function startReasons(issue, session) {
+  const found = claimReasons(issue, session);
+  return { ...found, blocked: [...found.blocked, ...session && found.claim?.session === session ? [] : workReasons(issue, session)] };
 }
 
 /**
@@ -534,11 +545,10 @@ function check(issue = readIssue(), claims, currentPrNumber) {
   const notes = [];
   let claim;
   if (claims) try {
-    const found = claimReasons(issue, claims.session);
+    const found = startReasons(issue, claims.session);
     blocked.push(...found.blocked);
     notes.push(...found.notes);
     claim = found.claim;
-    if (!claims.session || claim?.session !== claims.session) blocked.push(...workReasons(issue, claims.session));
   } catch (error) { unknown.push(`claim comments are unreadable: ${String(error.stderr || error.message).trim()}`); }
   // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
   stackedOn = undefined;
@@ -680,7 +690,13 @@ function next() {
         ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name };
     })
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);
-  const line = issue => `#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`
+  // A claim, an open PR or a branch holds an issue as in `check` (#497): read for the issues that would start or stack otherwise (REST only: the comments, one branch list).
+  let branches;
+  for (const issue of ready.filter(issue => !issue.reasons.length || heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors))) try {
+    branches ??= restAll(`repos/${project.repository}/branches`).map(({ name }) => ({ name }));
+    issue.reasons.push(...startReasons({ ...issue, branches, viewer: { login } }, sessionOption()).blocked);
+  } catch (error) { issue.reasons.push(`claim comments or branches are unreadable: ${String(error.stderr || error.message).trim()}`); }
+  const line =issue => `#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`
     + ` (assignees: ${issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none'})`;
   const startable = ready.filter(issue => !issue.reasons.length);
   // Held only by open predecessors that one open PR delivers: stackable on that PR.

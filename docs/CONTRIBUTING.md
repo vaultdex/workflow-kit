@@ -46,7 +46,8 @@ that session. The newest claim or handover decides, the later comment wins on eq
 another session than `--session` (or no session), `check` reports BLOCKED with agent, session, time and comment link.
 Without `--session`, or when the newest claim is an old one that lacks the field (no known session), `check` only shows a note.
 A claim without activity (issue, Project status, open PR) for `staleHours` (project file, default 6) has expired: with `--session`, `check` notes it
-instead of BLOCKED, also for the open PR and branch below; the new claim says `Takeover of stale claim OLD_SESSION` and the assignees stay. A new start
+instead of BLOCKED, also for the open PR and branch below; the new claim says `Takeover of stale claim OLD_SESSION` and the assignees stay. A claim with neither an open PR nor a branch expires by the age of its own comment
+(board changes by others do not renew it), and `next` lists no issue that `check` blocks for a claim, PR or branch. A new start
 is BLOCKED with `finish #N first` while the own session has an issue in In progress or Automated review (stacking on that work is allowed).
 Whatever the claims say, `check` also reports BLOCKED while an open PR closes the issue (a Draft too) or a branch `<agent>/<issue number>-…`
 exists, unless the newest claim is of `--session` (the own session resumes its own PR and branch); without `--session` nothing proves it. Both come
