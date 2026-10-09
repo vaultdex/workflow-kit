@@ -116,6 +116,10 @@ Wiederaufnahme“ (eine Zeile je Bedingung, nur der Wert, keine Zusätze):
 `board.mjs next` und `check` melden die Aufgabe BLOCKED, bis der Tag existiert und
 der Zeitpunkt erreicht ist; eine ungültige Zeile gilt als UNKNOWN.
 
+Die Zeile gehört nur in ein Issue, dessen ganze Arbeit wartet. Wartet nur ein Teil,
+etwa ein Live-Nachweis nach einem Datum, kommt dieser Teil in einen eigenen Folge-Task
+mit `Wartet bis`; der Rest bleibt startbar.
+
 ## PR zur kleinen Beispielaufgabe
 
 ### Was wurde geändert und warum?
