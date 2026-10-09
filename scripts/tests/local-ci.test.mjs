@@ -223,9 +223,8 @@ test('watch prüft einen neuen Head genau einmal, überspringt Drafts und Forks 
   assert.equal(readFileSync(join(f.dir, 'pushed.txt'), 'utf8').trim(), `main ${f.base} ${after} push neu`);
 });
 
-test('watch führt kitPush auf main des Projekts aus, wenn sich main des Kits bewegt; die erste Beobachtung löst nichts aus', async t => {
-  // setup (npm ci im Projekt) läuft hier nicht, das Kit-Submodul ist aber da
-  const f = fixture(t, { setup: ['exit 1'], kitPush: ['echo "$BRANCH $EVENT $BEFORE_SHA $AFTER_SHA $(git rev-parse HEAD) $(cat .vendor/workflow-kit/kitfile)" >> ../kit.txt'], checks: [] });
+/** Legt ein lokales Kit an und committet es als Submodul auf den ausgecheckten Branch von f.root (ohne Push). */
+function addKit(f) {
   const kit = join(f.dir, 'kit');
   mkdirSync(kit);
   f.ctx.git(kit, 'init', '-q', '-b', 'main');
@@ -238,6 +237,53 @@ test('watch führt kitPush auf main des Projekts aus, wenn sich main des Kits be
   f.ctx.git(f.root, 'update-index', '--add', '--cacheinfo', `160000,${f.ctx.git(kit, 'rev-parse', 'HEAD')},.vendor/workflow-kit`);
   f.ctx.git(f.root, 'add', '.gitmodules');
   f.ctx.git(f.root, 'commit', '-qm', 'kit');
+}
+
+test('watch führt push mit Konfiguration und Dateien des beobachteten Commits aus, auch wenn der Branch vor dem Fetch weiterzieht; die weitere Bewegung folgt danach', async t => {
+  const f = fixture(t, { push: [], checks: [] });
+  f.publish({ push: ['echo "a $AFTER_SHA $(git rev-parse HEAD)" >> ../pushed.txt'], checks: [] });
+  const a = f.ctx.git(f.root, 'rev-parse', 'HEAD');
+  writeFileSync(join(f.root, 'new.sh'), 'echo b >> ../pushed.txt'); // das Skript gibt es erst in b
+  f.ctx.git(f.root, 'add', 'new.sh');
+  f.publish({ push: ['bash new.sh'], checks: [] });
+  const b = f.ctx.git(f.root, 'rev-parse', 'HEAD'), ctx = { ...f.ctx, pollMs: 1, headsFile: join(f.dir, 'heads.json') };
+  const main = sha => { f.server.refs = [{ ref: 'refs/heads/main', object: { sha } }]; };
+  f.server.pulls = [];
+  main(f.base);
+  await watch(ctx, { rounds: 1 });
+  main(a); // origin steht schon auf b, die API meldet noch a
+  await watch(ctx, { rounds: 1 });
+  assert.equal(readFileSync(join(f.dir, 'pushed.txt'), 'utf8'), `a ${a} ${a}\n`);
+  main(b);
+  await watch(ctx, { rounds: 1 });
+  assert.equal(readFileSync(join(f.dir, 'pushed.txt'), 'utf8'), `a ${a} ${a}\nb\n`);
+});
+
+for (const kitOn of ['main', 'release']) {
+  test(`watch richtet das Kit im push-Worktree nach dessen eigenem Stand ein: Kit nur auf ${kitOn}`, async t => {
+    const f = fixture(t, { push: ['cat .vendor/workflow-kit/kitfile >> ../pushed.txt || echo ohne >> ../pushed.txt'], checks: [] });
+    f.ctx.git(f.root, 'checkout', '-q', '-b', 'release/1');
+    if (kitOn === 'release') addKit(f); else f.ctx.git(f.root, 'commit', '--allow-empty', '-qm', 'release');
+    f.ctx.git(f.root, 'push', '-q', 'origin', 'release/1');
+    const release = f.ctx.git(f.root, 'rev-parse', 'HEAD');
+    f.ctx.git(f.root, 'checkout', '-q', 'main');
+    if (kitOn === 'main') { addKit(f); f.ctx.git(f.root, 'push', '-q', 'origin', 'main'); }
+    const ctx = { ...f.ctx, pollMs: 1, headsFile: join(f.dir, 'heads.json') };
+    f.server.pulls = [];
+    f.server.kit = 'a'.repeat(40);
+    const refs = sha => { f.server.refs = [{ ref: 'refs/heads/release/1', object: { sha } }]; };
+    refs(f.base);
+    await watch(ctx, { rounds: 1 });
+    refs(release);
+    await watch(ctx, { rounds: 1 });
+    assert.equal(readFileSync(join(f.dir, 'pushed.txt'), 'utf8').trim(), kitOn === 'main' ? 'ohne' : 'kit');
+  });
+}
+
+test('watch führt kitPush auf main des Projekts aus, wenn sich main des Kits bewegt; die erste Beobachtung löst nichts aus', async t => {
+  // setup (npm ci im Projekt) läuft hier nicht, das Kit-Submodul ist aber da
+  const f = fixture(t, { setup: ['exit 1'], kitPush: ['echo "$BRANCH $EVENT $BEFORE_SHA $AFTER_SHA $(git rev-parse HEAD) $(cat .vendor/workflow-kit/kitfile)" >> ../kit.txt'], checks: [] });
+  addKit(f);
   f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
   const main = f.ctx.git(f.root, 'rev-parse', 'HEAD'), ctx = { ...f.ctx, pollMs: 1, headsFile: join(f.dir, 'heads.json') };
   f.server.pulls = [];

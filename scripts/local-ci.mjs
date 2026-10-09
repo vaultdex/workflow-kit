@@ -76,10 +76,15 @@ export function loadSlots(read) {
 }
 export const mainSlots = ctx => branchConfig(ctx, 'main', undefined, loadSlots);
 
+const fetchBranch = ({ git, root }, branch) => {
+  try { git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`); } catch { throw new Error(`origin/${branch} ist nicht abrufbar`); }
+};
+
 /** Die Konfiguration von origin/<branch> nach frischem Fetch: nie aus dem eigenen Checkout und nie aus dem PR, dem man nicht traut. */
-export function branchConfig({ git, root }, branch, sha, load = loadConfig) {
-  // Mit `sha` (die Basis, gegen die gemerged wurde) kein neuer Fetch: Prüfliste und Merge-Stand stammen aus demselben Commit.
-  if (!sha) try { git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`); } catch { throw new Error(`origin/${branch} ist nicht abrufbar`); }
+export function branchConfig(ctx, branch, sha, load = loadConfig) {
+  const { git, root } = ctx;
+  // Mit `sha` (die Basis, gegen die gemerged wurde; bei `push` der bearbeitete Commit) kein neuer Fetch: Prüfliste und Worktree stammen aus demselben Commit.
+  if (!sha) fetchBranch(ctx, branch);
   const ref = sha ?? `origin/${branch}`;
   return load(path => {
     try { return git(root, 'show', `${ref}:${path}`); } catch (error) {
@@ -276,7 +281,7 @@ const finished = (ctx, sha, base) => {
   return status?.state === 'success' || (status?.state === 'failure' && !!status.description?.startsWith(baseMark(base)));
 };
 
-/** Das Kit-Repository aus .gitmodules von origin/main (lokale Referenz ohne Fetch, wie in kit-pin.mjs); ohne Kit-Submodul undefined. */
+/** Das Kit-Repository aus .gitmodules von origin/main (lokale Referenz ohne Fetch, wie in kit-pin.mjs); ohne Kit-Submodul undefined. Nur für die Entdeckung von `kitPush`: ob ein Push-Worktree das Kit braucht, entscheidet sein eigener Stand. */
 const kitRepository = ({ git, root }) => {
   try { return /github\.com[/:](.+?)(?:\.git)?$/.exec(git(root, 'config', '--blob', 'refs/remotes/origin/main:.gitmodules', '--get', 'submodule..vendor/workflow-kit.url'))?.[1]; } catch { return undefined; }
 };
@@ -315,11 +320,13 @@ async function pushed(ctx, heads, saved, idle) {
     const work = `${ctx.work}-push`;
     let config, commands;
     try {
-      config = branchConfig(ctx, branch); // frischer Fetch von origin/<branch>
+      fetchBranch(ctx, branch);
+      const sha = kit ? ctx.git(ctx.root, 'rev-parse', `refs/remotes/origin/${branch}`) : after; // Konfiguration und Worktree stammen aus diesem einen Commit
+      config = branchConfig(ctx, branch, sha);
       commands = kit ? config.kitPush : config.push;
       if (commands.length) {
-        worktreeAt(ctx, work, kit ? ctx.git(ctx.root, 'rev-parse', `refs/remotes/origin/${branch}`) : after);
-        if (kitRepository(ctx)) ctx.git(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // die Skripte brauchen das Kit, kein `setup` (npm ci blockierte alle Plätze)
+        worktreeAt(ctx, work, sha);
+        if (ctx.git(work, 'ls-files', '--stage', '--', '.vendor/workflow-kit').startsWith('160000')) ctx.git(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // nur, wenn dieser Stand das Kit enthält; die Skripte brauchen es, kein `setup` (npm ci blockierte alle Plätze)
       }
     } catch (error) { console.error(`push ${key}: übersprungen, ${error.message}`); continue; }
     if (commands.length) {
