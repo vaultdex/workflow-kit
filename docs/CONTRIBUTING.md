@@ -469,7 +469,7 @@ backlink never closes an issue.
    under files the PR changes too, it first merges the base into the PR branch and waits for CI
    again; if GitHub refuses that update with 403, it names the manual way
    (`git merge origin/<base>`, push once, `merge` again); afterwards it deletes the head branch (not a stack base, not the default branch, not
-   where the repository deletes it itself). Codex is the only
+   where the repository deletes it itself). `merge --stack` wants each layer's issue in Human review; `--from-automated-review` also accepts Automated review, with every other gate unchanged. Codex is the only
    required review bot; CodeRabbit is optional and is neither awaited nor re-requested.
 8. After the merge, confirm the delivered scope is accepted and the issue is
    closed; then it is Done. A not-planned closure never becomes Done.

@@ -2120,7 +2120,7 @@ function layerReasons(layer, viewer) {
   for (const { number: issueNumber } of nodes) {
     const linked = readIssue(false, issueNumber), status = projectItem(linked)?.status?.name;
     if (isSpec(linked)) reasons.push(`delivers spec #${issueNumber}, which only a human closes (AGENT_RULES.md, Hard rules): unlink it and write "Refs #${issueNumber}"`);
-    if (status !== 'Human review') reasons.push(`delivers issue #${issueNumber}, whose status is ${status ?? 'unset'}, not Human review`);
+    if (status !== 'Human review' && !(fromAutomatedReview && status === 'Automated review')) reasons.push(`delivers issue #${issueNumber}, whose status is ${status ?? 'unset'}, not Human review${fromAutomatedReview ? ' or Automated review' : ''}`);
   }
   stackLayers.set(layer, { pr, issues: nodes.map(issue => issue.number) });
   return reasons;
@@ -2367,6 +2367,8 @@ async function merge() {
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;
 const stallOption = () => numberOption('--stall', 20);
 const stack = process.argv.includes('--stack');
+// `merge --from-automated-review`: a stack layer's issue may also be in Automated review (a plain merge reads no issue); every other gate stays (#512).
+const fromAutomatedReview = process.argv.includes('--from-automated-review');
 // "reviewerGraceMinutes" in the project file is the default of --grace; 0 turns the grace off. Only a missing field is allowed.
 const projectGrace = project.reviewerGraceMinutes === undefined ? 3 : project.reviewerGraceMinutes;
 const graceOption = () => numberOption('--grace', projectGrace);
@@ -2624,7 +2626,7 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next [--session ID] | sweep 
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
   + ' | quota-wait [--max-minutes N]'
   + ' | handoff ISSUE PR [--refs] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] (needs the comment "## Übergabe" with "Head: <sha>" on the PR, not the issue: gh pr comment PR --body-file FILE)'
-  + ' | merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
+  + ' | merge PR [--stack] [--from-automated-review] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
   + ' | stack-sync TOP'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
   + ' | link ISSUE PR [--refs] | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
@@ -2639,7 +2641,7 @@ const writeArgs = { sweep: { words: 0 }, status: { words: 2 }, priority: { words
   body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
   new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1, '--status': 1 } },
   ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1, '--refs': 0 } },
-  merge: { words: 1, flags: { '--stack': 0, '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } }, 'stack-sync': { words: 1 } };
+  merge: { words: 1, flags: { '--stack': 0, '--from-automated-review': 0, '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } }, 'stack-sync': { words: 1 } };
 function refusesArguments() {
   const { words, flags = {} } = writeArgs[command], args = process.argv.slice(3);
   let given = 0;

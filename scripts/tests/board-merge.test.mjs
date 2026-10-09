@@ -365,6 +365,18 @@ test('merge --stack gates every layer, merges only the top through merge-async a
     assert.match(result.stdout, expected, label);
     assert.deepEqual(calls(), [], `${label}: nothing is merged`);
   }
+  // --from-automated-review (#512) lets Automated review pass, nothing else: In progress and the other gates still refuse.
+  prepare({ status: 'Automated review' });
+  const withoutOption = run('merge', '7', '--stack', '--interval', '0');
+  assert.equal(withoutOption.status, 1, withoutOption.stdout + withoutOption.stderr);
+  assert.match(withoutOption.stdout, /^blocker: PR #5 delivers issue #1, whose status is Automated review, not Human review$/m);
+  prepare({ status: 'In progress' });
+  const inProgress = run('merge', '7', '--stack', '--from-automated-review', '--interval', '0');
+  assert.match(inProgress.stdout, /^blocker: PR #5 delivers issue #1, whose status is In progress, not Human review or Automated review$/m);
+  prepare({ status: 'Automated review', comments: [handoff(first)] });
+  assert.match(run('merge', '7', '--stack', '--from-automated-review', '--interval', '0').stdout, /^blocker: PR #5 has no handoff comment/m);
+  assert.deepEqual(calls(), []);
+
   // The top was built on an older head of the layer below.
   prepare();
   json('stack-compare.json', { status: 'diverged' });
@@ -423,4 +435,10 @@ test('merge --stack gates every layer, merges only the top through merge-async a
     assert.deepEqual(calls().filter(call => call.startsWith('close')), expected, label);
     assert.equal(JSON.parse(readFileSync(join(checkout, 'backlink-comments-1.json'), 'utf8')).length, expected.length, `${label}: one comment per close`);
   }
+
+  // Automated review with --from-automated-review (#512) passes the same gate and merges.
+  prepare({ status: 'Automated review' });
+  const fromAutomated = run('merge', '7', '--stack', '--from-automated-review', '--interval', '0');
+  assert.equal(fromAutomated.status, 0, fromAutomated.stdout + fromAutomated.stderr);
+  assert.match(fromAutomated.stdout, new RegExp(`^MERGED #7 head ${first} `, 'm'));
 });

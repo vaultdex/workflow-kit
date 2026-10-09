@@ -311,7 +311,7 @@ and then work in that directory, their relative paths (changed files given to `a
   Session ownership, final
   proof and whether a finding is justified remain driver responsibilities. Use this for
   delivery; `status` is metadata maintenance.
-- `merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]`: the only way for an agent with merge
+- `merge PR [--stack] [--from-automated-review] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] [--max-minutes N]`: the only way for an agent with merge
   authority to merge ([review loop](docs/CONTRIBUTING.md#review-loop) step 7). It applies the review gates of
   `handoff` (open non-draft PR, CI green, every reviewer with a trace on the head finished or
   stalled, no `blocker:` line, no open thread, determined merge state, the PR body's `Selbstprüfung` section when the project lists `"selfReview"`) and prints the same
