@@ -87,6 +87,9 @@ steht deshalb im Satz oder in Anführungszeichen, nicht als eigene Zeile.
 Zeitpunkt in der Zukunft liegt. Ein ungültiger Wert oder ein fehlschlagender Tag-Lookup
 ist UNKNOWN, nie „kein Blocker“. Das ersetzt keine nativen Blocker und verschiebt
 nichts nach Ready; Zeitzonen außer UTC gibt es nicht.
+`Wartet bis` gehört nur in ein Issue, dessen ganze Arbeit wartet: Wartet nur ein Teil
+(etwa ein Live-Nachweis nach einem Datum), kommt dieser Teil in einen eigenen Folge-Task
+mit `Wartet bis`, und der Rest bleibt startbar.
 
 **Claiming.** Complete and verify every step in [Start or resume](../AGENT_RULES.md#start-or-resume).
 
