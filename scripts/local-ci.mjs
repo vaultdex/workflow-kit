@@ -23,12 +23,14 @@ export const matches = (paths, file) => paths.reduce((hit, path) => path.startsW
 /** Die Prüfungen, deren Filter mindestens eine geänderte Datei treffen. */
 export const select = (checks, files) => checks.filter(check => files.some(file => matches(check.paths, file)));
 
+const SLOTS_MESSAGE = 'localChecks: "slots" muss eine ganze Zahl ab 1 sein';
+
 /** `localChecks` aus .github/workflow-project.json: Pfad zu einer JSON-Datei mit checks, optional setup, push und kitPush. `read(pfad)` liefert den Inhalt. */
 export function loadConfig(read) {
   const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
   const { checks, setup = [], push = [], kitPush = [], slots = 1, riskPaths } = JSON.parse(read(project.localChecks));
-  assert.ok(Number.isInteger(slots) && slots >= 1, 'localChecks: "slots" muss eine ganze Zahl ab 1 sein');
+  assert.ok(Number.isInteger(slots) && slots >= 1, SLOTS_MESSAGE);
   assert.ok(riskPaths === undefined || riskPaths.every?.(path => typeof path === 'string'), 'localChecks: "riskPaths" muss eine Liste von Pfaden sein');
   for (const check of checks) {
     assert.ok(check.context && check.paths?.every?.(path => typeof path === 'string') && check.run?.length && check.timeoutMinutes > 0,
@@ -65,8 +67,13 @@ export async function waitReason(ctx, pr, { apps }) {
   return open ? `${open} Sonar-Befunde offen` : null;
 }
 
-/** Die Platzzahl von main: ohne `localChecks` dort gilt 1 (die Prüflisten der PRs kommen vom jeweiligen Ziel-Branch), ein ungültiger Wert bleibt ein Fehler. */
-export const loadSlots = read => JSON.parse(read('.github/workflow-project.json')).localChecks ? loadConfig(read).slots : 1;
+/** Die Platzzahl von main: nur sie wird gelesen, eine Prüfliste braucht main nicht (die der PRs kommt vom jeweiligen Ziel-Branch). Ohne Angabe gilt 1, ein ungültiger Wert bleibt ein Fehler. */
+export function loadSlots(read) {
+  const { localChecks } = JSON.parse(read('.github/workflow-project.json'));
+  const { slots = 1 } = localChecks ? JSON.parse(read(localChecks)) : {};
+  assert.ok(Number.isInteger(slots) && slots >= 1, SLOTS_MESSAGE);
+  return slots;
+}
 export const mainSlots = ctx => branchConfig(ctx, 'main', undefined, loadSlots);
 
 /** Die Konfiguration von origin/<branch> nach frischem Fetch: nie aus dem eigenen Checkout und nie aus dem PR, dem man nicht traut. */
