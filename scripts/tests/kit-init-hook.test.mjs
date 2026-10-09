@@ -335,4 +335,33 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
     });
   });
 }
+
+// Claude Code creates an agent worktree without checkout and resets it, so post-checkout never runs (#479). The hook
+// then gets CLAUDE_PROJECT_DIR of the session that started the agent; the directory of the agent itself is on stdin.
+test('the Claude init handler fills the kit of the worktree named on stdin, not only that of the project directory', { skip: spawnSync(shell.posix, ['-c', 'exit 0']).status !== 0 && `${shell.posix} unavailable` }, async t => {
+  const temp = temporary(t, 'kit-worktree ');
+  const env = { ...isolatedGit(temp), GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'protocol.file.allow', GIT_CONFIG_VALUE_0: 'always' };
+  const git = async (cwd, ...a) => {
+    const result = await spawn('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...a], { cwd, env });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const fixture = async (name, file) => { const dir = join(temp, name); mkdirSync(dir); await git(dir, 'init', '--quiet'); writeFileSync(join(dir, file), 'x'); await git(dir, 'add', '.'); await git(dir, 'commit', '--quiet', '-m', name); return dir; };
+  const kit = await fixture('kit', 'AGENT_RULES.md'), origin = await fixture('origin', 'README.md');
+  await git(origin, 'submodule', '--quiet', 'add', kit.replaceAll('\\', '/'), '.vendor/workflow-kit');
+  await git(origin, 'commit', '--quiet', '-m', 'consumer');
+  const project = join(temp, 'project'), worktree = join(temp, 'worktree');
+  await git(temp, 'clone', '--quiet', '--recurse-submodules', origin, project);
+  await git(project, 'worktree', 'add', '--quiet', '--no-checkout', '--detach', worktree, 'HEAD');
+  await git(worktree, 'reset', '--quiet', '--hard');
+  const rules = join(worktree, '.vendor/workflow-kit/AGENT_RULES.md');
+  assert.ok(!existsSync(rules), 'a worktree created like Claude Code does starts without the kit');
+
+  // SessionStart and SubagentStart carry the same handler text, so one run covers both.
+  const commands = new Set(handlers('.claude/settings.json', 'command'));
+  assert.equal(commands.size, 1);
+  const [command] = commands;
+  const result = await spawn(shell.posix, ['-c', command], { cwd: project, env: { ...env, CLAUDE_PROJECT_DIR: project }, input: JSON.stringify({ hook_event_name: 'SubagentStart', cwd: worktree }) });
+  assert.deepEqual([result.status, result.stdout], [0, ''], result.stderr);
+  assert.ok(existsSync(rules), 'the kit of the agent worktree is initialized');
+});
 });
