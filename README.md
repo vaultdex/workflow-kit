@@ -493,8 +493,9 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   `origin/<that branch>`; a branch without the config is skipped), with
   `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
   The commands run in a worktree of their own (`<main checkout>-local-ci/work-push`) on `AFTER_SHA`, never in the
-  runner's own checkout, which may be old: a file that only exists on the new state is there. `setup` does not run (no `npm ci`
-  while all slots wait); if the project has the kit submodule, only `git submodule update --init .vendor/workflow-kit` runs first.
+  runner's own checkout, which may be old: a file that only exists on the new state is there. The commands themselves are
+  read from `AFTER_SHA`, not from the branch's newest head, so config and worktree are always one commit. `setup` does not run (no `npm ci`
+  while all slots wait); if that state has the kit gitlink, only `git submodule update --init .vendor/workflow-kit` runs first.
   The runner stores each branch head in `heads.json` next to its work folders once that branch's `push` is done, so a branch that
   moved while the runner was off is caught up at the next `--watch` start; without the file the first look is the baseline.
 - `kitPush` (list, next to `push`, read from `origin/main`) runs the same way when `main` of the kit moved (head stored in
