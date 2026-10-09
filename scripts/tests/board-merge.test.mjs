@@ -114,6 +114,18 @@ test('merge refuses a PR body without the Selbstprüfung section the project ask
   assert.deepEqual(calls(), ['merge', 'delete claude/7-topic']);
 });
 
+test('merge refuses a PR text that closes a spec, also when it changed after the handoff', t => {
+  const { run, show, calls, json } = mergeFixture(t);
+  json('backlink-5.json', { number: 5, labels: [{ name: 'spec' }] });
+  show({ body: 'Closes #5' });
+  const refused = run('merge', '7');
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.match(refused.stdout, /^blocker: BLOCKED: #5 is a spec /m);
+  assert.deepEqual(calls(), [], 'nothing is merged');
+  show({ body: 'Refs #5' });
+  assert.equal(run('merge', '7').status, 0);
+});
+
 test('merge looks again at a running check from the first look on, merges once it is green, and ends with exit 4 when --max-minutes runs out', t => {
   const { run, show, calls, json, first, headOf } = mergeFixture(t);
   const running = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS', conclusion: null }] } } };

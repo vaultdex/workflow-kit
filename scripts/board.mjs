@@ -1979,6 +1979,8 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
     reasons.push(`resolve review blockers and threads before ${action}`);
   }
   reasons.push(...selfReviewReasons(result.pr.bodyHTML, checks), ...extra(result));
+  // Handoff and merge alike: a PR text edited after the handoff must not close a spec either.
+  for (const specNumber of closedSpecs(result.pr.body)) reasons.push(specRefusal(specNumber, `the text of PR #${prNumber} closes it; write "Refs #${specNumber}" instead`));
   const undetermined = state => !state || state === 'UNKNOWN';
   let state = result.pr.mergeStateStatus;
   for (let read = 1; undetermined(state) && read < mergeReads; read++) {
@@ -2006,7 +2008,10 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
   return result;
 }
 
-/** The issues of this repository that the PR text closes with a keyword ("Closes #N", "Fixes owner/repo#N") and that carry the spec label. */
+/**
+ * The issues of this repository that the PR text closes with a keyword ("Closes #N", "Fixes owner/repo#N") and that carry the spec label.
+ * ponytail: only the first number after a keyword counts ("Closes #5, #6" names #5); a link or a native closing link made by hand is not read.
+ */
 function closedSpecs(prText) {
   const numbers = new Set();
   for (const [, repository, issueNumber] of String(prText ?? '').matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+((?:[\w.-]+\/[\w.-]+)?)#(\d+)/gi)) {
@@ -2034,7 +2039,6 @@ function handoffPr(issueId, viewer, expectedHead, prior, partial) {
       for (const note of retroNotes(rendered.body_html)) console.log(`note: ${note}`);
     }
     if (!partial && !connectedIssues(pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
-    for (const specNumber of closedSpecs(pr.body)) reasons.push(specRefusal(specNumber, `the text of PR #${value} closes it; write "Refs #${specNumber}" instead`));
     return reasons;
   }, prior);
   return result?.pr;
