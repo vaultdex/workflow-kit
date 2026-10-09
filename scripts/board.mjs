@@ -816,11 +816,11 @@ function guardOption(issue, { fieldName, option }) {
     // A refusal is an error like the others: its verdict lines become the one ERROR line instead of a second output format.
     const log = console.log, verdict = [];
     // An open issue in Done was reopened by a human (a merge closes it): it may leave Done, with a note (#510). A closed one stays blocked.
-    const reopened = issue.state === 'OPEN' && projectItem(issue)?.status?.name === 'Done';
-    if (reopened) log(`note: #${issue.number} is open again and was Done; it moves to In progress`);
-    const judged = reopened ? { ...issue, projectItems: { nodes: issue.projectItems.nodes.map(item => item === projectItem(issue) ? { ...item, status: { name: 'Ready' } } : item) } } : issue;
+    const wasDone = issue.state === 'OPEN' && projectItem(issue)?.status?.name === 'Done';
+    const judged = wasDone ? { ...issue, projectItems: { nodes: issue.projectItems.nodes.map(item => item === projectItem(issue) ? { ...item, status: { name: 'Ready' } } : item) } } : issue;
     console.log = (...parts) => verdict.push(parts.join(' '));
     try { if (!mayStart(check(judged))) throw new Error(verdict.join('; ')); } finally { console.log = log; }
+    if (wasDone) log(`note: #${issue.number} is open again and was Done; it moves to In progress`);
   }
   if (fieldName === 'Status' && option.name === 'Automated review') {
     verifyBacklinks(issue);

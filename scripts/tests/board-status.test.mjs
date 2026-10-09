@@ -133,7 +133,9 @@ test('An open issue a human reopened leaves Done for In progress with a note; a 
   assert.match(result.stdout, /^note: #1 is open again and was Done; it moves to In progress$/m);
   assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 1);
   writeIssue(done({ assignees: { nodes: [] } }));
-  assert.notEqual(run('status', '1', 'In progress').status, 0, 'the assignment is still required');
+  const refused = run('status', '1', 'In progress');
+  assert.notEqual(refused.status, 0, 'the assignment is still required');
+  assert.doesNotMatch(refused.stdout, /note:/, 'no note for a move that did not happen');
 });
 
 test('Automated review requires the declared open PR and every issue backlink before mutating status', t => {
