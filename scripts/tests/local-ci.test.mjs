@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { checkPullRequest, gitBash, loadConfig, loadSlots, lock, mainSlots, matches, select, watch } from '../local-ci.mjs';
+import { checkPullRequest, gitBash, gitOptions, loadConfig, loadSlots, lock, mainSlots, matches, select, watch } from '../local-ci.mjs';
 import { isolatedGit, temporary } from './fixtures.mjs';
 
 test('Pfad-Filter wie bei GitHub: der Reihe nach, "!" nimmt zurück, "*" bleibt im Ordner, "**" geht darunter', () => {
@@ -79,7 +79,7 @@ function fixture(t, config, prConfig) {
     return [];
   };
   const bash = gitBash(git(dir, '--exec-path')); // wie der Läufer: unter Windows das Git Bash, nie ein WSL-bash im PATH
-  const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, git, api, bash };
+  const ctx = { repository: 'o/r', root, work: join(dir, 'work'), logs: join(dir, 'logs'), pollMs: 100, git: (cwd, ...args) => git(cwd, ...gitOptions, ...args), api, bash };
   /** Ändert die Prüfliste auf main von origin (wie ein Merge dort); der Läufer liest sie beim nächsten Durchlauf. */
   const publish = next => {
     writeFileSync(join(root, '.github/local-checks.json'), JSON.stringify(next));
@@ -94,7 +94,7 @@ function fixture(t, config, prConfig) {
     git(root, 'push', '-q', 'origin', 'main');
     return git(root, 'rev-parse', 'HEAD');
   };
-  return { ctx, pr, posts, server, base, root, dir, publish, advance, summary: () => posts.map(({ context, state }) => `${context}: ${state}`) };
+  return { ctx, git, pr, posts, server, base, root, dir, publish, advance, summary: () => posts.map(({ context, state }) => `${context}: ${state}`) };
 }
 
 test('wählt nach den geänderten Dateien, meldet pending vor dem Ergebnis und gibt die Umgebung der Actions-CI weiter', async t => {
@@ -202,6 +202,27 @@ test('vor jedem Lauf ist der Arbeitsordner genau der PR-Stand: eine ignorierte D
   f.publish({ checks: [] });
   assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
   assert.ok(!existsSync(join(f.ctx.work, 'ignoriert')));
+});
+
+test('submodule.recurse=true im Clone: ein Pin-Bump auf einen Commit, den das Submodul im Arbeitsordner nicht hat, lässt den Checkout nicht scheitern', async t => {
+  const f = fixture(t, { checks: [] });
+  const { git, root } = f, file = ['-c', 'protocol.file.allow=always'], sub = join(f.dir, 'kit');
+  git(f.dir, 'init', '-q', '-b', 'main', sub);
+  writeFileSync(join(sub, 'a'), '1');
+  git(sub, 'add', '-A');
+  git(sub, 'commit', '-qm', 'c1');
+  git(root, ...file, 'submodule', 'add', '-q', sub, '.vendor/kit');
+  git(root, 'commit', '-qm', 'pin c1');
+  git(root, 'push', '-q', 'origin', 'main');
+  git(root, 'config', 'submodule.recurse', 'true');
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
+  git(f.ctx.work, ...file, 'submodule', 'update', '--init'); // wie `setup`: das Kit im Arbeitsordner steht auf c1
+  writeFileSync(join(sub, 'a'), '2');
+  git(sub, 'commit', '-qam', 'c2');
+  git(join(root, '.vendor/kit'), 'pull', '-q');
+  git(root, 'commit', '-qam', 'pin c2');
+  git(root, 'push', '-q', 'origin', 'main');
+  assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, true);
 });
 
 test('fehlt die Konfiguration auf dem Ziel-Branch, meldet local-ci das klar und die Schleife prüft den nächsten PR', async t => {
