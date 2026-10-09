@@ -222,3 +222,21 @@ test('status and priority refuse an unknown flag or extra word, and --help or -h
     assert.equal(existsSync(join(checkout, 'queries')), false, `${flag} reached gh`);
   }
 });
+
+test('status refuses Done and Human review for a spec, by the label of the project file, and writes nothing', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const labelled = name => writeIssue({ ...issue('In progress'), labels: { nodes: [{ name }] } });
+
+  labelled('Spec');
+  for (const status of ['Done', 'Human review']) {
+    const result = run('status', '1', status);
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stdout, /^ERROR - BLOCKED: #1 is a spec .*Only a human closes a spec/m, status);
+  }
+  assert.equal(existsSync(join(checkout, 'mutations')), false, 'a refused status writes nothing');
+
+  writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', specLabel: 'Konzept' }));
+  assert.equal(run('status', '1', 'Done').status, 0, 'the default label means nothing once the project names its own');
+  labelled('Konzept');
+  assert.match(run('status', '1', 'Done').stdout, /BLOCKED: #1 is a spec \(label "Konzept"\)/);
+});

@@ -19,9 +19,15 @@ const text = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
 // handoff, which upstream's `disable-model-invocation` makes the Skill tool refuse (#212), and
 // `implement` leaves the full suite to CI (#230).
 const implementTests = [', and the full test suite once at the end.', ', and leave the full test suite to CI (run it once at the end only if CI does not).'];
+// Only a human closes a spec (AGENT_RULES.md, Hard rules, #508): the integration PR of `implement-spec` closes the tickets, and `chief-of-staff` is told.
+const specRule = ['All work should be done in subagents. Protect your context window.\n',
+  'All work should be done in subagents. Protect your context window.\n\nNo agent closes a spec or sets it to Done or Human review, a subagent and you included: only a human accepts a spec (`AGENT_RULES.md`, Hard rules).\n'];
+const specPr = [' marked as closing the spec and tickets.', ' marked as closing the tickets, never the spec (only a human closes a spec: `AGENT_RULES.md`, Hard rules).'];
 const adapt = (skill, path, content) => path !== 'SKILL.md' ? content
   : skill === 'retro' ? content.replace(/^disable-model-invocation: true\n/m, '')
-    : skill === 'implement' ? content.replace(implementTests[0], implementTests[1]) : content;
+    : skill === 'implement' ? content.replace(implementTests[0], implementTests[1])
+      : skill === 'implement-spec' ? content.replace(specPr[0], specPr[1])
+        : skill === 'chief-of-staff' ? content.replace(specRule[0], specRule[1]) : content;
 
 function cleanSource() {
   assert.equal(git('-C', source, 'status', '--porcelain', '--untracked-files=all').trim(), '',

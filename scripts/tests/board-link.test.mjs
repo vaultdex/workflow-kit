@@ -60,6 +60,12 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   writeIssue({ ...issue('In progress'), state: 'CLOSED' });
   assert.equal(run('link', '1', '7').status, 2, 'A closed issue takes no backlink');
   assert.equal(mutations() + commentWrites(), 0, 'and is refused before any write');
+  prepare();
+  writeIssue({ ...issue('In progress'), labels: { nodes: [{ name: 'spec' }] } });
+  result = run('link', '1', '7');
+  assert.equal(result.status, 2, 'A spec is never linked: the PR would close it');
+  assert.match(result.stdout, /BLOCKED: #1 is a spec/);
+  assert.equal(mutations() + commentWrites(), 0, 'and is refused before any write');
   writeIssue(issue('In progress'));
 
   prepare();

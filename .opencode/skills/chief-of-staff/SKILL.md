@@ -19,6 +19,8 @@ Harness-permitting, you will suggest recurring schedules which can help in achie
 
 All work should be done in subagents. Protect your context window.
 
+No agent closes a spec or sets it to Done or Human review, a subagent and you included: only a human accepts a spec (`AGENT_RULES.md`, Hard rules).
+
 Use background agents so you can stay in active dialogue with the user.
 
 Communication to and from subagents should be sparse. Communicate primarily through **context pointers**: research notes, previous commits, and others. Don't duplicate information already available via pointers.

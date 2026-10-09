@@ -86,6 +86,7 @@ the head, a limit notice included. A project whose bots do not start on their ow
 `"reviewerGraceMinutes": 0`; a non-number or negative value is an ERROR.
 `"staleHours"` (default 6) is how long work may lie without any activity before `board.mjs next` lists it as abandoned and `check` lets a new
 session take over its claim; a non-number or negative value is an ERROR. The automatic `sweep` is the opt-in workflow [docs/board-sweep.yml](docs/board-sweep.yml).
+`"specLabel"` (default `spec`) names the label of a spec: `board.mjs` never closes such an issue, refuses its status Done and Human review, and a PR text with a closing keyword for it fails the handoff.
 `"selfReview"` lists the self-checks the PR body must name in its `## Selbstprüfung` section before
 `board.mjs handoff` or `merge` passes, for example `"selfReview": ["ponytail-review", "code-review"]`; omit it to ask
 nothing. A `null` or other non-list value is an ERROR.

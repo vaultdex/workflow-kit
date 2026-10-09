@@ -131,6 +131,28 @@ test('handoff blocks unlinked, unsafe and unreadable delivery before writing Hum
   }
 });
 
+test('handoff blocks a PR text that closes a spec with a keyword, and lets "Refs" and ordinary issues through', t => {
+  const { checkout, run, writeIssue } = handoffFixture(t);
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
+  writeFileSync(join(checkout, 'backlink-5.json'), JSON.stringify({ number: 5, labels: [{ name: 'spec' }] }));
+  writeFileSync(join(checkout, 'backlink-6.json'), JSON.stringify({ number: 6, labels: [{ name: 'bug' }] }));
+  const handoff = body => {
+    writeFileSync(join(checkout, 'handoff-fixture'), '');
+    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ body })));
+    return run('handoff', '1', '7', '--interval', '0');
+  };
+
+  for (const body of ['Closes #5', 'fixes: test/example#5 and more', 'Resolved #6, closed #5']) {
+    const blocked = handoff(body);
+    assert.equal(blocked.status, 1, `${body}: ${blocked.stdout}${blocked.stderr}`);
+    assert.match(blocked.stdout, /^blocker: BLOCKED: #5 is a spec .*write "Refs #5" instead/m, body);
+    assert.equal(existsSync(join(checkout, 'stored')), false, `${body}: Human review is not written`);
+  }
+  for (const body of ['Refs #5', 'Closes #6', 'Closes someone/else#5']) {
+    const passed = handoff(body);
+    assert.equal(passed.status, 0, `${body}: ${passed.stdout}${passed.stderr}`);
+  }
+});
 
 test('handoff passes a Refs PR beside the one closing PR through its own gate and leaves the issue status alone (#398)', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
