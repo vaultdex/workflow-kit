@@ -296,17 +296,18 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
 test('board check blocks a newer claim of another session of the same login unless handed over', t => {
   const { checkout, run, writeIssue } = fixture(t);
   writeIssue(issue());
+  const [older, newer] = [10, 1].map(minutes => new Date(Date.now() - minutes * 60_000).toISOString());
   const comment = (body, changes) => ({ id: 1, user: { login: 'worker', type: 'User' }, body, html_url: 'https://example.test/c1',
-    created_at: '2026-10-06T10:00:00Z', ...changes });
+    created_at: older, ...changes });
   const claim = (agent, session, changes) => comment(`Claim\n\nAgent: ${agent}, Session: ${session}`, changes);
   const check = (comments, ...args) => {
     writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
     return run('check', '1', ...args);
   };
 
-  const foreign = check([claim('claude', 'S1'), claim('codex', 'S2', { created_at: '2026-10-06T10:09:00Z' })], '--session', 'S1');
+  const foreign = check([claim('claude', 'S1'), claim('codex', 'S2', { created_at: newer })], '--session', 'S1');
   assert.equal(foreign.status, 1, foreign.stdout + foreign.stderr);
-  assert.match(foreign.stdout, /Agent codex, Session S2, 2026-10-06T10:09:00Z, https:\/\/example\.test\/c1/);
+  assert.match(foreign.stdout, new RegExp(`Agent codex, Session S2, ${newer}, https://example\\.test/c1`));
   assert.equal(check([claim('claude', 'S1')], '--session', 'S1').status, 0, 'own claim');
   assert.equal(check([claim('claude', 'S1'), claim('codex', 'S2')], '--session', 'S2').status, 0, 'equal times: the later comment wins');
   assert.equal(check([claim('claude', 'S1'), comment('Handover: S2')], '--session', 'S2').status, 0, 'handover');
@@ -336,7 +337,7 @@ test('board check blocks an issue another agent works on: its open PR, its branc
   const { checkout, run, writeIssue, queries } = fixture(t);
   const pr = (state, changes) => ({ number: 7, state, repository: { nameWithOwner: 'test/example' }, headRefName: 'codex/1-work', ...changes });
   const comments = (...bodies) => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(bodies.map((body, id) => ({ id, user: { login: 'worker', type: 'User' },
-    body, html_url: 'https://example.test/c1', created_at: '2026-10-06T10:00:00Z' }))));
+    body, html_url: 'https://example.test/c1', created_at: new Date(Date.now() - 600_000).toISOString() }))));
   const withWork = (prs, branches = []) => {
     writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: prs.length, nodes: prs } });
     writeFileSync(join(checkout, 'branches.json'), JSON.stringify(branches));
@@ -624,4 +625,29 @@ test('check lets a new session take over a claim without activity for staleHours
   assert.equal(run('check', '1', '--session', 'NEW').status, 0, 'a Human-review PR with conflicts is abandoned at once');
   work(1, 1, 'Human review');
   assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a clean one is not');
+});
+
+test('check and next let a new session take over a claim without PR and branch once the claim itself is older than staleHours', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
+  const base = issue();
+  // A field change just now: it must not renew the claim (#497).
+  const fresh = { ...base, updatedAt: hoursAgo(0), projectItems: { nodes: [{ ...base.projectItems.nodes[0], updatedAt: hoursAgo(0) }] } };
+  const claim = hours => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' },
+    body: 'Agent: claude, Session: OLD', html_url: 'https://example.test/c1', created_at: hoursAgo(hours) }]));
+  const startable = () => /^#1 /m.test(run('next', '--session', 'NEW').stdout.split('\n\n').find(part => !part.startsWith('Ready but not startable')) ?? '');
+  writeIssue(fresh);
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([{ ...fresh, issueFieldValues: { nodes: [] } }]));
+
+  claim(2);
+  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a fresh claim holds');
+  assert.equal(startable(), false, 'next does not offer what check blocks');
+  claim(7);
+  const taken = run('check', '1', '--session', 'NEW');
+  assert.equal(taken.status, 0, taken.stdout);
+  assert.match(taken.stdout, /Takeover of stale claim OLD/);
+  assert.equal(startable(), true, 'next offers what check allows');
+  writeFileSync(join(checkout, 'branches.json'), JSON.stringify(['claude/1-started']));
+  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a branch keeps holding it');
+  assert.equal(startable(), false, 'next sees the branch too');
 });
