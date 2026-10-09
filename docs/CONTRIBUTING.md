@@ -52,7 +52,8 @@ is BLOCKED with `finish #N first` while the own session has an issue in In progr
 Whatever the claims say, `check` also reports BLOCKED while an open PR closes the issue (a Draft too) or a branch `<agent>/<issue number>-…`
 exists, unless the newest claim is of `--session` (the own session resumes its own PR and branch); without `--session` nothing proves it. Both come
 with the one issue query. A branch without an open PR holds only while it has own commits against the base and its newest commit is younger than `staleHours`
-(one REST compare per branch); then BLOCKED names its agent and the commit age. An empty or older branch is a note (`Takeover of orphaned branch …` in the claim) (#504). Two sessions that check within seconds, before either has a claim or a branch, are not caught. Unreadable
+(one REST compare per branch); then BLOCKED names its agent and the commit age. An empty or older branch is a note (`Takeover of orphaned branch …` in the claim) (#504).
+Two sessions that check within seconds, before either has a claim or a branch, are not caught. Unreadable
 comments are UNKNOWN. Assignment stays no lock; this check only reports, and `status` and `handoff` do not read claims.
 
 **Claim-Alter und Sub-Issues.** Nur Information, kein neues Verdict und keine Erlaubnis zur Übernahme (die braucht

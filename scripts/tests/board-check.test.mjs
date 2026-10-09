@@ -369,7 +369,7 @@ test('board check blocks an issue another agent works on: its open PR, its branc
   withWork([], ['claude/12-other']);
   assert.equal(check('--session', 'S2').status, 0, 'a branch of another issue holds nothing');
 
-  // Vaultdex #1017: a branch without own commits, or one without an open PR and without a commit for staleHours (default 6), holds nothing (#504).
+  // #504: a branch without own commits, or one without an open PR and without a commit for staleHours (default 6), holds nothing.
   const branchWork = work => writeFileSync(join(checkout, 'branch-work.json'), JSON.stringify(work));
   withWork([], ['codex/1-empty']);
   branchWork({ 'codex/1-empty': { ahead: 0, hours: 99 } });
@@ -673,4 +673,7 @@ test('check and next let a new session take over a claim without PR and branch o
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');
   assert.equal(run('check', '1', '--session', 'NEW').status, 0, 'an orphaned branch without a claim holds nothing');
   assert.equal(startable(), true, 'next agrees');
+  writeFileSync(join(checkout, 'compare-404'), '');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 2, 'a base that does not exist is unknown');
+  assert.equal(startable(), false, 'next holds that issue and still answers');
 });

@@ -439,7 +439,7 @@ function workReasons(issue, session) {
   for (const branch of workBranches(issue).filter(branch => !heads.has(branch))) {
     const { ahead, idle } = branchWork(issue, branch), agent = branch.split('/')[0];
     if (!ahead) continue;
-    if (idle > staleHours * 3_600_000) notes.push(`orphaned branch ${branch} (agent ${agent}): no open PR, no commit for ${ago(idle)}; write "Takeover of orphaned branch ${branch}" in your claim comment and continue on it or branch anew`);
+    if (idle !== undefined && isStale(issue, idle)) notes.push(`orphaned branch ${branch} (agent ${agent}): no open PR, no commit for ${ago(idle)}; write "Takeover of orphaned branch ${branch}" in your claim comment and continue on it or branch anew`);
     else blocked.push(`branch ${branch} (agent ${agent}${idle === undefined ? '' : `, last commit ${ago(idle)} ago`}) belongs to this issue; ${own}`);
   }
   return { blocked, notes };
@@ -447,15 +447,17 @@ function workReasons(issue, session) {
 
 let defaultBranch;
 /**
- * Own commits of a branch against the issue's base and the age of its newest commit: one REST compare. The commit list is cut off at 250,
- * so `idle` is undefined then (that many commits are active work).
+ * Own commits of a branch against the issue's base and the age of its newest commit: one REST compare. The commits come oldest first, one page of 100:
+ * with more, `idle` is undefined (that many commits are active work). A compare that fails (no base) is an error of the caller: `check` is UNKNOWN, `next` holds that issue.
+ * ponytail: one compare per found branch, also per Ready issue in `next`, uncached; cache by branch if `next` gets slow.
+ * ponytail: over 100 commits the age is unknown and the branch holds; read the last page of the compare if that bites.
  */
 function branchWork(issue, branch) {
   const ref = name => name.split('/').map(encodeURIComponent).join('/');
   const base = baseOf(issue).branch || (defaultBranch ??= rest(`repos/${project.repository}`).default_branch);
-  const { ahead_by: ahead, commits = [] } = rest(`repos/${project.repository}/compare/${ref(base)}...${ref(branch)}`);
+  const { ahead_by: ahead, commits = [] } = rest(`repos/${project.repository}/compare/${ref(base)}...${ref(branch)}?per_page=100`);
   assert.ok(Number.isSafeInteger(ahead), `The comparison of ${branch} with ${base} is unreadable`);
-  const newest = commits.length === ahead ? Math.max(...commits.map(({ commit }) => Date.parse(commit.committer.date))) : NaN;
+  const newest = ahead && commits.length === ahead ? Date.parse(commits.at(-1).commit.committer.date) : NaN;
   return { ahead, idle: Number.isFinite(newest) ? Date.now() - newest : undefined };
 }
 

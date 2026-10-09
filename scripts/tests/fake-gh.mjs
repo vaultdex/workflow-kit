@@ -154,6 +154,7 @@ function api(argv, input, stdout, stderr, exit) {
       // A branch of an issue against its base (#504). branch-work.json: { BRANCH: { ahead, hours } } = own commits and the age of the newest; by default one fresh commit.
       const { ahead = 1, hours = 0 } = fs.existsSync('branch-work.json') ? JSON.parse(fs.readFileSync('branch-work.json'))[branchHead] ?? {} : {};
       fs.appendFileSync('calls', `compare ${parts.slice(4).join('/')}\n`);
+      if (fs.existsSync('compare-404')) { stderr('gh: Not Found (HTTP 404)\n'); exit(1); }
       stdout(JSON.stringify({ ahead_by: ahead, commits: Array.from({ length: ahead }, () => ({ commit: { committer: { date: new Date(Date.now() - hours * 3_600_000).toISOString() } } })) }));
       exit(0);
     }
