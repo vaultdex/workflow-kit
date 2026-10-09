@@ -2211,7 +2211,8 @@ async function merge() {
   const { headRefOid } = result.pr;
   let asynchronous = false;
   const mergeAsync = () => {
-    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/merge-async`, '-X', 'PUT', '-f', 'merge_action=direct_merge', '-f', 'merge_method=merge', '-f', `sha=${headRefOid}`],
+    // Without the version header GitHub answers 404 for a stacked PR (#492); direct_merge is still a valid merge_action with it. The result is read from the PR below.
+    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${number}/merge-async`, '-X', 'PUT', '-H', 'X-GitHub-Api-Version: 2026-03-10', '-f', 'merge_action=direct_merge', '-f', 'merge_method=merge', '-f', `sha=${headRefOid}`],
       { encoding: 'utf8', env: gh.env });
     asynchronous = true;
   };
