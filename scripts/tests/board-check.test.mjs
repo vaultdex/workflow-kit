@@ -363,11 +363,30 @@ test('board check blocks an issue another agent works on: its open PR, its branc
   withWork([], ['claude/1-first', 'claude/12-other', 'codex/10-1-nope', 'release/1-0']);
   const branch = check('--session', 'S2');
   assert.equal(branch.status, 1, branch.stdout);
-  assert.match(branch.stdout, /^- branch claude\/1-first belongs to this issue; no claim of session S2$/m);
+  assert.match(branch.stdout, /^- branch claude\/1-first \(agent claude, last commit 0m ago\) belongs to this issue; no claim of session S2$/m, 'the message names the agent and the age');
   assert.doesNotMatch(branch.stdout, /12-other|10-1-nope/, 'only <agent>/<number>- belongs to the issue');
   assert.match(branch.stdout, /^- branch release\/1-0 /m, 'any prefix names a branch of the issue');
   withWork([], ['claude/12-other']);
   assert.equal(check('--session', 'S2').status, 0, 'a branch of another issue holds nothing');
+
+  // Vaultdex #1017: a branch without own commits, or one without an open PR and without a commit for staleHours (default 6), holds nothing (#504).
+  const branchWork = work => writeFileSync(join(checkout, 'branch-work.json'), JSON.stringify(work));
+  withWork([], ['codex/1-empty']);
+  branchWork({ 'codex/1-empty': { ahead: 0, hours: 99 } });
+  const empty = check('--session', 'S2');
+  assert.equal(empty.status, 0, empty.stdout);
+  assert.doesNotMatch(empty.stdout, /codex\/1-empty/, 'an empty pointer to the base is no work');
+  withWork([], ['codex/1-old']);
+  branchWork({ 'codex/1-old': { ahead: 2, hours: 7 } });
+  const orphan = check('--session', 'S2');
+  assert.equal(orphan.status, 0, orphan.stdout);
+  assert.match(orphan.stdout, /^note: orphaned branch codex\/1-old \(agent codex\): no open PR, no commit for 7h 0m; write "Takeover of orphaned branch codex\/1-old" in your claim comment/m);
+  branchWork({ 'codex/1-old': { ahead: 2, hours: 5 } });
+  assert.match(check('--session', 'S2').stdout, /^- branch codex\/1-old \(agent codex, last commit 5h 0m ago\) belongs to this issue/m, 'a commit within staleHours still holds');
+  rmSync(join(checkout, 'calls'), { force: true });
+  check('--session', 'S2');
+  assert.equal(readFileSync(join(checkout, 'calls'), 'utf8'), 'compare main...codex/1-old\n', 'one compare per branch, against the default branch without a base setting');
+  rmSync(join(checkout, 'branch-work.json'));
 
   withWork([]);
   const sentence = 'Quota-Blocker aufgehoben: frischer board check ist STARTABLE. Agent: codex, Session: S1';
@@ -650,4 +669,8 @@ test('check and next let a new session take over a claim without PR and branch o
   writeFileSync(join(checkout, 'branches.json'), JSON.stringify(['claude/1-started']));
   assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a branch keeps holding it');
   assert.equal(startable(), false, 'next sees the branch too');
+  writeFileSync(join(checkout, 'branch-work.json'), JSON.stringify({ 'claude/1-started': { ahead: 1, hours: 7 } }));
+  writeFileSync(join(checkout, 'issues-comments.json'), '[]');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 0, 'an orphaned branch without a claim holds nothing');
+  assert.equal(startable(), true, 'next agrees');
 });

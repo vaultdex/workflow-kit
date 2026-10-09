@@ -149,6 +149,14 @@ function api(argv, input, stdout, stderr, exit) {
       stdout(fs.existsSync('stacks.json') ? fs.readFileSync('stacks.json') : '[]');
       exit(0);
     }
+    const branchHead = decodeURIComponent(parts.slice(4).join('/')).split('...')[1];
+    if (parts[3] === 'compare' && fs.existsSync('branches.json') && JSON.parse(fs.readFileSync('branches.json')).includes(branchHead)) {
+      // A branch of an issue against its base (#504). branch-work.json: { BRANCH: { ahead, hours } } = own commits and the age of the newest; by default one fresh commit.
+      const { ahead = 1, hours = 0 } = fs.existsSync('branch-work.json') ? JSON.parse(fs.readFileSync('branch-work.json'))[branchHead] ?? {} : {};
+      fs.appendFileSync('calls', `compare ${parts.slice(4).join('/')}\n`);
+      stdout(JSON.stringify({ ahead_by: ahead, commits: Array.from({ length: ahead }, () => ({ commit: { committer: { date: new Date(Date.now() - hours * 3_600_000).toISOString() } } })) }));
+      exit(0);
+    }
     if (parts[3] === 'compare') {
       // compare.json: { behind: commits the base gained, own: files of the PR, base: files of the base }; by default the base has not moved.
       const moved = fs.existsSync('compare.json') ? JSON.parse(fs.readFileSync('compare.json')) : { behind: 0, own: [], base: [] };
