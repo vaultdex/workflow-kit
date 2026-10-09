@@ -375,4 +375,37 @@ test('the Claude init handler fills the kit of the worktree named on stdin, not 
   assert.deepEqual([result.status, result.stdout], [0, ''], result.stderr);
   assert.ok(existsSync(rules), 'the kit of the agent worktree is initialized');
 });
+
+// Claude Code reads hooks once per session (#513): SessionStart keeps a fingerprint, SubagentStart compares it with the last fetched base.
+test('the Claude init handler warns a subagent when the base changed the hook settings since the session started', { skip: spawnSync(shell.posix, ['-c', 'exit 0']).status !== 0 && `${shell.posix} unavailable` }, async t => {
+  const temp = temporary(t, 'kit-fingerprint ');
+  const env = { ...isolatedGit(temp), CLAUDE_CONFIG_DIR: join(temp, 'claude') };
+  const git = async (cwd, ...a) => {
+    const result = await spawn('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...a], { cwd, env });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const origin = join(temp, 'origin'), project = join(temp, 'project');
+  mkdirSync(join(origin, '.claude'), { recursive: true });
+  await git(origin, 'init', '--quiet');
+  const settings = text => writeFileSync(join(origin, '.claude/settings.json'), text);
+  settings('{}');
+  await git(origin, 'add', '.');
+  await git(origin, 'commit', '--quiet', '-m', 'one');
+  await git(temp, 'clone', '--quiet', origin, project);
+  const [command] = new Set(handlers('.claude/settings.json', 'command'));
+  const hook = (hook_event_name, session_id, source) => spawn(shell.posix, ['-c', command], { cwd: project, env: { ...env, CLAUDE_PROJECT_DIR: project }, input: JSON.stringify({ hook_event_name, session_id, source, cwd: project }) });
+  const warns = async session => (await hook('SubagentStart', session)).stdout.includes('Hooks seit Session-Start geändert: Session neu starten');
+
+  await hook('SessionStart', 'old', 'startup');
+  assert.equal(await warns('old'), false, 'unchanged settings stay silent');
+  settings('{"changed":true}');
+  await git(origin, 'commit', '--quiet', '-am', 'two');
+  await git(project, 'fetch', '--quiet');
+  assert.equal(await warns('old'), true, 'a session that started before the change is warned');
+  assert.equal(await warns('unknown'), false, 'a session without fingerprint is not');
+  await hook('SessionStart', 'old', 'compact');
+  assert.equal(await warns('old'), true, 'a compaction does not reload hooks, so it keeps the fingerprint');
+  await hook('SessionStart', 'new', 'startup');
+  assert.equal(await warns('new'), false, 'a session that started after the change is not');
+});
 });
