@@ -286,6 +286,9 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
   for (const invalid of ['Wartet bis: bald nach dem Release', 'Wartet bis: release.', 'Wartet bis: foo.lock', 'Wartet bis: 2026-02-30T10:00Z', 'Wartet bis: 2999-01-01T00:00+02:00', 'Wartet bis:']) {
     assert.equal(check(invalid).status, 2, `${invalid} is unknown, never "no blocker"`);
   }
+  const decision = check('Wartet bis: Entscheidung Milan');
+  assert.equal(decision.status, 1, decision.stdout);
+  assert.ok(decision.stdout.includes('decision of Milan'), 'The open decision is named');
   writeFileSync(join(checkout, 'fail-rest'), '');
   assert.equal(check('Wartet bis: v1.2.3').status, 2, 'A failed tag lookup is unknown');
   rmSync(join(checkout, 'fail-rest'));

@@ -120,6 +120,19 @@ test('In progress requires a startable issue assigned to the authenticated user 
   assert.equal(run('status', '1', 'Ready').status, 0, 'Returning blocked work to Ready does not require assignment');
 });
 
+test('Status Ready is refused while a decision wait stands, and names it (#514)', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  writeIssue({ ...issue(), body: 'Wartet bis: Entscheidung Milan' });
+  for (const args of [['status', '1', 'Ready'], ['field', '1', 'Status', 'Ready']]) {
+    const result = run(...args);
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stdout, /decision of Milan/);
+  }
+  assert.equal(existsSync(join(checkout, 'mutations')), false, 'A refused transition does not mutate');
+  writeIssue(issue());
+  assert.equal(run('status', '1', 'Ready').status, 0, 'Without the line Ready works');
+});
+
 test('An open issue a human reopened leaves Done for In progress with a note; a closed one stays blocked (#510)', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const mutations = join(checkout, 'mutations');

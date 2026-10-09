@@ -43,6 +43,17 @@ test('next lists blocked and unreadable Ready issues apart from startable ones',
 });
 
 
+test('next reports a Ready issue with an open decision wait as a contradiction and does not start it (#514)', t => {
+  const { checkout, run } = fixture(t);
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([{ ...issue('Ready'), number: 1, issueFieldValues: { nodes: [] }, body: 'Wartet bis: Entscheidung Milan' }]));
+  const result = run('next');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const [startable, held] = result.stdout.split('\n\n');
+  assert.equal(startable.match(/^#\d+/gm), null, 'Not startable');
+  assert.ok(held.startsWith('Ready but not startable') && held.includes('#1') && held.includes('decision of Milan'), held);
+});
+
+
 test('next reads the PRs of predecessors in one lookup, for the candidates for a stack only', t => {
   const { checkout, run, queries } = fixture(t);
   const pr = { number: 5, state: 'OPEN', isDraft: false, isCrossRepository: false, repository: { nameWithOwner: 'test/example' }, baseRefName: 'main', headRefName: 'claude/5-base', headRefOid: 'abcdef1234' };
