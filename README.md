@@ -494,11 +494,12 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   `BRANCH`, `BEFORE_SHA`, `AFTER_SHA` and `EVENT=push` (for example to update release branches or run the board sweep).
   The commands run, after `setup`, in a worktree of their own (`<main checkout>-local-ci/work-push`) on `AFTER_SHA`, never in the
   runner's own checkout, which may be old: a file that only exists on the new state is there.
-- `kitPush` (list, next to `push`, read from `origin/main`) runs the same way when `main` of the kit moved, on `origin/main` of the
-  project, with `BRANCH=main` and `EVENT=kit` (`BEFORE_SHA`/`AFTER_SHA` are the kit's). The kit repository comes from `.gitmodules`
-  of `origin/main` (`.vendor/workflow-kit`), its head is read once per round like the project branches. Meant for `kit-pin.mjs`.
   The runner stores each branch head in `heads.json` next to its work folders once that branch's `push` is done, so a branch that
   moved while the runner was off is caught up at the next `--watch` start; without the file the first look is the baseline.
+- `kitPush` (list, next to `push`, read from `origin/main`) runs the same way when `main` of the kit moved (head stored in
+  `heads.json` as `kit:main`), on `origin/main` of the project, with `BRANCH=main` and `EVENT=kit` (`BEFORE_SHA`/`AFTER_SHA` are the
+  kit's). The kit repository comes from `.gitmodules` of `origin/main` (`.vendor/workflow-kit`), its head is read once per round
+  like the project branches. Meant for `kit-pin.mjs`.
 - With `localChecks` configured, `board.mjs reviews`, `wait`, `handoff` and `merge` require the head's `local-ci` commit
   status: missing or `pending` waits, `failure` and `error` are red, and only `success` passes.
   `localChecks`, `awaitApps`, `optionalReviewers` and `updateBranchChecks` are read from `.github/workflow-project.json` on the

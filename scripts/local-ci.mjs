@@ -23,7 +23,7 @@ export const matches = (paths, file) => paths.reduce((hit, path) => path.startsW
 /** Die Prüfungen, deren Filter mindestens eine geänderte Datei treffen. */
 export const select = (checks, files) => checks.filter(check => files.some(file => matches(check.paths, file)));
 
-/** `localChecks` aus .github/workflow-project.json: Pfad zu einer JSON-Datei mit checks, optional setup und push. `read(pfad)` liefert den Inhalt. */
+/** `localChecks` aus .github/workflow-project.json: Pfad zu einer JSON-Datei mit checks, optional setup, push und kitPush. `read(pfad)` liefert den Inhalt. */
 export function loadConfig(read) {
   const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
@@ -296,7 +296,7 @@ async function pushed(ctx, heads, saved, idle) {
   const kit = kitRepository(ctx);
   if (kit) try { seen('kit:main', ctx.api('GET', 'git/ref/heads/main', {}, kit).object.sha, { branch: 'main', kit: true }); } catch (error) { console.error(`push kit: ${error.message.split('\n')[0]}`); } // ein Fehler beim Kit hält die Projekt-Branches nicht auf
   save();
-  if (moved.length) await idle(); // die Befehle laufen im Projekt-Checkout: kein Platz holt dort gleichzeitig (Fetch) ab, wie bisher
+  if (moved.length) await idle(); // Fetch und Worktree entstehen im Projekt-Checkout: kein Platz holt dort gleichzeitig ab, wie bisher
   for (const { key, branch, before, after, kit } of moved) {
     const work = `${ctx.work}-push`;
     let config, commands;
