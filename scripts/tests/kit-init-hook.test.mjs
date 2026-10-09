@@ -356,7 +356,10 @@ test('the Claude init handler fills the kit of the worktree named on stdin, not 
   const rules = join(worktree, '.vendor/workflow-kit/AGENT_RULES.md');
   assert.ok(!existsSync(rules), 'a worktree created like Claude Code does starts without the kit');
 
-  const [command] = handlers('.claude/settings.json', 'command');
+  // SessionStart and SubagentStart carry the same handler text, so one run covers both.
+  const commands = new Set(handlers('.claude/settings.json', 'command'));
+  assert.equal(commands.size, 1);
+  const [command] = commands;
   const result = await spawn(shell.posix, ['-c', command], { cwd: project, env: { ...env, CLAUDE_PROJECT_DIR: project }, input: JSON.stringify({ hook_event_name: 'SubagentStart', cwd: worktree }) });
   assert.deepEqual([result.status, result.stdout], [0, ''], result.stderr);
   assert.ok(existsSync(rules), 'the kit of the agent worktree is initialized');
