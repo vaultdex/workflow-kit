@@ -1,7 +1,7 @@
 // Lokale CI mit echtem Git (Merge-Stand wird aus origin/<base> und refs/pull/N/head gebaut) und nachgebautem gh: Filter, Auswahl, Ablauf der Status, Abbruch, Basis-Wechsel.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { checkPullRequest, gitBash, loadConfig, loadSlots, lock, mainSlots, matches, select, watch } from '../local-ci.mjs';
@@ -122,6 +122,27 @@ test('ohne betroffene Prüfung bleibt es bei einem grünen local-ci; ein fehlges
   assert.equal((await checkPullRequest(f.ctx, f.pr)).ok, false);
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'Backend: failure', 'local-ci: failure']);
   assert.ok(!existsSync(join(f.ctx.work, 'gelaufen')));
+});
+
+test('.node-version des geprüften Stands wählt die Node-Version über fnm; ohne Datei ändert sich nichts, ohne fnm bleibt es bei der des Läufers mit Hinweis', async t => {
+  const config = { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['echo gelaufen'], timeoutMinutes: 1 }] };
+  const withVersion = fixture(t, config), without = fixture(t, config);
+  const { root } = withVersion, git = withVersion.ctx.git;
+  git(root, 'checkout', 'feature');
+  writeFileSync(join(root, '.node-version'), '26.1.2\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-m', 'node');
+  git(root, 'push', '-q', 'origin', 'feature:refs/pull/1/head');
+  withVersion.pr.head.sha = git(root, 'rev-parse', 'HEAD');
+  const fnm = join(withVersion.dir, 'fnm').replace(/\\/g, '/'), calls = `${fnm}.log`; // eingeschleust statt echtem fnm: merkt sich "install V" und "exec V" und führt den Befehl aus
+  writeFileSync(fnm, '#!/bin/sh\necho "$1 ${2#--using=}" >> "$0.log"\n[ "$1" = exec ] && { shift 3; exec "$@"; }\nexit 0\n', { mode: 0o755 }); // ausführbar, sonst scheitert der Aufruf unter Linux
+  assert.equal((await checkPullRequest({ ...withVersion.ctx, fnm }, withVersion.pr)).ok, true);
+  assert.deepEqual(readFileSync(calls, 'utf8').trim().split(/\r?\n/), ['install 26.1.2', 'exec 26.1.2']);
+  assert.equal((await checkPullRequest({ ...without.ctx, fnm }, without.pr)).ok, true);
+  assert.ok(!existsSync(`${without.dir.replace(/\\/g, '/')}/fnm.log`), 'ohne .node-version wird fnm nicht gerufen');
+  assert.equal((await checkPullRequest(withVersion.ctx, withVersion.pr)).ok, true); // ohne fnm
+  const log = readFileSync(join(withVersion.ctx.logs, readdirSync(withVersion.ctx.logs).find(name => name.includes('Backend'))), 'utf8');
+  assert.match(log, /\.node-version nennt 26\.1\.2, aber fnm fehlt/);
 });
 
 test('die Prüfliste kommt vom Ziel-Branch auf origin, weder aus dem PR noch aus dem eigenen Checkout; ein neuer Stand dort gilt beim nächsten Durchlauf', async t => {
