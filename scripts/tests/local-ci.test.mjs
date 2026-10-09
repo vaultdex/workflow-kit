@@ -135,7 +135,7 @@ test('.node-version des geprüften Stands wählt die Node-Version über fnm; ohn
   git(root, 'push', '-q', 'origin', 'feature:refs/pull/1/head');
   withVersion.pr.head.sha = git(root, 'rev-parse', 'HEAD');
   const fnm = join(withVersion.dir, 'fnm').replace(/\\/g, '/'), calls = `${fnm}.log`; // eingeschleust statt echtem fnm: merkt sich "install V" und "exec V" und führt den Befehl aus
-  writeFileSync(fnm, '#!/bin/sh\necho "$1 ${2#--using=}" >> "$0.log"\n[ "$1" = exec ] && { shift 3; exec "$@"; }\nexit 0\n');
+  writeFileSync(fnm, '#!/bin/sh\necho "$1 ${2#--using=}" >> "$0.log"\n[ "$1" = exec ] && { shift 3; exec "$@"; }\nexit 0\n', { mode: 0o755 }); // ausführbar, sonst scheitert der Aufruf unter Linux
   assert.equal((await checkPullRequest({ ...withVersion.ctx, fnm }, withVersion.pr)).ok, true);
   assert.deepEqual(readFileSync(calls, 'utf8').trim().split(/\r?\n/), ['install 26.1.2', 'exec 26.1.2']);
   assert.equal((await checkPullRequest({ ...without.ctx, fnm }, without.pr)).ok, true);
