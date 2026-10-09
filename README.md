@@ -161,7 +161,7 @@ and then work in that directory, their relative paths (changed files given to `a
 - `--help` or `-h` (any command) prints the usage and exits 0 without calling GitHub. A writing command (`status`, `priority`, `field`, `new`,
   `block`, `sub`, `link`, `body`, `body-replace`, `ready`, `handoff`, `merge`, `sweep`) refuses any flag (`--flag` or `-f`) and any extra word it does not
   take with the usage line (exit 2) before it reads or writes anything. `field` and `status ISSUE "Automated review"` take further words of their own.
-- `sweep` (merge loop or chief session, at their usual rhythm): sets every Human-review issue whose open PR has merge conflicts (DIRTY) back to Automated review with a comment, and closes every open issue whose linked PR (same repository) is merged into `release/**` (GitHub closes only for the default branch) with a comment, one line each, else `clean`; see [parallel-drivers.md](docs/parallel-drivers.md).
+- `sweep` (merge loop or chief session, at their usual rhythm): sets every Human-review issue whose open PR has merge conflicts (DIRTY) back to Automated review with a comment, and closes every open issue whose linked PR (same repository) is merged into `release/**` (GitHub closes only for the default branch) with a comment, unless a human reopened it after the merge (then it stays open and is named), one line each, else `clean`; see [parallel-drivers.md](docs/parallel-drivers.md).
   To run it without a person, copy [docs/board-sweep.yml](docs/board-sweep.yml) to `.github/workflows/board-sweep.yml`: it runs `sweep` on every push to
   the PR bases (`main`, `release/**`; adjust) and hourly. It needs the secret `BOARD_TOKEN` (a token that may write the Project and issues; `GITHUB_TOKEN` cannot).
   The reset issues then show up in `next` as stale work (below).
@@ -231,7 +231,8 @@ and then work in that directory, their relative paths (changed files given to `a
   of `body` apply. No match or several matches are refused with the reason (exit 1, nothing
   written; several matches are listed by line); an empty `--from` text, unreadable files and API
   errors exit 2.
-- `link ISSUE PR`: connect the issue natively to the PR (the GraphQL
+- `link ISSUE PR [--refs]` (`--refs`: only the backlink comment, no native link; `handoff ISSUE PR --refs` then
+  skips the native-link requirement like a partial PR): connect the issue natively to the PR (the GraphQL
   `addCloseIssueReferences` mutation behind a closing keyword, which acts only on the
   default branch) and read `closingIssuesReferences` back. A Draft PR works; an existing
   connection is a success without a write; the read-back after the write is repeated up to

@@ -45,6 +45,22 @@ test('sweep sends a Human-review issue with a conflicting PR back to Automated r
   const mutations = readFileSync(join(checkout, 'mutations'), 'utf8');
   assert.ok(mutations.indexOf('addComment') < mutations.indexOf('closeIssue') && mutations.includes('stateReason:COMPLETED'));
 
+  // A reopen after the merge keeps the issue open and is named; one before the merge does not count (#510).
+  rmSync(join(checkout, 'mutation-targets'), { force: true });
+  rmSync(join(checkout, 'mutations'), { force: true });
+  const reopen = created_at => writeFileSync(join(checkout, 'events-5.json'), JSON.stringify([{ event: 'closed', created_at: '2026-10-09T12:00:00Z' }, { event: 'reopened', created_at }]));
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([row(5, 'Done', [merged({ mergedAt: '2026-10-09T10:00:00Z' })])]));
+  reopen('2026-10-09T10:05:00Z');
+  const kept = run('sweep');
+  assert.equal(kept.status, 0, kept.stdout + kept.stderr);
+  assert.match(kept.stdout, /^#5 stays open: reopened 2026-10-09T10:05:00Z after PR #70 was merged$/m);
+  assert.equal(existsSync(join(checkout, 'mutations')), false, 'a reopened issue is not written');
+  reopen('2026-10-09T09:00:00Z');
+  assert.match(run('sweep').stdout, /^#5 closed: delivered with PR #70/m);
+  rmSync(join(checkout, 'events-5.json'));
+  rmSync(join(checkout, 'mutation-targets'), { force: true });
+  rmSync(join(checkout, 'mutations'), { force: true });
+
   // A spec is never closed by the sweep, whatever PR was delivered (the project's own label counts too).
   rmSync(join(checkout, 'mutation-targets'), { force: true });
   untouched('a delivered spec', [{ ...row(9, 'Human review', [merged()]), labels: { nodes: [{ name: 'Spec' }] } }]);

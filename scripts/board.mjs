@@ -640,7 +640,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
 
 /**
  * Human review means mergeable (docs/parallel-drivers.md): a Human-review issue whose open PR is DIRTY goes back to "Automated review" with a comment.
- * An open issue (never a spec) whose linked PR of this repository is merged into release/** is commented and closed as completed.
+ * An open issue (never a spec) whose linked PR of this repository is merged into release/** is commented and closed as completed, unless a human reopened it after the merge.
  * ponytail: search cannot filter by Project status, so it reads every open issue (100 per page); UNKNOWN (still computing) waits for the next sweep.
  */
 function sweep() {
@@ -650,7 +650,7 @@ function sweep() {
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{id number
       projectItems(first:100){nodes{id project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}
       labels(first:20){nodes{name}}
-      closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number url state merged baseRefName mergeStateStatus headRefName repository{nameWithOwner}}}}}}}`,
+      closedByPullRequestsReferences(first:10,includeClosedPrs:true){totalCount nodes{number url state merged mergedAt baseRefName mergeStateStatus headRefName repository{nameWithOwner}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open`, ...(after && { after }) });
     for (const issue of search.nodes) {
       const linked = issue.closedByPullRequestsReferences;
@@ -659,6 +659,14 @@ function sweep() {
       // ponytail: reads the first 10 linked PRs; a release PR behind them is missed, never an error.
       // A spec stays open until a human accepts it, however many of its tickets are delivered.
       const delivered = !isSpec(issue) && own.find(node => node.merged && node.baseRefName.startsWith('release/'));
+      // A human reopened it after the merge: closing it again would undo that (#510). REST, only for the issues that would be closed.
+      const reopened = delivered && restAll(`repos/${project.repository}/issues/${issue.number}/events`)
+        .findLast(event => event.event === 'reopened' && Date.parse(event.created_at) > Date.parse(delivered.mergedAt));
+      if (reopened) {
+        console.log(`#${issue.number} stays open: reopened ${reopened.created_at} after PR #${delivered.number} was merged`);
+        resets++;
+        continue;
+      }
       if (delivered) {
         graphql('mutation($issue:ID!,$body:String!){addComment(input:{subjectId:$issue,body:$body}){clientMutationId}}', { issue: issue.id,
           body: `Geliefert mit #${delivered.number} in \`${delivered.baseRefName}\`. Der Release-PR nach \`main\` veröffentlicht die Version.` });
@@ -807,8 +815,12 @@ function guardOption(issue, { fieldName, option }) {
       `Assign yourself first: gh issue edit ${number} --repo ${project.repository} --add-assignee "@me". Verify session ownership before assigning.`);
     // A refusal is an error like the others: its verdict lines become the one ERROR line instead of a second output format.
     const log = console.log, verdict = [];
+    // An open issue in Done was reopened by a human (a merge closes it): it may leave Done, with a note (#510). A closed one stays blocked.
+    const wasDone = issue.state === 'OPEN' && projectItem(issue)?.status?.name === 'Done';
+    const judged = wasDone ? { ...issue, projectItems: { nodes: issue.projectItems.nodes.map(item => item === projectItem(issue) ? { ...item, status: { name: 'Ready' } } : item) } } : issue;
     console.log = (...parts) => verdict.push(parts.join(' '));
-    try { if (!mayStart(check(issue))) throw new Error(verdict.join('; ')); } finally { console.log = log; }
+    try { if (!mayStart(check(judged))) throw new Error(verdict.join('; ')); } finally { console.log = log; }
+    if (wasDone) log(`note: #${issue.number} is open again and was Done; it moves to In progress`);
   }
   if (fieldName === 'Status' && option.name === 'Automated review') {
     verifyBacklinks(issue);
@@ -1764,18 +1776,19 @@ function bodyReplace() {
 }
 
 /** Connect the issue natively to the PR (what a closing keyword does only on the default branch), post the backlink comment `status` requires, and read both back. */
-const link = () => linkIssue(number, Number(value));
-function linkIssue(issueNumber, prNumber) {
+const link = () => linkIssue(number, Number(value), process.argv.includes('--refs'));
+/** `refsOnly` (link --refs): the PR only names the issue, so no native link; the backlink comment alone (#510). */
+function linkIssue(issueNumber, prNumber, refsOnly) {
   const issue = readIssue(false, issueNumber);
   assert.ok(issue?.id, 'Issue identity is unreadable');
   // The backlink comment belongs on an open issue (the guard requires one); refuse before any write instead of half-way.
   assert.equal(issue.state, 'OPEN', `#${issueNumber} is not an open issue`);
-  assert.ok(!isSpec(issue), specRefusal(issueNumber, `a PR must not close it, so it is not linked natively (use "Refs #${issueNumber}")`));
+  assert.ok(refsOnly || !isSpec(issue), specRefusal(issueNumber, `a PR must not close it, so it is not linked natively (use "Refs #${issueNumber}": link ${issueNumber} PR --refs)`));
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     pullRequest(number:$number){id number state url headRefOid}}}`, { owner, name, number: prNumber }).repository;
   assert.ok(pr?.id && pr.number === prNumber && pr.state === 'OPEN', `#${prNumber} is not an open pull request of ${project.repository}`);
   // Already connected is a success without a write; a Draft PR can be connected too.
-  if (!connectedIssues(pr, true).has(issue.id)) {
+  if (!refsOnly && !connectedIssues(pr, true).has(issue.id)) {
     graphql('mutation($issue:ID!,$pr:ID!){addCloseIssueReferences(input:{issueId:$issue,pullRequestIds:[$pr]}){clientMutationId}}',
       { issue: issue.id, pr: pr.id });
     // GitHub shows the new connection with a delay (seen live: the first read-back right after the write was empty).
@@ -1785,7 +1798,7 @@ function linkIssue(issueNumber, prNumber) {
       sleep(1);
     }
   }
-  console.log(`#${issueNumber} is natively linked to PR #${prNumber}`);
+  console.log(refsOnly ? `#${issueNumber} is named by PR #${prNumber} (Refs, no native link)` : `#${issueNumber} is natively linked to PR #${prNumber}`);
   postBacklink(issueNumber, pr.url);
 }
 
@@ -2055,7 +2068,8 @@ function handoff() {
   const prior = handoffIssueReasons(issue, viewer, undefined, currentPrNumber);
   if (!prior) return;
   // A partial PR (see isPartialPr) passes the PR gate without a native link and leaves the issue's status alone: the closing PR hands the issue off.
-  const partial = isPartialPr(issue, currentPrNumber);
+  // `handoff --refs` is the same for a PR that only names the issue (#510).
+  const partial = process.argv.includes('--refs') || isPartialPr(issue, currentPrNumber);
   const pr = handoffPr(issue.id, viewer, undefined, prior, partial);
   if (!pr) return;
   if (partial) return console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid} (partial PR: the issue status stays, the closing PR hands it off)`);
@@ -2609,11 +2623,11 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next [--session ID] | sweep 
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
   + ' | quota-wait [--max-minutes N]'
-  + ' | handoff ISSUE PR [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] (needs the comment "## Übergabe" with "Head: <sha>" on the PR, not the issue: gh pr comment PR --body-file FILE)'
+  + ' | handoff ISSUE PR [--refs] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] (needs the comment "## Übergabe" with "Head: <sha>" on the PR, not the issue: gh pr comment PR --body-file FILE)'
   + ' | merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
   + ' | stack-sync TOP'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
-  + ' | link ISSUE PR | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
+  + ' | link ISSUE PR [--refs] | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // --help (-h) is the one flag that never writes: usage on stdout, success.
 if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
   console.log(usage);
@@ -2621,10 +2635,10 @@ if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
 }
 // A writing command takes only its own flags (value 1: followed by a value) and as many plain words as it names (the issue or PR
 // included); any other argument is a mistake that must not reach a write. `field` and `status ISSUE "Automated review"` check their own trailing words.
-const writeArgs = { sweep: { words: 0 }, status: { words: 2 }, priority: { words: 2 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2 },
+const writeArgs = { sweep: { words: 0 }, status: { words: 2 }, priority: { words: 2 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2, flags: { '--refs': 0 } },
   body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
   new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1, '--status': 1 } },
-  ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1 } },
+  ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1, '--refs': 0 } },
   merge: { words: 1, flags: { '--stack': 0, '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } }, 'stack-sync': { words: 1 } };
 function refusesArguments() {
   const { words, flags = {} } = writeArgs[command], args = process.argv.slice(3);

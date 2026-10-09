@@ -333,6 +333,9 @@ connection and, if no comment with the PR's URL exists yet, that comment, read b
 afterwards. A second run writes nothing twice. `status ISSUE "Automated review" PR`
 runs the same logic for a missing backlink on an issue of this repository, so `link`
 is not needed beforehand; only a failing link or read-back refuses.
+A PR that does not deliver the issue (for example a test fix for a proof issue) is only named: run
+`board.mjs link ISSUE PR --refs` first (backlink comment, no native link, so the merge does not close the issue);
+`status … "Automated review"` then finds the comment, and `handoff ISSUE PR --refs` needs no native link.
 
 Before Automated review, run `board.mjs status ISSUE "Automated review" PR
 [OTHER_ISSUE...]` with the PR number and all other issues it delivers in this
