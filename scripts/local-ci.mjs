@@ -29,14 +29,15 @@ const SLOTS_MESSAGE = 'localChecks: "slots" muss eine ganze Zahl ab 1 sein';
 export function loadConfig(read) {
   const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
-  const { checks, setup = [], push = [], kitPush = [], slots = 1, riskPaths } = JSON.parse(read(project.localChecks));
+  const { checks, setup = [], push = [], kitPush = [], slots = 1, riskPaths, baseRecheck } = JSON.parse(read(project.localChecks));
   assert.ok(Number.isInteger(slots) && slots >= 1, SLOTS_MESSAGE);
   assert.ok(riskPaths === undefined || riskPaths.every?.(path => typeof path === 'string'), 'localChecks: "riskPaths" muss eine Liste von Pfaden sein');
+  assert.ok(baseRecheck === undefined || typeof baseRecheck === 'string', 'localChecks: "baseRecheck" muss ein Befehl (Text) sein');
   for (const check of checks) {
     assert.ok(check.context && check.paths?.every?.(path => typeof path === 'string') && check.run?.length && check.timeoutMinutes > 0,
       `localChecks: "${check.context}" braucht context, paths, run und timeoutMinutes`);
   }
-  return { repository: project.repository, checks, setup, push, kitPush, slots, riskPaths };
+  return { repository: project.repository, checks, setup, push, kitPush, slots, riskPaths, baseRecheck };
 }
 
 /** Die Einstellung `localCiAfterApps` vom Ziel-Branch: ohne sie (oder ohne die belegt fehlende Datei dort, das meldet dann der Lauf selbst) null, der PR startet wie bisher. Ein Fetch- oder anderer Lesefehler wirft: Er gilt nicht als ausgeschaltete Einstellung. */
@@ -221,11 +222,13 @@ export async function checkPullRequest(ctx, pr) {
   try {
     report(AGGREGATE, 'pending', `Prüfung läuft auf ${host}`);
     let config, env, files, base;
+    const redFile = join(ctx.logs, `pr${pr.number}-${sha.slice(0, 7)}-red-tests.txt`), baseRedFile = redFile.replace('-red-', '-base-red-');
     const aggregate = (result, text) => report(AGGREGATE, result, base ? `${baseMark(base)}: ${text}` : text); // die Basis gehört in jeden Endstand, sonst gälte er nach einem Merge in den Ziel-Branch weiter
     try {
       ({ base, files } = await checkout(ctx, pr));
       config = branchConfig(ctx, pr.base.ref, base); // bei jedem Durchlauf neu vom Ziel-Branch, vom Commit des Merge-Stands; fehlt sie dort, wird der PR übersprungen
       env = { ...process.env, BASE_SHA: base, BASE_REF: pr.base.ref, HEAD_REF: pr.head.ref, EVENT: 'pull_request' };
+      if (config.baseRecheck) env.LOCAL_CI_RED_TESTS = redFile; // die Prüfungen tragen hier ihre roten Tests ein (je Zeile einer)
     } catch (error) {
       base ??= error.base;
       if (error.moved) moved = true; // finally schließt den Status ohne rotes Ergebnis
@@ -243,6 +246,7 @@ export async function checkPullRequest(ctx, pr) {
     }
     for (const check of selected) report(check.context, 'pending', `Läuft auf ${host}`);
     mkdirSync(ctx.logs, { recursive: true });
+    if (config.baseRecheck) writeFileSync(redFile, '');
     const run = async (name, commands, minutes) => {
       const log = join(ctx.logs, `pr${pr.number}-${sha.slice(0, 7)}-${name.replace(/[^\w.-]+/g, '-')}.log`), begun = Date.now(), end = begun + minutes * 60_000;
       writeFileSync(log, '');
@@ -266,9 +270,25 @@ export async function checkPullRequest(ctx, pr) {
       if (result[0] !== 'success') failed.push(check.context);
       report(check.context, ...result);
     }
+    let baseRed = []; // rote Tests des PRs, die auch am Kopf der Basis rot sind
+    if (!state.aborted && failed.length && config.baseRecheck) {
+      const red = [...new Set(readFileSync(redFile, 'utf8').split(/\r?\n/).filter(Boolean))];
+      if (red.length) { // nur die roten Tests, einmal; der Befehl schreibt die dort weiter roten nach LOCAL_CI_BASE_RED_TESTS. Ein Fehler hier ändert das Ergebnis nicht.
+        worktreeAt(ctx, work, base);
+        writeFileSync(baseRedFile, '');
+        env.LOCAL_CI_BASE_RED_TESTS = baseRedFile;
+        const minutes = Math.max(...selected.map(check => check.timeoutMinutes));
+        const ready = config.setup.length ? await run('setup-base', config.setup, 60) : ['success'];
+        if (ready?.[0] === 'success') await run('base-recheck', [config.baseRecheck], minutes);
+        const still = readFileSync(baseRedFile, 'utf8').split(/\r?\n/);
+        baseRed = red.filter(test => still.includes(test));
+      }
+    }
     if (!state.aborted) {
       ok = !failed.length;
-      aggregate(ok ? 'success' : 'failure', ok ? `${selected.length} Prüfungen grün in ${took()} auf ${host}` : `${failed.length} von ${selected.length} rot: ${failed.join(', ')}`);
+      const summary = ok ? `${selected.length} Prüfungen grün in ${took()} auf ${host}` : `${failed.length} von ${selected.length} rot: ${failed.join(', ')}`;
+      aggregate(ok ? 'success' : 'failure', baseRed.length ? `Basis rot: ${baseRed.join(', ')}; ${summary}` : summary);
+      if (baseRed.length) try { api('POST', `issues/${pr.number}/comments`, { body: `Basis rot: ${baseRed.join(', ')}\n\nDiese Tests sind schon am Kopf von ${pr.base.ref} (${base.slice(0, 12)}) rot, sie stammen nicht von diesem PR. Weitere rote Prüfungen stehen im Status.` }); } catch { /* nur ein Hinweis */ }
     }
   } finally {
     clearInterval(watcher);

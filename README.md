@@ -472,6 +472,12 @@ which is untrusted, and not from its own checkout either (only the `repository` 
 - `riskPaths` (list, same rules as `paths`, next to `checks` in the `localChecks` file) and `"slow": true` on a check: a slow check
   selected by its `paths` runs only when a changed file matches `riskPaths`; otherwise it reports `success` with
   "übersprungen: risikoarm" and does not start. Without `riskPaths` slow checks always run (nothing changes).
+- `baseRecheck` (command, next to `checks` in the `localChecks` file): tells whether a red PR run is the base's fault. The runner sets
+  `LOCAL_CI_RED_TESTS` for the checks; a check appends the names of its failed tests to that file, one per line. If the run is red and
+  the file has names, the runner resets the worktree to the base commit, runs `setup` and then `baseRecheck` once (timeout: the longest
+  selected check) with `LOCAL_CI_RED_TESTS` (input) and `LOCAL_CI_BASE_RED_TESTS` (output: the command writes the names that are still red there).
+  Tests red on both sides appear as "Basis rot: <tests>" right after the "Basis <sha>" stamp of the `local-ci` description and in a PR comment (once per run). Without `baseRecheck`
+  (or without names) nothing changes; a failing recheck never changes the result. Vaultdex' `scripts/red-tests.mjs` can supply the names.
 - `paths` use GitHub's rules for `*`, `**` and `!` only (no `?` or `[…]`): in order, a later match wins, `!` takes a file
   back out, `*` stays within a folder, `**` goes below it. A check runs when one changed file of the PR matches.
 - Per PR the script builds the merge state itself in its own worktree (`<main checkout>-local-ci/work`; not under `.git`,
