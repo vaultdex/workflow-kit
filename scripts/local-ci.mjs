@@ -37,10 +37,10 @@ export function loadConfig(read) {
   return { repository: project.repository, checks, setup, push, kitPush, slots, riskPaths };
 }
 
-/** Die Einstellung `localCiAfterApps` vom Ziel-Branch: ohne sie (oder ohne die Datei dort, das meldet dann der Lauf selbst) null, der PR startet wie bisher. Ein Fetch- oder Lesefehler wirft: Er gilt nicht als ausgeschaltete Einstellung. */
+/** Die Einstellung `localCiAfterApps` vom Ziel-Branch: ohne sie (oder ohne die belegt fehlende Datei dort, das meldet dann der Lauf selbst) null, der PR startet wie bisher. Ein Fetch- oder anderer Lesefehler wirft: Er gilt nicht als ausgeschaltete Einstellung. */
 const waitSettings = (ctx, branch) => branchConfig(ctx, branch, undefined, read => {
   let text;
-  try { text = read('.github/workflow-project.json'); } catch { return null; }
+  try { text = read('.github/workflow-project.json'); } catch (error) { if (error.missing) return null; throw error; }
   const { localCiAfterApps, awaitApps = [] } = JSON.parse(text);
   return localCiAfterApps ? { apps: awaitApps } : null;
 });
@@ -73,8 +73,14 @@ export const mainSlots = ctx => branchConfig(ctx, 'main', undefined, loadSlots);
 export function branchConfig({ git, root }, branch, sha, load = loadConfig) {
   // Mit `sha` (die Basis, gegen die gemerged wurde) kein neuer Fetch: Prüfliste und Merge-Stand stammen aus demselben Commit.
   if (!sha) try { git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`); } catch { throw new Error(`origin/${branch} ist nicht abrufbar`); }
+  const ref = sha ?? `origin/${branch}`;
   return load(path => {
-    try { return git(root, 'show', `${sha ?? `origin/${branch}`}:${path}`); } catch { throw new Error(`${path} fehlt auf origin/${branch}`); }
+    try { return git(root, 'show', `${ref}:${path}`); } catch (error) {
+      // Nur ein leerer Baum-Eintrag belegt Fehlen (`missing`); jeder andere Lesefehler wirft weiter, auch wenn der Beleg selbst scheitert.
+      let listed = true;
+      try { listed = Boolean(git(root, 'ls-tree', '--name-only', ref, '--', path).trim()); } catch { /* Beleg nicht möglich: kein Fehlen */ }
+      throw Object.assign(new Error(listed ? `${path} nicht lesbar auf origin/${branch}: ${String(error.message).split('\n')[0]}` : `${path} fehlt auf origin/${branch}`), { missing: !listed });
+    }
   });
 }
 

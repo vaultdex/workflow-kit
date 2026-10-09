@@ -409,6 +409,28 @@ test('localCiAfterApps: eine übersprungene Sonar-Analyse und ein einmaliger Fet
   assert.deepEqual(f.summary(), ['local-ci: pending', 'local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success'], 'Fetchfehler: erst gemeldet und gewartet, dann geprüft');
 });
 
+test('localCiAfterApps: ein einmaliger Lesefehler der vorhandenen Einstellung gilt nicht als ausgeschaltet, die Sonar-Prüfung folgt in der nächsten Runde', async t => {
+  const f = afterAppsFixture(t, [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }]);
+  f.server.checkRuns = [];
+  let failed = false; // der erste `git show` der Projektdatei scheitert, der Beleg `ls-tree` und alle späteren Lesungen klappen
+  const git = (cwd, ...args) => { if (args[0] === 'show' && !failed) { failed = true; throw new Error('Lesefehler'); } return f.ctx.git(cwd, ...args); };
+  await watch({ ...f.ctx, git, pollMs: 1 }, { rounds: 2 });
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'local-ci: pending'], 'erst nicht lesbar, dann wartet auf Sonar: nie ein Prüfbefehl');
+  assert.match(f.posts[0].description, /nicht lesbar/);
+
+  f.server.checkRuns = sonarRuns('[0 New issues](x)');
+  f.posts.length = 0;
+  await watch({ ...f.ctx, pollMs: 1 }, { rounds: 2 });
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success'], 'Sonar 0: genau ein Lauf');
+
+  const gone = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }] });
+  gone.ctx.git(gone.root, 'rm', '-q', '.github/workflow-project.json');
+  gone.ctx.git(gone.root, 'commit', '-qm', 'ohne Projektdatei');
+  gone.ctx.git(gone.root, 'push', '-q', 'origin', 'main');
+  await watch({ ...gone.ctx, pollMs: 1 }, { rounds: 1 });
+  assert.match(gone.posts.at(-1).description, /fehlt auf origin\/main/, 'belegt fehlende Datei: bisherige Meldung im Lauf');
+});
+
 test('localCiAfterApps: ein Folgehead nach einem Push-Abbruch wartet wie der erste und läuft nach Sonar 0 genau einmal', async t => {
   const f = afterAppsFixture(t, [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1'], timeoutMinutes: 1 }]);
   f.ctx.git(f.root, 'checkout', '-q', 'feature');
