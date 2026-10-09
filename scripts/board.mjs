@@ -366,11 +366,12 @@ const validTagName = tag => tag !== '' && !/[\x00-\x1f\x7f ~^:?*[\\]|\.\.|@\{|\/
   && tag.split('/').every(part => !part.startsWith('.') && !part.endsWith('.lock'));
 
 /**
- * Zeilen `Wartet bis: <Tag | JJJJ-MM-TTThh:mmZ>` im Issue-Text (üblich unter "Abhängigkeiten und Wiederaufnahme"): ein
+ * Zeilen `Wartet bis: <Tag | JJJJ-MM-TTThh:mmZ | Entscheidung NAME>` im Issue-Text (üblich unter "Abhängigkeiten und Wiederaufnahme"): ein
  * fehlender Tag oder ein künftiger UTC-Zeitpunkt hält das Issue wie ein nativer Blocker; was nicht lesbar ist, zählt als
  * unbekannt, nie als frei. Bewusst ohne Markdown-Abschnittslogik: jede solche Zeile zählt, auch in Code oder unter anderer
  * Überschrift. Ein Fehlgriff blockiert sichtbar (mit Grund), statt eine Bedingung still zu überlesen.
  */
+const decisionWait = 'waits for the decision of';
 function waitReasons(body) {
   const blocked = [], unknown = [], values = [];
   for (const line of String(body ?? '').split(/\r?\n/)) {
@@ -381,7 +382,9 @@ function waitReasons(body) {
     else if (/^[\s>*_+\-[\]xX\d.#|`~=()]*wartet\s+bis\b/i.test(line)) unknown.push(`unreadable line "${line.trim()}": write it as "Wartet bis: <tag or UTC time>"`);
   }
   for (const wanted of values) {
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(wanted)) {
+    // Zurückgestellt bis zu einer Entscheidung: offen, solange die Zeile steht; wer entscheidet, entfernt sie (#514).
+    if (/^Entscheidung[ \t]+\S/.test(wanted)) blocked.push(`${decisionWait} ${wanted.replace(/^Entscheidung[ \t]+/, '')} (remove the line "Wartet bis: ${wanted}" once decided)`);
+    else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(wanted)) {
       const at = Date.parse(wanted);
       // Ein Datum wie 2026-02-30 rollt über; nur der unveränderte Wert zählt.
       if (!Number.isFinite(at) || `${new Date(at).toISOString().slice(0, 16)}Z` !== wanted) unknown.push(`invalid "Wartet bis: ${wanted}": no such UTC time`);
@@ -807,6 +810,11 @@ function resolveOption(fieldName, optionName) {
 /** Guards of a transition; a refusal throws. They print (backlinks), so run them only after every pair is valid. */
 function guardOption(issue, { fieldName, option }) {
   if (fieldName === 'Status' && ['Done', 'Human review'].includes(option.name) && isSpec(issue)) throw new Error(specRefusal(issue.number, `Status ${option.name} is refused`));
+  if (fieldName === 'Status' && option.name === 'Ready') {
+    // Ready contradicts an open decision wait: it stays Backlog until the line is removed (#514).
+    const decisions = waitReasons(issue.body).blocked.filter(reason => reason.startsWith(decisionWait));
+    if (decisions.length) throw new Error(`#${issue.number} cannot be Ready: ${decisions.join('; ')}`);
+  }
   if (fieldName === 'Status' && option.name === 'In progress') {
     // Assignment first, so a missing assignment is named even when the issue is also blocked.
     const { viewer } = graphql('query{viewer{login}}');
@@ -2623,11 +2631,11 @@ const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next [--session ID] | sweep 
   + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
   + ' | quota-wait [--max-minutes N]'
-  + ' | handoff ISSUE PR [--refs] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] (needs the comment "## Übergabe" with "Head: <sha>" on the PR, not the issue: gh pr comment PR --body-file FILE)'
+  + ' | handoff ISSUE PR [--refs (PR liefert das Issue nicht; Status bleibt)] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] (needs the comment "## Übergabe" with "Head: <sha>" on the PR, not the issue: gh pr comment PR --body-file FILE)'
   + ' | merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
   + ' | stack-sync TOP'
   + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
-  + ' | link ISSUE PR [--refs] | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
+  + ' | link ISSUE PR [--refs (PR liefert das Issue nicht; Status bleibt)] | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // --help (-h) is the one flag that never writes: usage on stdout, success.
 if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
   console.log(usage);
