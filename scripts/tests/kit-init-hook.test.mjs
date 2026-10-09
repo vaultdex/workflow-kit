@@ -262,7 +262,8 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
   describe(`${kind} hooks move the kit to the pin of the fast-forwarded checkout`, { skip: !available && `${shell[kind]} unavailable`, concurrency: true }, () => {
     for (const [file, key] of variants) test(file, async t => {
       const temp = temporary(t, 'kit-follow ');
-      const env = { ...isolatedGit(temp), GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'protocol.file.allow', GIT_CONFIG_VALUE_0: 'always' };
+      // submodule.recurse=true is the documented setup: a project fast-forward then also checks out the new pin in the kit.
+      const env = { ...isolatedGit(temp), GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'protocol.file.allow', GIT_CONFIG_VALUE_0: 'always', GIT_CONFIG_KEY_1: 'submodule.recurse', GIT_CONFIG_VALUE_1: 'true' };
       const git = async (cwd, ...a) => {
         const result = await spawn('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...a], { cwd, env });
         assert.equal(result.status, 0, result.stderr);
@@ -272,20 +273,30 @@ for (const [kind, variants, args] of [['posix', posix, ['-c']], ['windows', wind
       const kit = await fixture('kit', 'AGENT_RULES.md'), origin = await fixture('origin', 'README.md');
       await git(origin, 'submodule', '--quiet', 'add', kit.replaceAll('\\', '/'), '.vendor/workflow-kit');
       await git(origin, 'commit', '--quiet', '-m', 'consumer');
-      const work = join(temp, 'work');
-      await git(temp, 'clone', '--quiet', '--recurse-submodules', origin, work);
-      // The consumer moves its pin to a newer kit commit; the clone only fetches that.
+      // A second clone works on a clean, published kit branch (#484).
+      const [work, branched] = [join(temp, 'work'), join(temp, 'branched')];
+      for (const dir of [work, branched]) await git(temp, 'clone', '--quiet', '--recurse-submodules', origin, dir);
+      const [inner, branch] = [join(work, '.vendor/workflow-kit'), join(branched, '.vendor/workflow-kit')];
+      await git(branch, 'switch', '--quiet', '-c', 'mine');
+      const old = await git(branch, 'rev-parse', 'HEAD');
+      // The consumer moves its pin to a newer kit commit; the clones only fetch that.
       await git(kit, 'commit', '--quiet', '--allow-empty', '-m', 'newer');
-      const pin = await git(kit, 'rev-parse', 'HEAD'), inner = join(work, '.vendor/workflow-kit');
+      const pin = await git(kit, 'rev-parse', 'HEAD');
       await git(join(origin, '.vendor/workflow-kit'), 'pull', '--quiet');
       await git(origin, 'commit', '--quiet', '-am', 'bump the kit');
-      await git(work, 'fetch', '--quiet');
+      for (const dir of [work, branched]) await git(dir, 'fetch', '--quiet');
       assert.notEqual(await git(inner, 'rev-parse', 'HEAD'), pin, 'the kit lags behind the fetched pin');
 
       for (const command of new Set(handlers(file, key))) {
-        const result = await spawn(shell[kind], [...args, command], { cwd: work, env: { ...env, CLAUDE_PROJECT_DIR: '' } });
+        const trial = cwd => spawn(shell[kind], [...args, command], { cwd, env: { ...env, CLAUDE_PROJECT_DIR: '' } });
+        const result = await trial(work);
         assert.deepEqual([result.status, result.stdout], [0, ''], result.stderr);
         assert.deepEqual([await git(work, 'rev-parse', 'HEAD'), await git(inner, 'rev-parse', 'HEAD')], [await git(origin, 'rev-parse', 'HEAD'), pin]);
+
+        // The project still moves, but the kit keeps its branch and commit.
+        await trial(branched);
+        assert.equal(await git(branched, 'rev-parse', 'HEAD'), await git(origin, 'rev-parse', 'HEAD'), 'the project fast-forwards');
+        assert.deepEqual([await git(branch, 'symbolic-ref', '--short', 'HEAD'), await git(branch, 'rev-parse', 'HEAD')], ['mine', old], `${file} leaves a kit branch alone`);
       }
     });
   });

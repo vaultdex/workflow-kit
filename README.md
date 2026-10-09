@@ -100,7 +100,7 @@ Settings → Hooks in Cursor, `.github/hooks` for Copilot. Missing snapshots pro
 a SessionStart install hint. Session and subagent starts also run
 `git submodule update --init .vendor/workflow-kit` when the kit checkout is missing (fresh
 worktree) or not at the commit the gitlink pins (a base merge moves the pin, not the checkout); a kit at its pin stays untouched,
-a kit with local changes or unpublished commits is not moved, and both that case and a failure print a hint. Before that, the same handler
+a kit with local changes, unpublished commits or a checked-out branch is not moved (the fast-forward then runs with `submodule.recurse=false`), and both that case and a failure print a hint. Before that, the same handler
 fast-forwards (`git merge --ff-only`) a checkout that is behind its upstream or `origin/HEAD`, has no commits of its own and a clean working tree (a worktree or driver started
 from a stale branch), so the kit follows the new pin in the same step. It compares with the last fetched state, so it needs no network, never fetches and never delays the session.
 A second handler only reports such a checkout when local changes stopped the fast-forward. A third SessionStart handler prints one line when the worktree has a `package.json` with dependencies but no `node_modules` (Node would then resolve modules from a parent checkout); it names the `"setup"` command of `.github/workflow-project.json` (for example `"node scripts/bootstrap.mjs"`) or, without that field, the project's `AGENTS.md`, and never installs. A SubagentStart in
