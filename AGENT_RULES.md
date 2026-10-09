@@ -13,9 +13,18 @@ If unset or false, run `git config --local submodule.recurse true`. Read back
 errors or a disabling worktree override and stop affected Git operations; preserve
 the override. This is an agent command, not a hook or a full bootstrap.
 The clone-local setting is shared by its worktrees and also affects checkout,
-switch and push (on-demand submodule pushes unless `push.recurseSubmodules` overrides
-it). New submodules still need `git submodule update --init`. Preserve local changes;
-never force a submodule update.
+switch and merge. New submodules still need `git submodule update --init`. Preserve
+local changes; never force a submodule update.
+
+Also run `git config --local push.recurseSubmodules no` and read back
+`git config --get push.recurseSubmodules`; it must print `no`. A project push then never
+pushes kit commits; push the kit from inside `.vendor/workflow-kit`.
+
+Exceptions to the recursion, while the kit has a branch checked out (not detached; see
+[Kit issues from a project worktree](#kit-issues-from-a-project-worktree)): run project
+checkout, switch and merge as `git -c submodule.recurse=false …`, otherwise Git resets the
+kit to the pin or aborts on its changes. The same prefix repairs a fresh agent worktree
+whose `git reset --hard` aborted with `could not reset submodule index` and left tracked files missing.
 
 ## Hard rules
 
