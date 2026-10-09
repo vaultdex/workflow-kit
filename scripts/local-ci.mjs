@@ -271,7 +271,8 @@ const kitRepository = ({ git, root }) => {
 /**
  * `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat, und `kitPush`, wenn sich main des Kits bewegt hat
  * (dann auf main des Projekts); die erste Beobachtung löst nichts aus. Die Befehle laufen nach `setup` in einem eigenen Worktree auf
- * dem neuen Stand (`AFTER_SHA`, bei `kitPush` origin/main), nie im alten Stand des Läufer-Checkouts.
+ * dem neuen Stand, nie im alten Stand des Läufer-Checkouts: bei `push` ist das `AFTER_SHA`, bei `kitPush` origin/main des Projekts
+ * (dort ist `AFTER_SHA` der SHA im Kit, kein Commit des Projekts).
  * `saved` sind die Heads, deren Aufgabe erledigt ist (Datei `ctx.headsFile`): nach einem Neustart zählt der Vergleich damit,
  * nicht die erste Beobachtung. Ein Head wird erst nach der Aufgabe gespeichert, eine abgebrochene läuft beim nächsten Start nochmal.
  */

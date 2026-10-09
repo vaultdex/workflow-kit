@@ -499,7 +499,8 @@ which is untrusted, and not from its own checkout either (only the `repository` 
 - `kitPush` (list, next to `push`, read from `origin/main`) runs the same way when `main` of the kit moved (head stored in
   `heads.json` as `kit:main`), on `origin/main` of the project, with `BRANCH=main` and `EVENT=kit` (`BEFORE_SHA`/`AFTER_SHA` are the
   kit's). The kit repository comes from `.gitmodules` of `origin/main` (`.vendor/workflow-kit`), its head is read once per round
-  like the project branches. Meant for `kit-pin.mjs`.
+  like the project branches. The first look at `kit:main` (first `--watch` start, no `heads.json` entry) is only the baseline and
+  runs nothing. Meant for `kit-pin.mjs`.
 - With `localChecks` configured, `board.mjs reviews`, `wait`, `handoff` and `merge` require the head's `local-ci` commit
   status: missing or `pending` waits, `failure` and `error` are red, and only `success` passes.
   `localChecks`, `awaitApps`, `optionalReviewers` and `updateBranchChecks` are read from `.github/workflow-project.json` on the
