@@ -326,7 +326,7 @@ async function pushed(ctx, heads, saved, idle) {
       commands = kit ? config.kitPush : config.push;
       if (commands.length) {
         worktreeAt(ctx, work, sha);
-        if (ctx.git(work, 'ls-files', '--stage', '--', '.vendor/workflow-kit').startsWith('160000')) ctx.git(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // nur, wenn dieser Stand das Kit enthält; die Skripte brauchen es, kein `setup` (npm ci blockierte alle Plätze)
+        if (ctx.git(work, 'ls-files', '--stage', '--', '.vendor/workflow-kit').startsWith('160000')) ctx.git(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // nur, wenn dieser Stand das Kit enthält (Modus 160000 = Gitlink); die Skripte brauchen es, kein `setup` (npm ci blockierte alle Plätze)
       }
     } catch (error) { console.error(`push ${key}: übersprungen, ${error.message}`); continue; }
     if (commands.length) {
