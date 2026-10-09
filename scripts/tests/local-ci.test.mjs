@@ -351,6 +351,19 @@ test('main ohne lokale CI: der Start gibt 1 Platz, und der Release-PR wird mit d
   assert.deepEqual(f.summary(), ['local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
 });
 
+test('main mit reiner Platzkonfiguration: der Start liest nur slots, der Release-PR nutzt die Prüfliste seines Ziel-Branchs, ein Ziel-Branch ohne Prüfliste bleibt rot', async t => {
+  const f = fixture(t, { checks: [{ context: 'Backend', paths: ['backend/**'], run: ['echo ok'], timeoutMinutes: 1 }] });
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main:refs/heads/release/9');
+  writeFileSync(join(f.root, '.github/local-checks.json'), '{"slots":2}');
+  f.ctx.git(f.root, 'commit', '-qam', 'main nur mit slots');
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main', 'main:refs/heads/release/10');
+  f.server.pulls = [{ ...f.pr, number: 2, base: { ref: 'release/10' } }, { ...f.pr, base: { ref: 'release/9' } }];
+  const ctx = { ...f.ctx, pollMs: 1 };
+  assert.equal(mainSlots(ctx), 2);
+  await watch(ctx, { rounds: 1 });
+  assert.deepEqual(f.summary(), ['local-ci: pending', 'local-ci: failure', 'local-ci: pending', 'Backend: pending', 'Backend: success', 'local-ci: success']);
+});
+
 test('slow: eine langsame Prüfung läuft nur, wenn der Diff riskPaths trifft, sonst zählt sie als grün; ohne riskPaths läuft sie immer', async t => {
   const checks = [{ context: 'Slow', slow: true, paths: ['backend/**'], run: ['touch gelaufen'], timeoutMinutes: 1 }];
   const f = fixture(t, { checks });
