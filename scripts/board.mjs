@@ -2685,6 +2685,10 @@ async function done() {
     return console.log(`CLOSED PR #${prNumber} (no change); the result is in the comment on #${number}`);
   }
   const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
+  // The handoff file is only needed while no comment for this head exists (a repeated call after exit 4 has one): refuse before the tests, not after.
+  if (!file && !findHandoffComment(restAll(`repos/${project.repository}/issues/${prNumber}/comments`), issue.viewer, sha)) {
+    return fail(`no handoff comment for head ${sha.slice(0, 7)} and no HANDOFF_FILE: write it (<Ergebnis in einem Satz>, then "### Retro"; README: Handoff comment) and run board.mjs done ${number} HANDOFF_FILE`);
+  }
   // The tests of this head ran once: a call that only waits does not repeat them.
   const tested = resolve(projectDirectory, git('rev-parse', '--git-path', 'board-done-tested'));
   if (!(existsSync(tested) && readFileSync(tested, 'utf8') === sha)) {
