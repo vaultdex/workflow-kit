@@ -486,7 +486,7 @@ function pr(argv, input, stdout, stderr, exit) {
     stderr((fs.readFileSync('merge-403', 'utf8') || 'GraphQL: This pull request is part of a stack and must be merged using the asynchronous merge REST API. For more information, see https://docs.github.com/rest/pulls/pulls#merge-a-pull-request-asynchronously (mergePullRequest)') + '\n');
     exit(1);
   }
-  if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));
+  if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: fs.existsSync('merge-oid') ? fs.readFileSync('merge-oid', 'utf8') : 'f'.repeat(40) } }));
 }
 
 /** gh issue develop …: the branch exists afterwards (branches.json), the call is kept in develops. */

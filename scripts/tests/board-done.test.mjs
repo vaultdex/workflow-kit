@@ -34,7 +34,7 @@ test('done takes the pushed work to Human review: tests, ready, ticked boxes, Au
   const result = run('done', '1', 'result.md');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /HANDOFF #1/);
-  assert.match(text('local-ci-calls'), /--run/, 'the targeted tests ran');
+  assert.match(text('affected-tests-calls'), /--run/, 'the targeted tests ran');
   assert.equal(json('pr.json').isDraft, false, 'the PR is ready');
   assert.equal(json('backlink-1.json').body, '- [x] first\n- [ ] moved on, see #12\n- [x] done', 'the box without a follow-up is ticked');
   assert.equal(text('stored'), 'Human review');

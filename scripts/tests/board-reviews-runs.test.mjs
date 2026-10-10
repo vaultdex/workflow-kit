@@ -169,36 +169,10 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
   assert.match(optionalEyes.stdout, /^reaction coderabbitai /m, 'The optional 👀 is shown');
   writeFileSync(config, plain);
   assert.equal(reviews(pr({ contexts: [rabbitStatus('SUCCESS')] })), 0, 'Precondition: unlisted, the same lone status is CI');
-  // Local CI (scripts/local-ci.mjs) reports commit statuses only, no check runs: they decide alone.
-  const local = (state, context = 'Backend domain') => ({ __typename: 'StatusContext', context, state, description: '12 s auf PC', creator: { login: 'maintainer' } });
-  assert.equal(reviews(pr({ contexts: [local('PENDING', 'local-ci'), local('PENDING')] })), 3, 'A pending local status waits');
-  assert.equal(reviews(pr({ contexts: [local('SUCCESS', 'local-ci'), local('FAILURE')] })), 1, 'A failed local status is red');
-  assert.equal(reviews(pr({ contexts: [local('ERROR', 'local-ci')] })), 1, 'An aborted local status is red');
-  assert.equal(reviews(pr({ contexts: [local('SUCCESS', 'local-ci'), local('SUCCESS')] })), 0, 'Local statuses alone are CI');
   const sonar = { ...check('COMPLETED'), name: 'SonarCloud Code Analysis', summary: '[0 New issues]',
     detailsUrl: 'https://sonarcloud.io/dashboard?id=test_example&pullRequest=7', checkSuite: { app: { slug: 'sonarqubecloud' } } };
   const sonarOnly = look(pr({ contexts: [sonar] }));
   assert.equal(sonarOnly.status, 0, sonarOnly.stdout + sonarOnly.stderr);
-  writeFileSync(config, JSON.stringify({ ...JSON.parse(plain), localChecks: '.github/local-checks.json', optionalReviewers: ['maintainer'] }));
-  const missingLocalCi = look(pr({ contexts: [sonar] }));
-  assert.equal(missingLocalCi.status, 3, missingLocalCi.stdout + missingLocalCi.stderr);
-  assert.match(missingLocalCi.stdout, /^waiting: check local-ci$/m, 'Configured local CI needs its aggregate on this head');
-  assert.equal(reviews(pr({ contexts: [sonar, { ...check('COMPLETED'), name: 'local-ci' }] })), 3, 'A same-named check run is no local commit status');
-  assert.equal(reviews(pr({ contexts: [sonar, local('PENDING', 'local-ci')] })), 3, 'A pending aggregate waits');
-  assert.equal(reviews(pr({ contexts: [sonar, local('FAILURE', 'local-ci')] })), 1, 'A red aggregate fails even if its creator is optional');
-  assert.equal(reviews(pr({ contexts: [sonar, local('SUCCESS', 'local-ci')] })), 0, 'A successful aggregate completes the review');
-  writeFileSync(config, plain);
-  // An Actions check run and a commit status of one name are one check: only the newer decides, the older is a note.
-  const actions = (conclusion, minutes) => ({ ...check('COMPLETED', conclusion), name: 'Repository checks', completedAt: minutesAgo(minutes) });
-  const commitStatus = (state, minutes) => ({ ...local(state, 'Repository checks'), createdAt: minutesAgo(minutes) });
-  const replaced = look(pr({ contexts: [actions('FAILURE', 30), commitStatus('SUCCESS', 3)] }));
-  assert.equal(replaced.status, 0, replaced.stdout + replaced.stderr);
-  assert.match(replaced.stdout, /^note: Repository checks FAILURE as check run is replaced by a newer one of the same name$/m);
-  assert.equal(reviews(pr({ contexts: [commitStatus('SUCCESS', 3), actions('FAILURE', 30)] })), 0, 'The order of the list does not matter');
-  assert.equal(reviews(pr({ contexts: [actions('SUCCESS', 30), commitStatus('FAILURE', 3)] })), 1, 'A newer red status beats an older green check run');
-  assert.equal(reviews(pr({ contexts: [commitStatus('FAILURE', 30), actions('SUCCESS', 3)] })), 0, 'A newer green check run beats an older red status');
-  assert.equal(reviews(pr({ contexts: [actions('FAILURE', 30), { ...actions('SUCCESS', 3), checkSuite: { databaseId: 99 } }] })), 1,
-    'Two check runs of one name never replace each other');
   assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
@@ -249,27 +223,16 @@ test('reviews names the cause of a head without pull_request runs and an UNKNOWN
   assert.equal(look({ ...pr({ contexts: [check('IN_PROGRESS')] }), mergeStateStatus: 'UNKNOWN' }).status, 3, 'Running CI keeps waiting');
 });
 
-test('the review gate takes localChecks and the reviewer lists from the PR base, not from the checkout (#448)', t => {
-  const { checkout, runBriefly, look, reviews, pr, check } = reviewsFixture(t);
+test('the review gate takes the reviewer lists from the PR base, not from the checkout (#448)', t => {
+  const { checkout, reviews, pr } = reviewsFixture(t);
   const config = join(checkout, '.github/workflow-project.json'), plain = readFileSync(config, 'utf8'), base = join(checkout, 'base-project.json');
-  const local = state => ({ __typename: 'StatusContext', context: 'local-ci', state, description: '12 s auf PC', creator: { login: 'maintainer' } });
-  const withLocal = { ...JSON.parse(plain), localChecks: '.github/local-checks.json' };
-  // A stale checkout without localChecks, the base has them: green CI alone is not enough.
-  writeFileSync(base, JSON.stringify(withLocal));
-  const stale = look(pr());
-  assert.equal(stale.status, 3, stale.stdout + stale.stderr);
-  assert.match(stale.stdout, /^waiting: check local-ci$/m);
-  assert.equal(readFileSync(join(checkout, 'contents-refs'), 'utf8').trim(), 'release/0.1.1', 'The settings are read from the base of the PR');
-  assert.match(runBriefly(3000, 'wait', '7'), /^WAITING\nwaiting: check local-ci/, 'wait, handoff and merge use the same look');
-  assert.equal(reviews(pr({ contexts: [check('COMPLETED'), local('SUCCESS')] })), 0, 'The aggregate on the head completes the review');
-  // The reviewer list comes from the base as well.
+  // The base has a malformed list, the checkout does not: the base decides.
   writeFileSync(base, JSON.stringify({ ...JSON.parse(plain), optionalReviewers: 'coderabbitai' }));
   assert.equal(reviews(pr()), 2, 'A malformed list on the base is an error');
-  // The other way round: the base dropped localChecks, the stale checkout still has them.
-  writeFileSync(config, JSON.stringify(withLocal));
-  writeFileSync(base, plain);
-  assert.equal(reviews(pr()), 0, 'Without localChecks on the base no local-ci is awaited');
+  assert.equal(readFileSync(join(checkout, 'contents-refs'), 'utf8').trim(), 'release/0.1.1', 'The settings are read from the base of the PR');
   // A base that cannot be read is no reason to fall back to the checkout.
+  writeFileSync(base, plain);
   writeFileSync(join(checkout, 'base-missing'), '');
   assert.equal(reviews(pr()), 2, 'An unreadable base fails closed');
 });
+
