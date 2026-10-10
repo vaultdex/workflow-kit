@@ -153,7 +153,7 @@ the installer, so the kit's current one is copied.
 ## Board commands
 
 `scripts/board.mjs` reads `.github/workflow-project.json` and uses `gh`. It acts on the project of the
-working directory; `--cwd PROJECT_DIR` as the first argument (`board.mjs --cwd PROJECT_DIR check 7`) reads
+working directory; `--cwd PROJECT_DIR` as the first argument (`board.mjs --cwd PROJECT_DIR next`) reads
 the project from that directory instead. Other relative paths (`--body-file`) stay relative to the working directory.
 `init-project.mjs`, `setup-skills.mjs` and `affected-tests.mjs` take the same first argument (`takeCwd` in `checkout-root.mjs`),
 and then work in that directory, their relative paths (changed files given to `affected-tests.mjs`) included:

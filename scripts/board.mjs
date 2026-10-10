@@ -26,7 +26,7 @@ function git(...args) {
   return execFileSync(tool.file, ['-C', projectDirectory, ...args], { encoding: 'utf8', env: tool.env, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-/** The commit the project's checkout (--cwd, else the working directory) has checked out: what `ready PR --local` expects the PR to show. */
+/** The commit the project's checkout (--cwd, else the working directory) has checked out: what `done` expects the PR to show. */
 function localHead() {
   try {
     return git('rev-parse', 'HEAD');
@@ -35,9 +35,9 @@ function localHead() {
     process.exit(2);
   }
 }
-// The first argument after the PR; `ready PR --local` takes the head from the checkout, so a shell never has to splice `$(git rev-parse HEAD)` into the call.
+// The first argument after the PR; `ready PR --local` (the step `done` takes) reads the head from the checkout, so a shell never has to splice `$(git rev-parse HEAD)` into the call.
 // The PR must still show exactly that head before it is marked ready, so a commit that was not pushed is refused like a mistyped id.
-// `done` sets it to the PR it found, so the handoff steps it calls read their PR where they read it for `handoff ISSUE PR`.
+// `done` sets it to the PR it found, so the handoff steps it calls read their PR where they read it for a called `handoff`.
 let value = command === 'ready' && typed === '--local' && Number.isSafeInteger(number) ? localHead() : typed;
 
 // The account's GraphQL quota (5000 points an hour) is shared by every agent on it. Every response carries what is left and when it

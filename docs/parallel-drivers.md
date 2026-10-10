@@ -34,7 +34,7 @@ Nummern kollidieren. Die Regel steht im Projekt, nicht im Kit: Vaultdex
 mechanisch geprüft von der
 Repository-CI ([vaultdex/Vaultdex#980](https://github.com/vaultdex/Vaultdex/issues/980)).
 
-**Sonar.** Null offene Sonar-Issues prüft `board.mjs handoff` bereits mechanisch
+**Sonar.** Null offene Sonar-Issues prüft `board.mjs done` bereits mechanisch
 ([#134](https://github.com/vaultdex/workflow-kit/issues/134)); nichts weiter zu tun.
 
 **Merge-Vollmacht.** Agents mit Merge-Vollmacht mergen nur über `board.mjs merge PR` und
@@ -46,20 +46,20 @@ Einen ganzen Stapel gestapelter PRs mergt `board.mjs merge OBERSTE --stack` in e
 
 **GitHub-Kontingent.** Das GraphQL-Kontingent (5.000 Punkte pro Stunde) gilt für das ganze
 Konto und wird von allen Drivern gemeinsam verbraucht; ist es leer, scheitert jeder
-`board.mjs`-Befehl bis zum Reset. Gemessene Kosten: eine Lesung von `reviews`/`wait` kostet
-2 Punkte, `check` 1 (2 bei einem Issue, das nur offene Vorgänger hält), `next` 3 (4 bei einem Stapel-Kandidaten, je weitere 30 offene Issues 1 mehr). `wait` fragt zuerst nach 60 s, dann mit wachsendem Abstand bis
+`board.mjs`-Befehl bis zum Reset. Gemessene Kosten: eine Lesung von `wait`/`done` kostet
+2 Punkte, `start` 1 (2 bei einem Issue, das nur offene Vorgänger hält), `next` 3 (4 bei einem Stapel-Kandidaten, je weitere 30 offene Issues 1 mehr). `wait` fragt zuerst nach 60 s, dann mit wachsendem Abstand bis
 5 Minuten (bei Neuigkeiten wieder von vorn), also etwa 20 bis 40 Punkte pro Stunde und Driver
 statt 120 bei festem Minutentakt. Als Budget gilt: Zahl der Driver mal 40 Punkte, dazu der eigene
 Verbrauch der Agents; höchstens 20 parallele `wait` (rund 800 Punkte pro Stunde, ein Sechstel
 des Kontingents). `wait` fragt GraphQL nur noch, wenn sich laut REST etwas geändert hat (Head, Checks,
 Status, Aktualisierungszeit), spätestens alle 5 Minuten und zur Bestätigung jedes Endes; `wait PR --merged` liest nur REST
-([#324](https://github.com/vaultdex/workflow-kit/issues/324)). `wait` und `reviews` melden den Rest in einer Zeile (`quota: …`).
+([#324](https://github.com/vaultdex/workflow-kit/issues/324)). `wait` und `done` melden den Rest in einer Zeile (`quota: …`).
 `node scripts/quota-sample.mjs OUT.jsonl` misst den Verbrauch des ganzen Kontos: eine Stunde lang jede Minute `used` und `usedDelta` (die Abfrage kostet selbst einen Punkt pro Minute).
-`reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 50 Punkten bis zum Reset
+`done` schläft bei einer Sperre oder bei weniger als 50 Punkten bis zum Reset
 (`rate limited until …`) und fragen danach weiter. `wait` schläft nicht: bei einer Sperre oder unter 300 Punkten liest es
 PR und Checks weiter über REST (Zähler in der Zeile `waiting:`, ohne Urteil) und holt Threads und Urteil nach dem Reset;
 bei `--max-minutes` endet es mit Exit 4 und der Reset-Zeit. Bei
-einer kurzen Drosselung („secondary rate limit“) warten `reviews` und `handoff` 1, 2, dann 4 Minuten statt bis zum
+einer kurzen Drosselung („secondary rate limit“) wartet `done` 1, 2, dann 4 Minuten statt bis zum
 Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab (Uhrzeit und Minuten bis dahin). Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
 Rest und Reset stammen aus den Headern `x-ratelimit-remaining` und `x-ratelimit-reset` der eigenen Antworten
 (auch der abgewiesenen); zeigt eine Abweisung selbst freies Kontingent, fragt der Befehl sofort erneut,

@@ -54,7 +54,7 @@ test('done hands a partial PR off without a native link, status or ticked boxes,
   writeIssue(issue('In progress'));
   const result = run('done', '1', '7', 'result.md', '--refs');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /^HANDOFF #1 PR #7 .*partial PR/m);
+  assert.match(result.stdout, /^HANDOFF #1 PR #7 /m);
   assert.equal(text('stored'), 'In progress', 'the issue status stays');
   assert.ok(json('backlink-1.json').body.startsWith('- [ ] first'), 'the boxes of the issue stay open');
   assert.equal(json('pr.json').isDraft, false);

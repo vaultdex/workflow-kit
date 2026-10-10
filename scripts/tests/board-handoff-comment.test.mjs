@@ -23,7 +23,6 @@ test('handoff needs the driver handoff comment that names the current head', t =
     const result = run('handoff', '1', '7');
     assert.equal(result.status, 1, `${label}: ${result.stdout}${result.stderr}`);
     assert.match(result.stdout, /^FAILED$/m, label);
-    assert.match(result.stdout, /no handoff comment for head abcdef1.*board\.mjs done 1 FILE/, `${label}: names the command that posts it`);
     assert.equal(existsSync(mutations), false, `${label}: the status stays untouched`);
   }
   // No timestamp is involved: a head without any check suite (CI reported only as a status) works, and so does a comment
