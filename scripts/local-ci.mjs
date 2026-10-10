@@ -324,7 +324,7 @@ const kitRepository = ({ git, root }) => {
  * `saved` sind die Heads, deren Aufgabe erledigt ist (Datei `ctx.headsFile`): nach einem Neustart zählt der Vergleich damit,
  * nicht die erste Beobachtung. Ein Head wird erst nach der Aufgabe gespeichert, eine abgebrochene läuft beim nächsten Start nochmal.
  */
-async function pushed(ctx, heads, saved, idle) {
+async function pushed(ctx, heads, saved) {
   const moved = [];
   const save = () => { // erst eine Nebendatei, dann umbenennen: ein Abbruch mitten im Schreiben hinterlässt keine halbe Datei
     if (!ctx.headsFile) return;
@@ -345,7 +345,6 @@ async function pushed(ctx, heads, saved, idle) {
   const kit = kitRepository(ctx);
   if (kit) try { seen('kit:main', ctx.api('GET', 'git/ref/heads/main', {}, kit).object.sha, { branch: 'main', kit: true }); } catch (error) { console.error(`push kit: ${error.message.split('\n')[0]}`); } // ein Fehler beim Kit hält die Projekt-Branches nicht auf
   save();
-  if (moved.length) await idle(); // Fetch und Worktree entstehen im Projekt-Checkout: kein Platz holt dort gleichzeitig ab, wie bisher
   for (const { key, branch, before, after, kit } of moved) {
     const work = `${ctx.work}-push`;
     let config, commands;
@@ -378,8 +377,9 @@ async function pushed(ctx, heads, saved, idle) {
  * Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head, oder neuer Basis nach rotem Endstand, genau einmal.
  * Bis zu `ctx.slots` PRs laufen gleichzeitig (Standard 1: einer nach dem anderen im Ordner `work`), jeder auf einem Platz mit eigenem
  * Arbeitsordner `work-1`, `work-2`, …; ein PR belegt nie zwei Plätze. `checkout()` hat kein `await`: die Git-Aufrufe im gemeinsamen
- * Projekt-Checkout (Fetch, FETCH_HEAD, Worktree anlegen) laufen so nie ineinander. Die `push`-Befehle legen ihren Worktree im selben
- * Checkout an und warten deshalb, bis alle Plätze frei sind; neue PRs starten erst danach.
+ * Projekt-Checkout (Fetch, FETCH_HEAD, Worktree anlegen) laufen so nie ineinander; das gilt auch für den Fetch der `push`-Befehle.
+ * Sie laufen sofort, auch neben laufenden PRs (eigener Ordner `work-push`), und gehen neuen PRs voraus. Sind alle Plätze belegt,
+ * fragt `slotFree` jede Runde die Branches ab, damit ein langer PR-Lauf `push` und `kitPush` nicht aufhält.
  */
 export async function watch(ctx, { rounds = Infinity } = {}) {
   let known = {};
@@ -387,8 +387,8 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
     if (error.code !== 'ENOENT') throw error; // erster Start: die erste Beobachtung ist die Ausgangslage; eine kaputte oder fremde Datei (auch `null`) bricht den Start sichtbar ab
   }
   const heads = new Map(Object.entries(known)), saved = new Map(heads), done = new Map(), waiting = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
-  const waitUntil = async free => { while (busy.size > slots - free) await Promise.race([...busy.values()].map(({ task }) => task)); };
-  const slotFree = () => waitUntil(1), idle = () => waitUntil(slots);
+  const push = () => pushed(ctx, heads, saved).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
+  const slotFree = async () => { while (busy.size >= slots) { await Promise.race([pause(ctx.pollMs), ...[...busy.values()].map(({ task }) => task)]); if (busy.size >= slots) await push(); } }; // kein Platz frei: weiter nach Bewegungen fragen
   // Einstellung `localCiAfterApps`: bis Sonar für den Head fertig ist und 0 Befunde offen sind, nimmt der Läufer den PR nicht, auch nicht als Folgehead in `follow`
   const hold = async (pr, settings = new Map()) => {
     let reason = null;
@@ -411,7 +411,7 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
   };
   for (let round = 0; round < rounds; round++) {
     try {
-      await pushed(ctx, heads, saved, idle).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
+      await push();
       const bases = new Map(), settings = new Map(); // aktueller SHA und Einstellung `localCiAfterApps` je Ziel-Branch, einmal pro Runde
       for (const pr of ctx.api('GET', 'pulls?state=open&per_page=100').filter(pr => !pr.draft && pr.head.repo?.full_name === ctx.repository)) {
         try { if (!bases.has(pr.base.ref)) bases.set(pr.base.ref, ctx.api('GET', `git/ref/heads/${pr.base.ref}`).object.sha); } catch (error) {

@@ -407,14 +407,22 @@ test('ohne slots läuft ein PR nach dem anderen im Ordner work, wie bisher', asy
   assert.deepEqual(['work', 'work-1'].map(name => existsSync(join(f.dir, `${name}.gestartet`))), [true, false]);
 });
 
-test('mit slots 2 wartet ein fälliger push, bis die laufenden Prüfungen fertig sind: kein Fetch der Plätze im Projekt-Checkout währenddessen', async t => {
-  const f = fixture(t, { push: ['test -e ../work-1.fertig && echo ok > ../pushed.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: ['sleep 1', 'touch "$PWD.fertig"'], timeoutMinutes: 1 }] });
-  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: f.base } }];
+test('ein PR-Lauf, der alle Plätze belegt, hält push und kitPush nicht auf: beide laufen währenddessen, die Prüfung wartet auf sie (#520)', async t => {
+  const wait = 'for i in $(seq 100); do test -e ../pushed.txt && test -e ../kit.txt && exit 0; sleep 0.1; done; exit 1';
+  const f = fixture(t, { push: ['touch ../pushed.txt'], kitPush: ['touch ../kit.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: [wait], timeoutMinutes: 1 }] });
+  addKit(f);
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
+  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: f.ctx.git(f.root, 'rev-parse', 'HEAD') } }];
+  f.server.kit = 'a'.repeat(40);
   const after = f.advance('b.txt');
-  const ctx = { ...f.ctx, slots: 2, pollMs: 1 }, api = ctx.api;
-  ctx.api = (method, path, fields) => { if (path.startsWith('pulls?') && f.posts.length) f.server.refs = [{ ref: 'refs/heads/main', object: { sha: after } }]; return api(method, path, fields); };
-  await watch(ctx, { rounds: 3 });
-  assert.equal(readFileSync(join(f.dir, 'pushed.txt'), 'utf8').trim(), 'ok');
+  const ctx = { ...f.ctx, pollMs: 1 }, api = ctx.api;
+  ctx.api = (method, path, fields, repo) => { // main und Kit-main bewegen sich, sobald der PR läuft und den einzigen Platz belegt
+    if (path.startsWith('git/matching-refs/') && f.posts.length) { f.server.refs = [{ ref: 'refs/heads/main', object: { sha: after } }]; f.server.kit = 'b'.repeat(40); }
+    return api(method, path, fields, repo);
+  };
+  await watch(ctx, { rounds: 1 });
+  assert.ok(existsSync(join(f.dir, 'pushed.txt')) && existsSync(join(f.dir, 'kit.txt')));
+  assert.equal(f.posts.at(-1).state, 'success', JSON.stringify(f.posts));
 });
 
 test('ein PR belegt nie zwei Plätze: ein neuer Head während des Laufs wird von follow geprüft, nicht zusätzlich gestartet', async t => {
