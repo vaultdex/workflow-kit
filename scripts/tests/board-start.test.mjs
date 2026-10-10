@@ -49,23 +49,33 @@ test('start takes a Ready issue to a Draft PR that closes it, and the same call 
   assert.match(result.stdout, /^START #1 session S1 branch claude\/1-fixture base main PR #7$/m);
   assert.equal(text('stored'), 'In progress');
   assert.equal(JSON.parse(text('issue.json')).assignees.nodes[0].login, 'worker');
-  assert.match(JSON.parse(text('backlink-comments-1.json'))[0].body, /^Agent: claude, Session: S1\n$/);
   assert.equal(git(checkout, 'branch', '--show-current'), 'claude/1-fixture');
   assert.equal(git(checkout, 'rev-list', '--count', 'origin/main..origin/claude/1-fixture'), '1', 'the branch is pushed with its first commit');
   const created = text('created-pr');
-  for (const part of ['head=claude/1-fixture', 'base=main', 'draft=true', 'Closes #1']) assert.ok(created.includes(part), part);
+  for (const part of ['head=claude/1-fixture', 'base=main', 'draft=true', 'Closes #1\nAgent: claude, Session: S1\n']) assert.ok(created.includes(part), part);
+  assert.doesNotMatch(text('backlink-comments-1.json'), /Agent:/, 'the PR is the claim: no claim comment');
   assert.deepEqual(JSON.parse(text('pr.json')).linkPages, [['I1']], 'the issue is linked natively');
 
   // The same call again: the issue now has its PR, claim and branch, so nothing is created twice.
   rmSync(file('created-pr'));
   const developed = text('develops'), comments = JSON.parse(text('backlink-comments-1.json')).length;
-  writeIssue({ ...JSON.parse(text('issue.json')), closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/example' } }] } });
+  const openPr = body => writeIssue({ ...JSON.parse(text('issue.json')), closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', body, repository: { nameWithOwner: 'test/example' } }] } });
+  openPr('Closes #1\nAgent: claude, Session: S1\n');
   result = run('start', '1', '--session', 'S1');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /^START #1 .* PR #7$/m);
   assert.equal(existsSync(file('created-pr')), false, 'no second PR');
   assert.equal(text('develops'), developed, 'no second branch');
-  assert.equal(JSON.parse(text('backlink-comments-1.json')).length, comments, 'no second claim or backlink');
+  assert.equal(JSON.parse(text('backlink-comments-1.json')).length, comments, 'no backlink twice');
+  assert.equal(JSON.parse(text('pr.json')).body, undefined, 'the own PR body is not touched');
+
+  // A stale PR of another session is taken over: its claim line now names the new session, the rest of the body stays.
+  const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
+  writeFileSync(file('pr.json'), JSON.stringify({ ...JSON.parse(text('pr.json')), body: 'Closes #1\nAgent: claude, Session: OLD\nMehr' }));
+  writeIssue({ ...JSON.parse(text('issue.json')), updatedAt: hoursAgo(9), closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', body: 'Closes #1\nAgent: claude, Session: OLD\nMehr', updatedAt: hoursAgo(9), headRefName: 'claude/1-fixture', repository: { nameWithOwner: 'test/example' } }] } });
+  result = run('start', '1', '--session', 'S2');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(text('pr.json')).body, 'Closes #1\nAgent: claude, Session: S2\nMehr');
 });
 
 test('start names the worktree that holds the branch when it cannot switch to it', t => {

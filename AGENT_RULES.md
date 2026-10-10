@@ -101,12 +101,13 @@ work between them:
    [execution check](docs/CONTRIBUTING.md#execution-check) first: BLOCKED or UNKNOWN stop and write
    nothing, except a specifically authorized, documented exception; STACKABLE (only an open
    predecessor PR holds the issue) continues as a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests).
-   Then it assigns you, posts the claim `Agent: claude|codex, Session: ID`, sets In progress, creates
-   the issue-linked branch on the right base, switches to it, brings the kit to its pin, opens the
-   Draft PR that closes the issue and reads every step back. A newer claim of another session blocks
-   unless a `Handover: ID` comment passes it to yours. Abandoned work (no push, comment or status
-   change for `staleHours`, default 6, or a Human-review PR with conflicts) is taken over; the claim
-   then also says `Takeover of stale claim OLD_SESSION`. `board.mjs next --session ID` lists your
+   Then it assigns you, sets In progress, creates the issue-linked branch on the right base,
+   switches to it, brings the kit to its pin, opens the Draft PR that closes the issue and reads
+   every step back. The Draft PR is the claim: its body carries `Agent: claude|codex, Session: ID`
+   (keep that line when you rewrite the body), and an open PR of another session blocks unless a
+   handover edits the line to yours. Abandoned work (no push, comment or status
+   change for `staleHours`, default 6, or a Human-review PR with conflicts) is taken over by
+   the same call, which writes your session into the line. `board.mjs next --session ID` lists your
    unfinished issues first, and `start` of another issue says `finish #N first` until they are handed
    off. A repeated call resumes.
 2. Implement and push. `node .vendor/workflow-kit/scripts/board.mjs done ISSUE FILE` then runs the
@@ -117,7 +118,7 @@ work between them:
    blocker: fix it, push, run `done` again; exit 4 (`still waiting`) means run `done` again.
 
 A documented blocker exception keeps the current status and failed verdict: claim by hand (assign,
-claim comment), skip the guarded transition and edit only its permitted scope. If prerequisites
+Draft PR with the claim line), skip the guarded transition and edit only its permitted scope. If prerequisites
 change, stop affected edits and run `start` again. Subagents implement bounded assignments; only the
 driver runs `start` and `done`.
 

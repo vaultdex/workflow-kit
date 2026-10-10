@@ -109,7 +109,7 @@ Modellwahl stehen hier nicht.
 2. **Regeln vom Ziel-Release-Branch lesen.** AGENTS.md und Kit-Regeln stammen vom
    Release-Branch, auf den die PR zielt, nicht nur von `main`; eine Regel kann nur
    dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume):
-   `board.mjs start ISSUE --session ID` schreibt `Agent: …, Session: …` und zweigt den
+   `board.mjs start ISSUE --session ID` öffnet den Entwurfs-PR mit `Agent: …, Session: …` und zweigt den
    Issue-Branch vom Ziel-Release-Branch ab (die Basis nennt das Projektfeld, nicht `main`). Bei
    STACKABLE ist es der Branch des Basis-PR
    ([Stacked pull requests](CONTRIBUTING.md#stacked-pull-requests)). Er bleibt ein fremder
