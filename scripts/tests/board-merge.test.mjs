@@ -25,7 +25,7 @@ test('merge merges the checked head by its full id only when no review is runnin
       requestEvents: { totalCount: 1, nodes: [{ createdAt: pushedAt(), requestedReviewer: { login: 'reviewer' } }] } }), [], 4],
     ['red CI', withHead(oid, { commits: { nodes: [{ commit: failedCi }] } }), [], 1],
     ['a Draft', withHead(oid, { isDraft: true }), [], 1],
-    ['a merged PR', withHead(oid, { state: 'MERGED' }), [], 1],
+    ['a PR closed without merge', withHead(oid, { state: 'CLOSED' }), [], 1],
     ['an unresolved thread', withHead(oid, { threadPages: [[false]] }), [], 1],
     ['conflicts', withHead(oid, { mergeStateStatus: 'DIRTY' }), [], 1],
     ['an undetermined merge state', withHead(oid, { mergeStateStatus: 'UNKNOWN' }), [], 3],
@@ -114,6 +114,16 @@ test('merge refuses a PR body without the Selbstprüfung section the project ask
   show({ bodyHTML: '<h2 dir="auto">Selbstprüfung</h2>\n<p>ponytail-review: nichts zu streichen.</p>' });
   assert.equal(run('merge', '7').status, 0);
   assert.deepEqual(calls(), ['merge', 'delete claude/7-topic']);
+});
+
+test('merge reports a PR that somebody else already merged as MERGED, without merging it again (#556)', t => {
+  const { run, show, calls } = mergeFixture(t);
+  show({ state: 'MERGED' });
+  const result = run('merge', '7');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^note: PR #7 is already merged$/m);
+  assert.match(result.stdout, /^MERGED #7 /m);
+  assert.deepEqual(calls(), ['delete claude/7-topic'], 'no second merge, the branch goes as after an own merge');
 });
 
 test('merge refuses a PR text that closes a spec, also when it changed after the handoff', t => {

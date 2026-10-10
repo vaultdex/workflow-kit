@@ -277,7 +277,8 @@ and then work in that directory, their relative paths (changed files given to `a
   (check names, for example `["Restart CI after retarget"]`; `wait` and `done` still end `FAILED`, naming `board.mjs merge N`),
   and once for any other red check when the base gained commits since the merge-base (the CI ran on the old merge state, #425); a red check after that update, or on an unmoved base, ends `FAILED`. If GitHub refuses that update with 403 (a PR with stacked children), `merge` ends
   `FAILED` (exit 1) and tells you to run `git merge origin/<base>` in the PR's worktree, push once and call `merge` again;
-  it never pushes for you. Then it runs `gh pr merge --merge
+  it never pushes for you. A PR that somebody else merged meanwhile ends `MERGED` (note "already merged", exit 0, no second merge) with the steps after a merge (#556);
+  closed without merge and Draft stay `FAILED`. Otherwise it runs `gh pr merge --merge
   --match-head-commit <full head id>` once (a push after the check makes gh refuse; a refusal of a PR with stacked children ("part of a stack", "asynchronous merge REST API" or HTTP 403)
   goes once to `PUT pulls/N/merge-async` with `merge_action=direct_merge`, `merge_method=merge` and `sha` = the same head,
   and the merge is read back until it shows) and counts

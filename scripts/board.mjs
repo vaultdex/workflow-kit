@@ -1941,6 +1941,8 @@ function finishedPr(prNumber, action, expectedHead, extra = () => [], prior = []
   if (checks.length) assert.equal(typeof pr.bodyHTML, 'string', 'The rendered PR body is unreadable');
   assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
   const blockers = reasons => reasons.map(reason => `blocker: ${reason}`);
+  // Somebody else merged it while merge waited (#556): the goal is reached, so merge goes on with its steps after a merge. Handoff still needs an open PR.
+  if (action === 'merge' && pr.state === 'MERGED') return { pr, merged: true };
   if (pr.state !== 'OPEN' || pr.isDraft) {
     console.log(['FAILED', ...blockers([...prior, `${action} needs an open non-draft PR`])].join('\n'));
     process.exitCode = 1;
@@ -2298,7 +2300,7 @@ async function merge() {
     asynchronous = true;
   };
   // A stack is merged by GitHub from its top, and a plain `gh pr merge` of the top would land it in the layer below: merge-async only.
-  if (stack) mergeAsync(); else try {
+  if (result.merged) console.log(`note: PR #${number} is already merged`); else if (stack) mergeAsync(); else try {
     execFileSync(gh.file, ['pr', 'merge', String(number), '--repo', project.repository, '--merge', '--match-head-commit', headRefOid],
       { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
   } catch (error) {
