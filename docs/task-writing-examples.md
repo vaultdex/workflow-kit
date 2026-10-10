@@ -113,7 +113,7 @@ Wiederaufnahme“ (eine Zeile je Bedingung, nur der Wert, keine Zusätze):
 > Die Migration setzt das Release voraus; die zweite Zeile hält den Start bis nach
 > dem Wartungsfenster zurück.
 
-`board.mjs next` und `check` melden die Aufgabe BLOCKED, bis der Tag existiert und
+`board.mjs next` und `start` melden die Aufgabe BLOCKED, bis der Tag existiert und
 der Zeitpunkt erreicht ist; eine ungültige Zeile gilt als UNKNOWN.
 
 Die Zeile gehört nur in ein Issue, dessen ganze Arbeit wartet. Wartet nur ein Teil,

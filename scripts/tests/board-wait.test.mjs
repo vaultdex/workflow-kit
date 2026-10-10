@@ -21,7 +21,7 @@ test('wait ends at once on merge conflicts of a non-draft PR and ignores every o
   look({ ...pr({ contexts: [check('COMPLETED', 'SKIPPED')], suites: [suite('COMPLETED', 1, 5, 'SKIPPED')] }), isDraft: true });
   const draft = run('wait', '7', '--max-minutes', '0.1');
   assert.equal(draft.status, 1, 'A Draft with only skipped checks is never DONE');
-  assert.match(draft.stdout, /^blocker: PR is still Draft; run board\.mjs ready 7 --local$/m);
+  assert.match(draft.stdout, /^blocker: PR is still Draft; run board\.mjs done ISSUE$/m);
   const readied = { ...pr({ pushed: 5 }), isDraft: false, createdAt: minutesAgo(30), readyEvents: { nodes: [{ createdAt: minutesAgo(5) }] } };
   assert.equal(reviews({ ...readied, mergeStateStatus: 'BEHIND' }), 0, 'BEHIND is no conflict');
 });

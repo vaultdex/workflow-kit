@@ -27,47 +27,46 @@ it or change its status without authorization.
 
 ### Execution check
 
-The [start procedure](../AGENT_RULES.md#start-or-resume) requires a fresh check on
-claim, resume, handoff and review fixes. Memory, an existing branch or Ready status
-does not replace it.
+`board.mjs start` ([start procedure](../AGENT_RULES.md#start-or-resume)) runs a fresh check at every
+claim and resume. Memory, an existing branch or Ready status does not replace it.
 
 | Verdict | Meaning |
 | --- | --- |
 | STARTABLE | Open, on the configured Project with an active status, every native predecessor closed as completed, every `Wartet bis` condition met. |
-| STACKABLE | Held only by open native predecessors, all in this repository and all delivered by the same single open, non-Draft PR from a branch of this repository (or by the same single PR once it is merged into a release branch, where the predecessor issue stays open until the release: then there is no stack, only a plain PR on that branch). `check` names it (`stack base: PR #N`); work starts as a [stacked pull request](#stacked-pull-requests) on that PR. Exit code 4, never 0. |
+| STACKABLE | Held only by open native predecessors, all in this repository and all delivered by the same single open, non-Draft PR from a branch of this repository (or by the same single PR once it is merged into a release branch, where the predecessor issue stays open until the release: then there is no stack, only a plain PR on that branch). the check names it (`stack base: PR #N`); work starts as a [stacked pull request](#stacked-pull-requests) on that PR. Exit code 4, never 0. |
 | BLOCKED | An open predecessor that is not STACKABLE (no open PR, only a Draft PR, a fork PR, several PRs, another repository), a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, an unmet `Wartet bis` condition, or work of another session (see Claims). |
 | UNKNOWN | API error, incomplete dependency data (including the PR list of an open predecessor), an inaccessible predecessor, an unset or unknown status, the issue is missing from the Project, or an unreadable `Wartet bis` line. Retry the read; never read it as "no blockers". |
 
-**Claims.** `check ISSUE --session ID` also reads the issue comments of the authenticated login
+**Claims.** The check (`start ISSUE --session ID`) also reads the issue comments of the authenticated login
 (other authors are ignored). A claim carries `Agent: claude|codex, Session: ID` (anywhere in a line, not quoted in code); `Agent: codex`
 alone is a claim of an unknown session. A comment
 with the line `Handover: ID` (from the earlier session or the human handing over, under the same login) passes the claim to
 that session. The newest claim or handover decides, the later comment wins on equal times. If it names
-another session than `--session` (or no session), `check` reports BLOCKED with agent, session, time and comment link.
-Without `--session`, or when the newest claim is an old one that lacks the field (no known session), `check` only shows a note.
-A claim without activity (issue, Project status, open PR) for `staleHours` (project file, default 6) has expired: with `--session`, `check` notes it
+another session than `--session` (or no session), the check reports BLOCKED with agent, session, time and comment link.
+Without `--session`, or when the newest claim is an old one that lacks the field (no known session), the check only shows a note.
+A claim without activity (issue, Project status, open PR) for `staleHours` (project file, default 6) has expired: with `--session`, the check notes it
 instead of BLOCKED, also for the open PR and branch below; the new claim says `Takeover of stale claim OLD_SESSION` and the assignees stay. A claim with neither an open PR nor a branch expires by the age of its own comment
-(board changes by others do not renew it), and `next` lists no issue that `check` blocks for a claim, PR or branch. A new start
+(board changes by others do not renew it), and `next` lists no issue that the check blocks for a claim, PR or branch. A new start
 is BLOCKED with `finish #N first` while the own session has an issue in In progress or Automated review (stacking on that work is allowed).
-Whatever the claims say, `check` also reports BLOCKED while an open PR closes the issue (a Draft too) or a branch `<agent>/<issue number>-…`
+Whatever the claims say, the check also reports BLOCKED while an open PR closes the issue (a Draft too) or a branch `<agent>/<issue number>-…`
 exists, unless the newest claim is of `--session` (the own session resumes its own PR and branch); without `--session` nothing proves it. Both come
 with the one issue query. A branch without an open PR holds only while it has own commits against the base and its newest commit is younger than `staleHours`
 (one REST compare per branch); then BLOCKED names its agent and the commit age. An empty or older branch is a note (`Takeover of orphaned branch …` in the claim) (#504).
 Two sessions that check within seconds, before either has a claim or a branch, are not caught. Unreadable
-comments are UNKNOWN. Assignment stays no lock; this check only reports, and `status` and `handoff` do not read claims.
+comments are UNKNOWN. Assignment stays no lock; the check only reports, and `field` and `done` do not read claims.
 
 **Claim-Alter und Sub-Issues.** Nur Information, kein neues Verdict und keine Erlaubnis zur Übernahme (die braucht
-weiter eine ausdrückliche Übergabe). Bei einem bekannten Claim nennt `check` danach Alter und PR-Lage, etwa
+weiter eine ausdrückliche Übergabe). Bei einem bekannten Claim nennt die Prüfung danach Alter und PR-Lage, etwa
 `claim: 2d 4h ago (Session S1), open PR: none` oder `open PR: #123` (offene PRs mit Closing-Link auf das Issue).
 Hat das Issue native Sub-Issues, folgt pro Sub-Issue eine Zeile `#N  Status  Assignee  Verdict` mit der Logik des
 Verdicts oben, ohne Claims; sie ändern das Verdict des Issues nicht.
 
 STARTABLE covers native prerequisites, not permission or ownership. Also inspect
 **Abhängigkeiten und Wiederaufnahme** for external access, releases and decisions.
-`status ISSUE "In progress"` accepts STARTABLE and STACKABLE, repeats this check and requires assignment to the
+`start` accepts STARTABLE and STACKABLE; `field ISSUE Status "In progress"` repeats this check and requires assignment to the
 authenticated GitHub user before writing; it cannot distinguish sessions sharing
 a login. Failed reads prevent the transition. Automated review also checks
-[PR backlinks](#pr-backlinks); remaining status commands are metadata operations,
+[PR backlinks](#pr-backlinks); remaining `field` writes are metadata operations,
 not approval checks.
 
 BLOCKED or UNKNOWN stops claims, In progress and dependent edits. Preserve
@@ -85,7 +84,7 @@ ein Tag des Projekt-Repositorys (`Wartet bis: v0.1.1`) oder ein UTC-Zeitpunkt
 Die Zeile zählt, wo immer sie im Issue-Text steht, auch in einem Code-Block: so wird
 keine Bedingung durch Markdown-Besonderheiten still überlesen. Ein Beispiel im Text
 steht deshalb im Satz oder in Anführungszeichen, nicht als eigene Zeile.
-`check` und `next` melden BLOCKED mit der Bedingung, solange der Tag fehlt oder der
+`start` und `next` melden BLOCKED mit der Bedingung, solange der Tag fehlt oder der
 Zeitpunkt in der Zukunft liegt. Ein ungültiger Wert oder ein fehlschlagender Tag-Lookup
 ist UNKNOWN, nie „kein Blocker“. Das ersetzt keine nativen Blocker und verschiebt
 nichts nach Ready; Zeitzonen außer UTC gibt es nicht.
@@ -149,9 +148,9 @@ and keeps them after closing. Set the real fields, not text in the body. The sta
 ([README](../README.md#board-commands)): it checks every value before creating the issue, sets the Status Backlog,
 and reads everything back. Several issues at once (a spec with its sub-issues, a batch of follow-ups): write them in
 a JSON list and run `board.mjs new --from FILE` ([README](../README.md#board-commands)), which needs 3 GraphQL
-requests per 5 issues instead of nine per issue. Add `--start --agent claude|codex --session ID` only when a human request covers the
-[start](#starting-work); it then runs steps 4 to 6 of [Start or resume](../AGENT_RULES.md#start-or-resume) (assignee, claim comment, In progress after the readiness check). Create the issue-linked branch and run `check ISSUE --session ID` right afterwards, before the first edit. For an existing issue use
-`board.mjs priority` and `board.mjs field` (several NAME VALUE pairs per call). Priority reflects
+requests per 5 issues instead of nine per issue. Starting the new issue is a separate `board.mjs start`, only when a human request covers the
+[start](#starting-work). For an existing issue use
+`board.mjs field` (several NAME VALUE pairs per call, Priority included). Priority reflects
 impact and urgency (Urgent, High, Medium, Low). If unsure, give a provisional one
 and state its basis. Don't reprioritize others' active work. Confirmed production,
 security or data-loss fixes use the milestone `Hotfixes · laufend`. Labels describe
@@ -213,7 +212,7 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
   das Formular „Spec oder längere Aufgabe“ setzt beides.
 - PRs und Kommentare beginnen mit dem Ergebnis in einem Satz, Details danach. Das gilt
   auch für den [Übergabekommentar](../README.md#handoff-comment). Maschinell erzeugte
-  Kommentare wie der Backlink von `board.mjs link` sind ausgenommen. Ein Hinweis, den
+  Kommentare wie der Backlink von `board.mjs start` und `done` sind ausgenommen. Ein Hinweis, den
   ein Skill an den Anfang stellt (der KI-Hinweis von `/triage`), steht zuerst, das
   Ergebnis direkt danach.
 - Kein Status im Text: Project-Status, Priorität und Größe stehen nur auf dem Board. Ein
@@ -226,28 +225,25 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
 
 ## Delivery
 
-**Branch.** Create the branch from the issue so GitHub links it:
-`gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base main`.
-GitHub cuts it from the current remote base, which a local clone often does not have yet:
-then run `git fetch origin` and `git switch --track origin/<agent>/ISSUE-topic`, never
-a branch cut from your local `main`. Reuse your existing branch and PR for the same
-issue. If creation fails, check the
-remote branches and issue links before retrying.
+**Branch.** `board.mjs start` creates the branch from the issue so GitHub links it
+(`gh issue develop ISSUE --name <agent>/ISSUE-topic --base <base>`), runs `git fetch origin` and
+`git switch --track`: GitHub cuts it from the current remote base, which a local clone often does not have yet, never
+from your local `main`. It reuses your existing branch and PR for the same
+issue. If creation fails, check the remote branches and issue links before retrying.
 
-**PR body.** From the first push, write `Closes #N` (cross-repo:
+**PR body.** `start` opens the Draft PR with `Closes #N`; for each further issue the PR fully delivers, write `Closes #N` (cross-repo:
 `Closes OWNER/REPO#N`) for each issue the PR fully delivers, and `Refs #N` for
 related work. Closing keywords work only in PRs into the default branch. Partial
 delivery never closes an issue; split the undeliverable part first
 ([undeliverable acceptance](#undeliverable-acceptance)). A branch created from the
 issue is a branch connection, not proof of a direct PR connection. After creating
 the PR or changing its body or base, verify the delivered issue in
-`gh pr view PR --json closingIssuesReferences`. On a non-default base, connect
-the issue with `board.mjs link ISSUE PR` (or GitHub's Development sidebar); the
-command reads the connection back. This connection closes
+`gh pr view PR --json closingIssuesReferences`. On a non-default base, `start` and `done` connect
+the issue (GitHub's Development sidebar does too) and read the connection back. This connection closes
 the issue only when merged into the default branch; keep the project's release
 rules for references and completion. A part that must go to another base (for
-example tooling to `main`) is a separate PR with `Refs #N` and no closing link; the
-board commands accept it beside the one PR that closes the issue and never move the
+example tooling to `main`) is a separate PR with `Refs #N` and no closing link;
+`done ISSUE PR FILE --refs` hands it off and never moves the
 issue to Human review or Done for it.
 
 Write the PR in [simple German](#einfache-sprache): **Was wurde geändert und warum?**
@@ -263,7 +259,7 @@ and empty sections.
 
 Use GitHub's [stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs)
 (public preview) so a dependent issue does not wait for the merge of its predecessor's
-PR. Stack only when `check` says STACKABLE; otherwise the issue stays BLOCKED. Nothing
+PR. Stack only when `start` says STACKABLE; otherwise the issue stays BLOCKED. Nothing
 obliges you to stack, and humans still merge, the whole stack included (layer by layer from the bottom, or at once with `board.mjs merge TOP --stack`, step 6).
 No stacks across forks or repositories and none made of several parallel branches.
 There is no local maximum depth: continue at the current tip when the native stack is
@@ -273,15 +269,13 @@ layers or create a wait/summary issue solely for stack depth or merge-queue prog
 Keep real planning and product work as issues; use native dependencies and stacks plus
 existing issue, PR and chat progress for coordination.
 
-1. **Branch.** Create the issue-linked branch from the head of the base PR's branch (`stack
-   base: … branch B` in the `check` output). When a predecessor PR is already in a native
-   stack, `check` names the current top PR and its stack number; branch from that top:
-   `gh issue develop ISSUE --repo OWNER/REPO --name <agent>/ISSUE-topic --base B`, then
-   `git fetch origin` and `git switch --track origin/<agent>/ISSUE-topic` as in [Delivery](#delivery).
+1. **Branch.** `start` creates the issue-linked branch from the head of the base PR's branch (`stack
+   base: … branch B` in the check output). When a predecessor PR is already in a native
+   stack, the check names the current top PR and its stack number; the branch comes from that top, as in [Delivery](#delivery).
    On a base PR into `release/X.Y.Z` the stack's trunk is that release branch; that is allowed.
-2. **PR and stack.** Create your PR as Draft with base `B` (`gh pr create --draft --base B`).
+2. **PR and stack.** `start` creates your PR as Draft with base `B`.
    If `B` is already the tip of a native stack, append your PR with
-   `gh stack link STACK_NUMBER YOUR_PR` (the number is shown by `check`; extension
+   `gh stack link STACK_NUMBER YOUR_PR` (the number is shown by the check; extension
    `gh extension install github/gh-stack`). Without the extension, call
    `POST repos/OWNER/REPO/stacks/STACK_NUMBER/add` with `{"pull_requests":[YOUR_PR]}`.
    If `B` is not already in a native stack, link the base and your PR bottom-first:
@@ -292,10 +286,10 @@ existing issue, PR and chat progress for coordination.
    Read it back with `gh api "repos/OWNER/REPO/stacks?pull_request=YOUR_PR"`; an empty result is
    no stack. If `gh stack` or the Stacks API is unavailable or fails (for example exit code 9, not
    enabled for the repository), keep the PR Draft, record the error in the issue and treat the issue
-   as BLOCKED until `check` says STARTABLE.
+   as BLOCKED until the check says STARTABLE.
 3. **Body and link.** `Closes #N` stays in the PR body. Because the base is not the default branch,
-   also run `board.mjs link ISSUE PR` and read the connection back, as for any
-   [non-default base](#delivery). Post the [backlinks](#pr-backlinks) as usual.
+   `start` also links the issue natively and reads the connection back, as for any
+   [non-default base](#delivery); the [backlinks](#pr-backlinks) follow.
 4. **Force-push.** The one exception to the force-push ban: `git push --force-with-lease=<branch>:<expected SHA> origin <branch>`
    on your own upper layer. Never push, rebase or force anything else, the base PR's branch
    included. So don't run `gh stack push`, `sync`, `rebase` or `submit`: they act on every layer,
@@ -311,9 +305,9 @@ existing issue, PR and chat progress for coordination.
    needs its upstream; the fork-point logic drops your commits that GitHub rewrote and replays only the
    local ones, so no `reset --hard` is needed), then `git diff --stat backup/<branch> HEAD`, which must
    show nothing but what the base branch gained meanwhile, then a plain `git push` and `git branch -D
-   backup/<branch>`. After that check the base branch and CI on the new head. On a release branch the base PR's issue stays open after the merge, so `check` keeps saying STACKABLE ("already merged"): your layer is then a plain PR on the release branch, and `handoff` skips the stack checks. If the base PR is closed
-   without merge, your layer stops: run `check` again and report; don't retarget your PR on your own.
-6. **Handoff.** Your layer may go to Human review before the base PR is merged. `board.mjs handoff`
+   backup/<branch>`. After that check the base branch and CI on the new head. On a release branch the base PR's issue stays open after the merge, so the check keeps saying STACKABLE ("already merged"): your layer is then a plain PR on the release branch, and `done` skips the stack checks. If the base PR is closed
+   without merge, your layer stops: run `start` again and report; don't retarget your PR on your own.
+6. **Handoff.** Your layer may go to Human review before the base PR is merged. `board.mjs done`
    then requires your PR to come from this repository, to be linked with the base PR as a stack on GitHub
    (the Stacks API read-back from step 2, not just an aligned branch chain; other layers may sit between the
    base PR and yours), to target the branch of the layer directly below it
@@ -325,36 +319,16 @@ existing issue, PR and chat progress for coordination.
 
 ### PR backlinks
 
-Immediately after creating a PR, post its full URL in a comment on every issue
-being delivered and read back the comments (`gh api --paginate
-repos/OWNER/REPO/issues/ISSUE/comments`). PR creation is complete only after every
-backlink is confirmed, including for Draft PRs. Reuse an existing comment pointing
-to the same open PR on resume; after a partial write or an API error, read first
-before retrying. A link in the chat or PR body does not replace the issue comment.
-`board.mjs link ISSUE PR` does both for an issue of this repository: the native
-connection and, if no comment with the PR's URL exists yet, that comment, read back
-afterwards. A second run writes nothing twice. `status ISSUE "Automated review" PR`
-runs the same logic for a missing backlink on an issue of this repository, so `link`
-is not needed beforehand; only a failing link or read-back refuses.
-A PR that does not deliver the issue (for example a test fix for a proof issue) is only named: run
-`board.mjs link ISSUE PR --refs` first (backlink comment, no native link, so the merge does not close the issue);
-`status … "Automated review"` then finds the comment, and `handoff ISSUE PR --refs` needs no native link.
+Every issue a PR delivers carries a comment with the PR's full URL, read back; PR creation is complete only after that, Draft PRs included.
+`start` and `done` set a missing native connection and a missing comment themselves and read both back (a second run writes nothing twice;
+a link in the chat or PR body does not replace the comment). Wrong or old backlinks, a missing one they cannot set, and unreadable or
+incomplete API data refuse the status Automated review. A PR that delivers several issues: run `done` for each of them. A PR that does not deliver the
+issue (for example a test fix for a proof issue) is only named: `done ISSUE PR FILE --refs` posts the backlink comment without a native link,
+so the merge does not close the issue.
 
-Before Automated review, run `board.mjs status ISSUE "Automated review" PR
-[OTHER_ISSUE...]` with the PR number and all other issues it delivers in this
-repository (numbers), or another repository (`OWNER/REPO#N`). The command checks
-the open PR's explicit issue references and every issue's complete comment list
-before changing status. Wrong/old backlinks, a missing one it cannot set,
-unreadable or incomplete API data fail without changing status. The `field ISSUE
-Status "Automated review" PR [OTHER_ISSUE...]` route performs the same check.
-
-This check accepts `Refs` on release branches as well as `Closes` on the default
-branch. It proves the comment backlinks, not native closing links, session
-ownership, full delivery or review completion. Keep those separate checks and the
-project's release policy. List only delivered issues; related references do not
-expand the declared scope. Repository PRs without a delivered issue still use
-`reviews PR` and `wait PR` without an artificial issue requirement. Creating a
-backlink never closes an issue.
+The check accepts `Refs` on release branches as well as `Closes` on the default branch. It proves the comment backlinks, not native closing links,
+session ownership, full delivery or review completion. Keep those separate checks and the project's release policy. List only delivered issues;
+related references do not expand the declared scope. Creating a backlink never closes an issue.
 
 ### Review loop
 
@@ -369,19 +343,14 @@ backlink never closes an issue.
    human; add cases that review uncovers. Pure text or configuration changes need
    no section. Where the project lists `"selfReview"` ([setup](../SETUP.md#3-board-and-labels)),
    run those checks on the diff before Ready for Review, once per PR, and name each in the PR body
-   section **Selbstprüfung**; `handoff` and `merge` check that each name appears there, but do not judge
+   section **Selbstprüfung**; `done` and `merge` check that each name appears there, but do not judge
    whether a check ran or whether its result was good.
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
-   Then mark it Ready for Review with `board.mjs ready PR SHA` (the id of the commit you just
-   pushed, or `--local` for the checkout's own head: it waits until GitHub reports that head, so CI starts for the right
-   revision) and set Automated review with the PR number and
-   all delivered issues ([PR backlinks](#pr-backlinks); `status` sets a missing
-   backlink itself, no `link` call needed). Don't wait for optional
+   Then `board.mjs done` marks it Ready for Review for the commit you just pushed (it waits until GitHub reports that head, so CI
+   starts for the right revision) and sets Automated review ([PR backlinks](#pr-backlinks)). Don't wait for optional
    self-reviews; bots and CI start only outside Draft.
-3. Wait for CI and every non-optional review with a trace on the current head with `board.mjs
-   wait PR --head SHA` (SHA: 7 to 40 characters of the head you just pushed; the flag keeps it from ending
-   on the old head right after a push) in the background (a driver subagent: foreground, see
-   [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
+3. `done` then waits for CI and every non-optional review with a trace on the current head, in the background (a driver subagent:
+   foreground, see [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
    status or review on the head commit, or, created after the head was pushed, a
    review comment, an open review request, an announced review or a bot's reaction
@@ -402,18 +371,18 @@ backlink never closes an issue.
    the head, say so in the handoff comment (`Codex: keine Spur auf <Head>`); the handoff
    stands. A reviewer the project lists as
    `"optionalReviewers"` ([setup](../SETUP.md#3-board-and-labels)) is never awaited,
-   re-requested or replaced by a self-review: `wait` and `handoff` ignore its traces,
+   re-requested or replaced by a self-review: `wait` and `done` ignore its traces,
    while its findings, open threads and change requests count like any other. Once all threads
-   are resolved, `handoff` dismisses its standing change request itself (GitHub's ruleset would block the merge).
-4. To change code: complete [Start or resume](../AGENT_RULES.md#start-or-resume),
-   set the PR to Draft, batch fixes and rerun affected checks. Mark Ready for Review
-   (`board.mjs ready PR SHA`), set Automated review and wait again. When `reviews` or `wait` print
+   are resolved, `done` dismisses its standing change request itself (GitHub's ruleset would block the merge).
+4. To change code: run `start` again,
+   set the PR to Draft, batch fixes and rerun affected checks. Push and run `done` again (Ready for Review,
+   Automated review, wait). When `done` or `wait` print
    `changed on both sides` with files, merge the base once before the next correction push. Otherwise merge the base
    only for a conflict: PR CI already tests the merge result. A project may name more cases (Vaultdex: new migrations on
    both sides).
    After two correction pushes, collect new findings that neither block (P0/P1,
    security, data loss) nor regress against main in one follow-up issue instead of
-   another push; every push restarts CI and reviews. `board.mjs reviews` and `wait` print
+   another push; every push restarts CI and reviews. `done` and `wait` print
    `correction pushes after ready: N` (distinct heads pushed after the PR's first Ready,
    not the head that set it) and from `N >= 2` `cap reached`; nothing is blocked, and
    findings that block or regress (as defined above) and a red required CI are still corrected.
@@ -437,34 +406,31 @@ backlink never closes an issue.
    resolution: an issue link, `behoben in <SHA>`, `persönlich gemeldet` or
    `kein Handlungsbedarf: <Grund>`; `Keine Funde` as the only line when there are none.
    A fixable finding that no issue covers yet becomes an issue first; a comment alone
-   is no record. `board.mjs handoff` notes a missing section or a line without a resolution.
-6. Run `board.mjs handoff ISSUE PR` for the fully delivered issue only when CI
-   passes, every non-optional review with a trace on the current head has finished or stalled,
-   each finding is fixed or linked to a follow-up, the
-   final proof has passed, the retro is recorded and no prerequisite is open. Name an
+   is no record. `board.mjs done` notes a missing section or a line without a resolution.
+6. Hand off with `board.mjs done ISSUE FILE` once each finding is fixed or linked to a follow-up, the
+   final proof has passed, the retro is recorded and no prerequisite is open; it waits for CI and every
+   non-optional review with a trace on the current head to finish or stall. Name an
    optional reviewer in the handoff only when it found something. If a
    reviewer that is not optional is confirmed unavailable (quota, outage) or stalled, record the
    reviewer, cause and evidence in the PR and hand off with that limitation stated
-   in the handoff comment. Post that [handoff comment](../README.md#handoff-comment)
-   on the PR for the current head (a `Head: <SHA>` line); `board.mjs handoff` refuses without it.
+   in the handoff comment: FILE is the body of that [handoff comment](../README.md#handoff-comment), and `done` refuses without a comment for the current head.
    Otherwise pending or unknown does not count as unavailable. Mergeable is not
-   merge-ready: resolve every `blocker:` that `board.mjs reviews` lists (a standing
+   merge-ready: resolve every `blocker:` that `done` lists (a standing
    change request, conflicts) or name it for the human when only a human may clear
-   it, such as dismissing a review (`handoff` dismisses an optional reviewer's itself)
+   it, such as dismissing a review (`done` dismisses an optional reviewer's itself)
    or resolving a thread you declined to fix.
-   Handoff reuses the review check, verifies the native PR link and assigned active
+   `done` reuses the review check, verifies the native PR link and assigned active
    task, rejects Draft/closed PRs, changed heads, conflicts and open threads, waits
    for a determined merge state, rechecks PR proof and issue prerequisites immediately before mutation, then
    writes and reads back Human review. A failed or unreadable check leaves the
    status untouched. An unsuccessful status read-back is an error, not a delivery;
-   inspect the actual status before retrying. Plain `status` writes maintain
+   inspect the actual status before retrying. `field` writes maintain
    metadata and do not prove these delivery gates.
-   Check off every fulfilled acceptance box in the issue body (`board.mjs body-replace`, one box per call, or `board.mjs body`) before the handoff; a part
-   moved to a follow-up stays unchecked and links that issue (`- [ ] … → #12`). `board.mjs handoff`
-   notes every open `- [ ]` line without an issue reference.
+   `done` ticks every acceptance box of the issue body that names no issue; a part
+   moved to a follow-up stays unchecked and links that issue (`- [ ] … → #12`).
 7. A human merges. An agent that was given merge authority (for example by the chief of
    staff) merges only with `board.mjs merge PR`, never with a plain `gh pr merge`: the
-   command applies the review gates of `handoff` (CI, every review with a trace on the head
+   command applies the review gates of `done` (CI, every review with a trace on the head
    finished, no `blocker:`, no open thread, determined merge state) and refuses while a
    reviewer is still running. It merges exactly the checked head by its full commit id
    (`gh pr merge --merge --match-head-commit`, or `merge-async` when GitHub refuses a PR with stacked children as "part of a stack" or HTTP 403)
@@ -511,7 +477,7 @@ data-loss or availability risks at once, without exposing secrets.
 If part of the acceptance can't be delivered, for example because access is
 missing, get explicit human authorization before opening the PR. Then move that
 part into a follow-up issue: Backlog, full metadata, native `blocked by` the
-original issue (`board.mjs block FOLLOW-UP ORIGINAL`). Record the split in the original issue: leave that acceptance line unchecked and add the link to the follow-up (`- [ ] … → #12`), which `handoff` accepts as moved; the PR then closes the
+original issue (`board.mjs block FOLLOW-UP ORIGINAL`). Record the split in the original issue: leave that acceptance line unchecked and add the link to the follow-up (`- [ ] … → #12`), which `done` accepts as moved; the PR then closes the
 reduced scope. Without authorization it stays a blocker. A split never waives
 security or required checks.
 

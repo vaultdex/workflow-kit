@@ -23,7 +23,7 @@ test('link connects the issue natively to the PR, repeats safely and trusts only
   assert.equal(mutations(), 1, 'A Draft PR is connected with one write');
   assert.match(readFileSync(join(checkout, 'mutations'), 'utf8'), /addCloseIssueReferences\(input:\{issueId:\$issue,pullRequestIds:\[\$pr\]\}\)/);
   assert.equal(commentWrites(), 1, 'The missing backlink comment is written once');
-  result = run('status', '1', 'Automated review', '7');
+  result = run('field', '1', 'Status', 'Automated review', '7');
   assert.equal(result.status, 0, 'The guard accepts what link wrote: ' + result.stdout + result.stderr);
 
   result = run('link', '1', '7');

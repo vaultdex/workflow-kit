@@ -12,7 +12,7 @@ const CALL_TIMEOUT_MS = 60_000;
 // The start line names the running test: a hung file shows its last "start" instead of staying silent (node:test prints a test only when it ends).
 export const test = (name, body) => nodeTest(name, t => { console.error(`start: ${name}`); return body(t); });
 
-// body_html is what GitHub renders for the body (the handoff check reads that, like the open acceptance of the issue).
+// body_html is what GitHub renders for the comment (the handoff check reads that).
 export const handoffComment = changes => ({ id: 900, user: { login: 'worker', type: 'User' }, body: '## Übergabe\n\nHead: abcdef1\n\n### Retro\n\n- Keine Funde',
   body_html: '<h2 dir="auto">Übergabe</h2>\n<p dir="auto">Head: abcdef1</p>\n<h3 dir="auto">Retro</h3>\n<ul dir="auto">\n<li>Keine Funde</li>\n</ul>',
   html_url: 'h', created_at: '2999-01-01T00:00:00Z', updated_at: '2999-01-01T00:00:00Z', ...changes });
@@ -72,7 +72,7 @@ export function handoffFixture(t) {
 }
 
 export const issue = (status = 'Ready', nodes = [], totalCount = nodes.length) => ({
-  id: 'I1', number: 1, title: 'Fixture', state: 'OPEN', bodyHTML: '', assignees: { nodes: [] },
+  id: 'I1', number: 1, title: 'Fixture', state: 'OPEN', assignees: { nodes: [] },
   projectItems: { nodes: [{ id: 'PI1', project: { id: 'P1' }, status: { name: status } }] },
   closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
   blockedBy: { totalCount, nodes },
@@ -144,9 +144,3 @@ export function reviewsFixture(t) {
   const oldTraces = { comments: [codex('Completed', 0)] };
   return { checkout, run, runBriefly, queries, minutesAgo, job, draftRun, readyHead, oldTraces, codexUser, check, suite, pr, codex, reaction, look, reviews };
 }
-
-// GitHub's rendering of a task item, an issue reference and a code block (shape of its Markdown API output).
-export const task = (text, checked) => `<li class="task-list-item"><input type="checkbox" id="" disabled="" class="task-list-item-checkbox" aria-label="${checked ? 'Completed' : 'Incomplete'} task"${checked ? ' checked=""' : ''}> ${text}</li>`;
-export const reference = '<a class="issue-link js-issue-link" href="https://github.com/test/example/issues/12">#12</a>';
-export const list = items => `<ul class="contains-task-list">\n${items.join('\n')}\n</ul>`;
-export const codeBlock = '<pre class="notranslate"><code class="notranslate">- [ ] sample in code\n</code></pre>';

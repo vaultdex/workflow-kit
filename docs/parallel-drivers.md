@@ -102,16 +102,16 @@ Modellwahl stehen hier nicht.
    `git submodule update --init .vendor/workflow-kit`, dann AGENT_RULES.md lesen.
 1. **Ein Issue bis „Human review“ treiben.** Früher enden nur bei einem menschlichen
    Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung) oder bei einem Blocker
-   (`board.mjs check` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
+   (`board.mjs start` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
    [Blockers and scope](CONTRIBUTING.md#blockers-and-scope)): erst im Issue
    kommentieren, dann berichten. „Human review“ heißt mergebar: Meldet `board.mjs sweep` danach
-   einen Konflikt (Issue zurück auf „Automated review“, Kommentar), löst der Owner ihn und ruft `handoff` erneut auf.
+   einen Konflikt (Issue zurück auf „Automated review“, Kommentar), löst der Owner ihn und ruft `done` erneut auf.
 2. **Regeln vom Ziel-Release-Branch lesen.** AGENTS.md und Kit-Regeln stammen vom
    Release-Branch, auf den die PR zielt, nicht nur von `main`; eine Regel kann nur
-   dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume) mit
-   `Agent: …, Session: …`. Den Issue-Branch zweigt der Driver vom Ziel-Release-Branch
-   ab (`--base` im `gh issue develop` der [Delivery](CONTRIBUTING.md#delivery)-Regel
-   ist dann dieser Branch, nicht `main`). Bei STACKABLE ist es der Branch des Basis-PR
+   dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume):
+   `board.mjs start ISSUE --session ID` schreibt `Agent: …, Session: …` und zweigt den
+   Issue-Branch vom Ziel-Release-Branch ab (die Basis nennt das Projektfeld, nicht `main`). Bei
+   STACKABLE ist es der Branch des Basis-PR
    ([Stacked pull requests](CONTRIBUTING.md#stacked-pull-requests)). Er bleibt ein fremder
    Branch (Regel 3): der Driver zweigt davon ab und liest ihn, pusht ihn aber nie.
 3. **Fremde Branches in Ruhe lassen.** `codex/*`-Branches und Branches anderer
@@ -119,18 +119,18 @@ Modellwahl stehen hier nicht.
    Issue-Branch gehört dem Driver. Überschneidungen melden.
 4. **Warten ohne Handarbeit.** Abweichend von [AGENT_RULES.md](../AGENT_RULES.md#economy)
    und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
-   `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
-   Zuges von Hintergrundaufgaben erfährt. `wait` endet nach 9 Minuten von selbst (`--max-minutes N`,
-   0 = unbegrenzt) mit Exit-Code 4 und der Zeile `still waiting: call wait again`, damit das
+   `board.mjs done` (oder `wait PR`) im Vordergrund ausführen, weil ein Subagent erst am Ende seines
+   Zuges von Hintergrundaufgaben erfährt. `done` und `wait` enden nach 9 Minuten von selbst (`--max-minutes N`,
+   0 = unbegrenzt) mit Exit-Code 4 und der Zeile `still waiting: call … again`, damit das
    Bash-Werkzeug es nicht nach 10 Minuten in den Hintergrund schiebt: bei Exit 4 einfach erneut
-   aufrufen. Jeder Vordergrund-Aufruf von `wait`, `merge` und `quota-wait` setzt den Timeout des
+   aufrufen. Jeder Vordergrund-Aufruf von `done`, `wait`, `merge` und `quota-wait` setzt den Timeout des
    Shell-Werkzeugs auf 600000 ms (Standard: 2 Minuten, dann Hintergrund); `--max-minutes` bleibt bei höchstens 9. Nach DONE nicht auf einen Reviewer
    ohne Spur pollen (ein Review, das nie startet) und keinen Review von Hand anfordern
    (kein `@codex review`); fehlt die Spur, nennt der Übergabe-Kommentar das
    ([Review loop](CONTRIBUTING.md#review-loop) Schritt 3). Freitext-Ankündigungen anderer Bots
    erkennt `wait` nicht ([README](../README.md#board-commands)); eine angekündigte
    Review verfolgt der Driver von Hand bis zum Ergebnis oder Stall und führt
-   `handoff` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;
+   `done` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;
    `tasks/*.output` nicht pollen, die Datei bleibt leer.
 5. **Shell und Werkzeuge.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus,
    mit literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
@@ -160,7 +160,7 @@ Modellwahl stehen hier nicht.
    - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
      und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
    - Kommentare eines Issues: `gh api repos/OWNER/REPO/issues/N/comments`.
-   - Kit-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD check N` (die Option steht vor
+   - Kit-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD start N` (die Option steht vor
      dem Befehl) liest `.github/workflow-project.json` aus dem Klon statt aus dem Arbeitsverzeichnis.
      `init-project.mjs`, `setup-skills.mjs` und `affected-tests.mjs` nehmen dieselbe Option als erstes
      Argument (`affected-tests.mjs --cwd KLON-PFAD --run`) und arbeiten dann im Klon.
@@ -176,7 +176,7 @@ Modellwahl stehen hier nicht.
    (zum Beispiel `ponytail-review` und `code-review`), laufen diese Prüfungen einmal je PR im
    Vordergrund vor „Ready for Review“, und der PR-Text hat den Abschnitt `## Selbstprüfung` mit jedem Namen
    und dem Ergebnis; Ergebnisse nennen Belege und unterscheiden geprüftes Verhalten von Mocks und Konfiguration.
-   `board.mjs handoff` und `merge` prüfen Abschnitt und Namen, nicht Ergebnis oder Qualität
+   `board.mjs done` und `merge` prüfen Abschnitt und Namen, nicht Ergebnis oder Qualität
    ([Review loop](CONTRIBUTING.md#review-loop) Schritt 1).
 6. **Reibung statt Retro-Skill.** Driver rufen den Skill `retro` nicht auf; er kostet
    zu viele Tokens pro Issue. Sie schreiben höchstens 3 Reibungszeilen aus der eigenen

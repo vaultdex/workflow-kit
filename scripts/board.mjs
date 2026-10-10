@@ -1,10 +1,10 @@
 // Board commands, so agents don't rediscover Project, priority and dependency APIs on every task.
-// Run in the project: board.mjs next | check | status | priority | field | new | block | sub | reviews | wait | quota-wait | merge (see usage below).
+// Run in the project: board.mjs start | done | next | sweep | field | new | block | sub | wait | quota-wait | merge | stack-sync | body | body-replace (see usage below).
 // `--cwd PATH` as the first argument runs it for the project in PATH from any directory: without it the
 // working directory decides the project, and a driver in another project would read and write the wrong board.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,11 +20,16 @@ const [owner, name] = project.repository.split('/');
 let number = Number(String(ref).replace(/^#/, ''));
 const gh = externalTool('gh', process.cwd(), projectDirectory);
 
+/** git in the project's checkout (--cwd, else the working directory); looked up on use, so commands without git never need one. */
+function git(...args) {
+  const tool = externalTool('git', process.cwd(), projectDirectory);
+  return execFileSync(tool.file, ['-C', projectDirectory, ...args], { encoding: 'utf8', env: tool.env, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
 /** The commit the project's checkout (--cwd, else the working directory) has checked out: what `ready PR --local` expects the PR to show. */
 function localHead() {
-  const git = externalTool('git', process.cwd(), projectDirectory);
   try {
-    return execFileSync(git.file, ['-C', projectDirectory, 'rev-parse', 'HEAD'], { encoding: 'utf8', env: git.env, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return git('rev-parse', 'HEAD');
   } catch (error) {
     console.error(`ready --local cannot read the head of ${projectDirectory}: ${String(error.stderr || error.message).trim()}`);
     process.exit(2);
@@ -32,13 +37,14 @@ function localHead() {
 }
 // The first argument after the PR; `ready PR --local` takes the head from the checkout, so a shell never has to splice `$(git rev-parse HEAD)` into the call.
 // The PR must still show exactly that head before it is marked ready, so a commit that was not pushed is refused like a mistyped id.
-const value = command === 'ready' && typed === '--local' && Number.isSafeInteger(number) ? localHead() : typed;
+// `done` sets it to the PR it found, so the handoff steps it calls read their PR where they read it for `handoff ISSUE PR`.
+let value = command === 'ready' && typed === '--local' && Number.isSafeInteger(number) ? localHead() : typed;
 
 // The account's GraphQL quota (5000 points an hour) is shared by every agent on it. Every response carries what is left and when it
 // resets in its headers (`gh api -i`, also on a refusal), so no extra request asks for it; a query reads its own cost.
 // wait, reviews and handoff sleep until the reset instead of failing when it runs out or falls below their reserve;
 // every other command stops with the reset time.
-const sleepers = { wait: 300, reviews: 50, handoff: 50, 'quota-wait': 300 };
+const sleepers = { wait: 300, reviews: 50, handoff: 50, done: 50, 'quota-wait': 300 };
 let quota, spent = 0; // the latest { remaining, resetAt } a response reported, and the points this run has used
 // `wait` gives up at this time (--max-minutes), before the 10-minute limit of an agent's shell tool would push it into the background.
 let deadline = Infinity;
@@ -133,7 +139,7 @@ const issueFields = predecessor => `id number title state body updatedAt reposit
 const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!,$branch:String!){viewer{login} repository(owner:$owner,name:$name){
   refs(refPrefix:"refs/heads/",query:$branch,first:20){nodes{name}}
   issue(number:$number){
-  ${issueFields(predecessorFields)} bodyHTML
+  ${issueFields(predecessorFields)}
   closedByPullRequestsReferences(first:100){totalCount nodes{number state updatedAt mergeStateStatus repository{nameWithOwner} headRefName}}
   labels(first:20){nodes{name}}
   ${subIssues ? `subIssues(first:${subIssues}){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}` : ''}}}}`;
@@ -687,7 +693,7 @@ function sweep() {
       plan ??= resolveOption('Status', 'Automated review');
       // The comment first: a failed comment must not leave an issue out of Human review that nobody was told about.
       graphql('mutation($issue:ID!,$body:String!){addComment(input:{subjectId:$issue,body:$body}){clientMutationId}}', { issue: issue.id,
-        body: `Der PR ${pr.url} hat Konflikte mit seiner Basis, ein Issue in Human review muss aber mergebar sein. Das Issue geht zurück auf Automated review. Konflikt lösen, dann neu übergeben (\`board.mjs handoff\`).` });
+        body: `Der PR ${pr.url} hat Konflikte mit seiner Basis, ein Issue in Human review muss aber mergebar sein. Das Issue geht zurück auf Automated review. Konflikt lösen, dann neu übergeben (\`board.mjs done\`).` });
       writeOption(issue, plan);
       console.log(`#${issue.number} reset to Automated review: PR #${pr.number} has merge conflicts`);
       resets++;
@@ -755,17 +761,17 @@ function next() {
   const stackable = candidates.map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
   const held = ready.filter(issue => issue.reasons.length && !stackable.some(candidate => candidate.number === issue.number));
   // Unfinished work comes first: the own (finish it before a new start), then work that nobody moves (a stale PR, a Human-review PR with conflicts),
-  // which a new session may take over (check ISSUE --session ID treats a stale claim as expired).
+  // which a new session may take over (start ISSUE --session ID treats a stale claim as expired).
   const status = issue => projectItem(issue)?.status?.name;
   const session = sessionOption(), mine = session ? ownWork(nodes, login, session) : [];
   const abandoned = nodes.filter(issue => ['In progress', 'Automated review', 'Human review'].includes(status(issue)) && !mine.includes(issue) && openPr(issue) && isStale(issue));
   const work = (issue, note) => `#${issue.number} [${status(issue)}] ${issue.title} (PR #${openPr(issue)?.number ?? '-'}${note ? `, ${note}` : ''})`;
-  if (mine.length) console.log(`Finish your own work first (check ISSUE is BLOCKED for a new start meanwhile):\n${mine.map(issue => work(issue)).join('\n')}\n`);
-  if (abandoned.length) console.log(`Stale or conflicting work, a new session may take it over (check ISSUE --session ID):\n${abandoned.map(issue => work(issue,
+  if (mine.length) console.log(`Finish your own work first (start ISSUE is BLOCKED for a new start meanwhile):\n${mine.map(issue => work(issue)).join('\n')}\n`);
+  if (abandoned.length) console.log(`Stale or conflicting work, a new session may take it over (start ISSUE --session ID):\n${abandoned.map(issue => work(issue,
     conflicting(issue) ? 'merge conflicts' : `no activity for ${ago(idleMs(issue))}`)).join('\n')}\n`);
   for (const issue of startable) console.log(line(issue));
-  console.log(startable.length ? 'Run board.mjs check ISSUE --session ID before claiming one.' : 'No Ready issue whose blockers are all completed.');
-  if (stackable.length) console.log('\nReady and stackable on an open PR (check ISSUE shows STACKABLE; see docs/CONTRIBUTING.md#stacked-pull-requests):');
+  console.log(startable.length ? 'Run board.mjs start ISSUE to claim one.' : 'No Ready issue whose blockers are all completed.');
+  if (stackable.length) console.log('\nReady and stackable on an open PR (start ISSUE says STACKABLE; see docs/CONTRIBUTING.md#stacked-pull-requests):');
   for (const issue of stackable) console.log(`${line(issue)}\n  - base PR #${issue.base.number} (${issue.base.state === 'MERGED' ? `merged into ${issue.base.baseRefName}` : `branch ${issue.base.headRefName}`})`);
   if (held.length) console.log('\nReady but not startable:');
   for (const issue of held) console.log([line(issue), ...issue.reasons.map(reason => `  - ${reason}`)].join('\n'));
@@ -832,11 +838,7 @@ function guardOption(issue, { fieldName, option }) {
     try { if (!mayStart(check(judged))) throw new Error(verdict.join('; ')); } finally { console.log = log; }
     if (wasDone) log(`note: #${issue.number} is open again and was Done; it moves to In progress`);
   }
-  if (fieldName === 'Status' && option.name === 'Automated review') {
-    verifyBacklinks(issue);
-    // Only a hint, never a refusal; `handoff` notes these again.
-    if (typeof issue.bodyHTML === 'string') for (const line of openAcceptance(issue.bodyHTML)) console.log(`warning: open acceptance in the issue (check it off, or move it to a follow-up and link that issue): ${line}`);
-  }
+  if (fieldName === 'Status' && option.name === 'Automated review') verifyBacklinks(issue);
 }
 
 function writeOption(issue, { fieldName, field, linked, option }) {
@@ -913,29 +915,27 @@ function applyFields(issue, plans) {
 
 /** Flags of `new`; unknown or repeated single flags are errors, never ignored. */
 function newOptions(args) {
-  const given = {}, single = ['--title', '--body-file', '--milestone', '--priority', '--agent', '--session', '--status'];
+  const given = {}, single = ['--title', '--body-file', '--milestone', '--priority', '--status'];
   for (let index = 0; index < args.length; index++) {
     const flag = args[index];
-    if (flag === '--start') { given[flag] = [true]; continue; }
     assert.ok([...single, '--label', '--field'].includes(flag), `new: unknown option ${flag}`);
     const text = args[++index];
     assert.ok(text !== undefined && !text.startsWith('--'), `new: ${flag} needs a value`);
     (given[flag] ??= []).push(text);
   }
   for (const flag of single) assert.ok((given[flag]?.length ?? 0) <= 1, `new: ${flag} may appear once`);
-  const [title, bodyFile, milestone, priority, agent, session, status] = single.map(flag => given[flag]?.[0]);
-  const start = Boolean(given['--start']);
+  const [title, bodyFile, milestone, priority, status] = single.map(flag => given[flag]?.[0]);
   const fields = (given['--field'] ?? []).map(pair => {
     const split = pair.indexOf('=');
     assert.ok(split > 0 && split < pair.length - 1, `new: --field wants NAME=VALUE, got "${pair}"`);
     return [pair.slice(0, split), pair.slice(split + 1)];
   });
-  return { title, bodyFile, milestone, priority, agent, session, status, start, fields, labels: given['--label'] ?? [] };
+  return { title, bodyFile, milestone, priority, status, fields, labels: given['--label'] ?? [] };
 }
 
 /**
  * One issue to create, every value checked and resolved before anything exists: body, Project fields (all of them against one read
- * of the field definitions), milestone and labels. `status` is the Status the command sets (Backlog; Ready first with --start).
+ * of the field definitions), milestone and labels. `status` is the Status the command sets.
  */
 let repositoryLists;
 function planNew({ title, bodyFile, milestone, priority, labels: wanted, fields }, status = 'Backlog') {
@@ -960,10 +960,10 @@ function planNew({ title, bodyFile, milestone, priority, labels: wanted, fields 
 }
 
 /** The REST call that creates the issue (no GraphQL point). A lost or unreadable answer does not prove that nothing was created. */
-function post({ title, text, milestone, labels }, assignees) {
+function post({ title, text, milestone, labels }) {
   try {
     const created = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues`, '-X', 'POST', '--input', '-'],
-      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: JSON.stringify({ title, body: text, milestone: milestone.number, labels, ...assignees && { assignees } }) }));
+      { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: JSON.stringify({ title, body: text, milestone: milestone.number, labels }) }));
     assert.ok(Number.isSafeInteger(created?.number) && created.html_url && created.node_id, 'GitHub did not report the new issue');
     return created;
   } catch (error) {
@@ -971,12 +971,11 @@ function post({ title, text, milestone, labels }, assignees) {
   }
 }
 
-/** The milestone, labels and (with `viewer`) assignee GitHub stored. */
-function readBackIssue(created, { milestone, labels }, viewer) {
+/** The milestone and labels GitHub stored. */
+function readBackIssue(created, { milestone, labels }) {
   const stored = rest(`repos/${project.repository}/issues/${created.number}`);
   assert.equal(stored.milestone?.title, milestone.title, `Read-back of the milestone shows ${stored.milestone?.title ?? 'none'}`);
   assert.deepEqual(stored.labels.map(label => label.name).sort(), [...labels].sort(), 'Read-back of the labels differs');
-  if (viewer) assert.ok(stored.assignees.some(assignee => assignee.login.toLowerCase() === viewer.toLowerCase()), 'Read-back of the assignee differs');
 }
 
 /** The one-line result of `new`. Later plans replace earlier ones of the same field (Status: Ready, then In progress). */
@@ -1080,49 +1079,24 @@ const readBlock = miss => rows => {
 /**
  * Create an issue with everything the workflow requires and read every value back. All inputs are checked before the
  * issue exists (Project fields, milestone, labels, start prerequisites); a failure after it names the issue so it is
- * finished by hand, never created twice. `--start` then runs the start steps: Ready, assignee, claim, In progress.
- * `--from FILE` creates a whole list instead (createMany).
+ * finished by hand, never created twice. `--from FILE` creates a whole list instead (createMany).
  */
 function create() {
   const args = process.argv.slice(3);
   if (args[0] === '--from') return createMany(args.slice(1));
   const options = newOptions(args);
-  const { agent, session, start, status } = options;
-  if (start) {
-    assert.ok(['claude', 'codex'].includes(agent) && /^\w[\w.-]*$/.test(session ?? ''), 'new: --start needs --agent claude|codex and --session ID (the claim comment)');
-  } else assert.ok(!agent && !session, 'new: --agent and --session belong to --start');
-  assert.ok(!(start && status), 'new: --status and --start exclude each other (--start sets Ready, then In progress)');
-  // Status is set by the command: Backlog, --status (checked against the Project options by planFields), or Ready then In progress with --start.
-  const plan = named('new', () => planNew(options, start ? 'Ready' : status ?? 'Backlog'));
-  const progress = start ? planFields([['Status', 'In progress']]) : [];
-  let viewer;
-  if (start) {
-    viewer = graphql('query{viewer{login}}').viewer?.login;
-    assert.ok(viewer, 'Cannot verify the authenticated GitHub user');
-    const waits = waitReasons(plan.text);
-    assert.ok(!waits.blocked.length && !waits.unknown.length, `new: the issue would not be startable: ${[...waits.blocked, ...waits.unknown].join('; ')}`);
-  }
-  const created = post(plan, start && [viewer]);
+  // Status is set by the command: Backlog or --status (checked against the Project options by planFields).
+  const plan = named('new', () => planNew(options, options.status ?? 'Backlog'));
+  const created = post(plan);
   number = created.number;
   let step = 'reading it back';
   try {
-    readBackIssue(created, plan, viewer);
+    readBackIssue(created, plan);
     step = 'setting the Project fields';
     setFields([{ id: created.node_id, number, plans: plan.plans }]);
-    let claim;
-    if (start) {
-      step = 'posting the claim comment';
-      execFileSync(gh.file, ['api', `repos/${project.repository}/issues/${number}/comments`, '-X', 'POST', '-F', 'body=@-'],
-        { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: `Agent: ${agent}, Session: ${session}\n` });
-      const read = claimReasons({ number }, session);
-      assert.ok(!read.blocked.length && read.claim?.session === session, 'Claim comment read-back differs');
-      claim = read.claim.comment.html_url;
-      step = 'setting In progress';
-      applyFields(readIssue(), progress);
-    }
-    console.log(newLine(created, { ...plan, plans: [...plan.plans, ...progress] }, ...start ? [`assignee: ${viewer}`, `claim: ${claim}`] : []));
+    console.log(newLine(created, plan));
   } catch (error) {
-    throw new Error(`${created.html_url} was created, but ${step} failed: ${String(error.stderr || error.message).trim()}; finish by hand with board.mjs field/status, do not create it again`, { cause: error });
+    throw new Error(`${created.html_url} was created, but ${step} failed: ${String(error.stderr || error.message).trim()}; finish by hand with board.mjs field, do not create it again`, { cause: error });
   }
 }
 
@@ -1235,9 +1209,10 @@ const findBacklink = (comments, prUrl) => comments.find(comment => (comment.body
 }));
 
 /** Explicit scope works with Refs on release branches; native closing links remain a separate proof. */
+let delivered; // [PR, ...OTHER_ISSUE] as `done` knows them; else they follow "Automated review" on the command line
 function verifyBacklinks(issue) {
-  const [prRef, ...extraIssues] = process.argv.slice(command === 'field' ? 6 : 5);
-  assert.ok(prRef !== undefined, 'Automated review needs the PR number: status ISSUE "Automated review" PR [OTHER_ISSUE...]');
+  const [prRef, ...extraIssues] = delivered ?? process.argv.slice(command === 'field' ? 6 : 5);
+  assert.ok(prRef !== undefined, 'Automated review needs the PR number: field ISSUE Status "Automated review" PR [OTHER_ISSUE...]');
   const positive = ref =>/^\d+$/.test(ref ?? '') && Number.isSafeInteger(Number(ref)) && Number(ref) > 0;
   assert.ok(positive(prRef) && extraIssues.every(ref => validBlocker(ref) && positive(ref.slice(ref.lastIndexOf('#') + 1))),
     'Automated review requires PR [OTHER_ISSUE...]; post and read back every issue backlink first.');
@@ -1245,7 +1220,7 @@ function verifyBacklinks(issue) {
   const { pullRequest: pr } = graphql(`query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
     pullRequest(number:$number){number url state isDraft body}}}`, { owner, name, number: prNumber }).repository;
   assert.ok(pr?.number === prNumber && pr.state === 'OPEN' && typeof pr.body === 'string', 'The declared PR is not open/readable');
-  assert.ok(pr.isDraft === false, `PR #${prNumber} is still Draft (its CI skips checks); run board.mjs ready ${prNumber} --local first`);
+  assert.ok(pr.isDraft === false, `PR #${prNumber} is still Draft (its CI skips checks); run board.mjs done ${number}`);
   const url = new URL(pr.url);
   assert.equal(url.pathname, `/${project.repository}/pull/${prNumber}`, 'PR belongs to another repository');
   const scope = new Set([`${project.repository}#${number}`, ...extraIssues.map(ref =>
@@ -1515,7 +1490,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   if (pr.isDraft) {
     failed = true;
     reasons.push('PR is still Draft');
-    lines.push(`blocker: PR is still Draft; run board.mjs ready ${pr.number} --local`);
+    lines.push(`blocker: PR is still Draft; run board.mjs done ISSUE`);
   }
   // GitHub sometimes starts no pull_request run for a push and keeps the merge state UNKNOWN, so the wait never ends (#412). In a native stack
   // a conflict in a lower layer causes it. After 10 minutes without a pull_request or workflow_dispatch run on the head that is a blocker with its cause.
@@ -1589,7 +1564,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
     const { total: open, lines: found } = sonarIssues(check.detailsUrl, pr.number, check.summary);
     if (open === null) {
-      lines.push('blocker: the Sonar issue count is unreadable: SONAR_TOKEN is not set and the SonarCloud check summary has no "N New issues"; set SONAR_TOKEN (README, Board commands) and run handoff again');
+      lines.push('blocker: the Sonar issue count is unreadable: SONAR_TOKEN is not set and the SonarCloud check summary has no "N New issues"; set SONAR_TOKEN (README, Board commands) and run done again');
       continue;
     }
     lines.push(`sonar: ${open} open issue${open === 1 ? '' : 's'}`, ...found);
@@ -1826,17 +1801,16 @@ function postBacklink(issueNumber, url) {
 }
 
 /**
- * Open task-list items of the issue body, as GitHub renders it, that name no issue: acceptance that is neither done nor
- * moved to a follow-up. GitHub's rendering decides what a task, a code block and an issue reference ("#N", "OWNER/REPO#N",
- * an issue URL) are, so no Markdown is parsed here.
+ * `done` says the issue is delivered, so every open task-list item of its body that names no issue counts as met; a part moved to a
+ * follow-up stays open and carries its issue (`- [ ] … → #12`). Fenced code is left alone.
+ * ponytail: works on the Markdown lines; a `#N` anywhere in the line or an issue URL counts as the follow-up reference.
  */
-// ponytail: relies on GitHub's task-list markup (task-list-item-checkbox, issue-link); replace when GitHub changes it.
-function openAcceptance(bodyHtml) {
-  assert.equal(typeof bodyHtml, 'string', 'The rendered issue body is unreadable');
-  const decode = text => text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-  return [...bodyHtml.matchAll(/(<input type="checkbox"[^>]*>)([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>]|<input type="checkbox")/g)]
-    .filter(([, box, text]) => box.includes('task-list-item-checkbox') && !/\schecked[\s=>]/.test(box) && !text.includes('class="issue-link'))
-    .map(([, , text]) => decode(text.replace(/<[^>]*>/g, '')).trim());
+function tickAcceptance(text) {
+  let fence = false;
+  return text.split('\n').map(line => {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    return fence || /#\d|\/issues\/\d/.test(line) ? line : line.replace(/^(\s*(?:[-*]|\d+\.)\s+)\[ \]/, '$1[x]');
+  }).join('\n');
 }
 
 /**
@@ -1886,7 +1860,7 @@ function handoffIssueReasons(issue, viewer, reviewedHead, currentPrNumber) {
       if (pr?.baseRefName !== lowerRef) reasons.push(`the open predecessor PR #${lowerNumber} is not merged: PR #${value} must target its branch ${lowerRef}, not ${pr?.baseRefName}`);
     }
   }
-  if (!['Automated review', 'Human review'].includes(status)) reasons.push(`status is ${status ?? 'unset'}: when the work is done, run board.mjs status ISSUE "Automated review" PR, then post a new handoff comment for the current head`);
+  if (!['Automated review', 'Human review'].includes(status)) reasons.push(`status is ${status ?? 'unset'}: when the work is done, run board.mjs done ISSUE`);
   if (!issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === viewer.login.toLowerCase())) {
     reasons.push(`the issue is not assigned to the authenticated driver: gh issue edit ${issue.number} --repo ${project.repository} --add-assignee "@me"`);
   }
@@ -2053,8 +2027,7 @@ function handoffPr(issueId, viewer, expectedHead, prior, partial) {
   const result = finishedPr(Number(value), 'handoff', expectedHead, ({ comments, pr }) => {
     const reasons = [];
     const comment = findHandoffComment(comments, viewer, pr.headRefOid);
-    if (!comment) reasons.push(`post the handoff comment on the PR #${value} (not on the issue) for the current head: a "## Übergabe" heading and a "Head: ${pr.headRefOid.slice(0, 7)}" line (README: Handoff comment).\n`
-      + `Write the file, then run: gh pr comment ${value} --repo ${project.repository} --body-file <file>\nTemplate:\n## Übergabe\n\n<Ergebnis in einem Satz>\n\nHead: ${pr.headRefOid.slice(0, 7)}\n\n### Retro\n\n- Keine Funde`);
+    if (!comment) reasons.push(`no handoff comment for head ${pr.headRefOid.slice(0, 7)} on PR #${value}: write FILE (<Ergebnis in einem Satz>, then "### Retro" with one list line per finding, or "- Keine Funde"; README: Handoff comment) and run board.mjs done ${number} FILE`);
     else if (!expectedHead) { // noted once, on the first pass
       // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
       const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
@@ -2072,14 +2045,13 @@ function handoff() {
   const issue = readIssue();
   const { viewer } = graphql('query{viewer{login}}');
   assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
-  for (const line of openAcceptance(issue.bodyHTML)) console.log(`note: open acceptance without an issue reference: ${line}`);
   // The issue side's reasons wait for the PR side's, so one run names everything that is missing.
   const currentPrNumber = Number(value);
-  const prior = handoffIssueReasons(issue, viewer, undefined, currentPrNumber);
-  if (!prior) return;
-  // A partial PR (see isPartialPr) passes the PR gate without a native link and leaves the issue's status alone: the closing PR hands the issue off.
-  // `handoff --refs` is the same for a PR that only names the issue (#510).
+  // A partial PR (see isPartialPr) has only the PR gate: no native link, and the issue's status and assignment are not its business, since the closing PR hands the issue off.
+  // `--refs` is the same for a PR that only names the issue, whether or not another PR closes it (#510).
   const partial = process.argv.includes('--refs') || isPartialPr(issue, currentPrNumber);
+  const prior = partial ? [] : handoffIssueReasons(issue, viewer, undefined, currentPrNumber);
+  if (!prior) return;
   const pr = handoffPr(issue.id, viewer, undefined, prior, partial);
   if (!pr) return;
   if (partial) return console.log(`HANDOFF #${number} PR #${value} head ${pr.headRefOid} (partial PR: the issue status stays, the closing PR hands it off)`);
@@ -2255,6 +2227,22 @@ function deleteHeadBranch(pr) {
 const localCi = fileURLToPath(new URL('local-ci.mjs', import.meta.url));
 
 /**
+ * No resident runner: a head without a `local-ci` status (a PR of `done`, Renovate, pin and human PRs, or the head after a base update) gets its run from here,
+ * once per head and in the background (a run outlasts a tool call); the looks wait for its pending status. A run killed halfway leaves `pending`: start it again by hand.
+ */
+function startLocalCi(result, prNumber, started) {
+  const sha = result.pr?.headRefOid;
+  if (!result.done && sha && gate.localChecks && !result.pr.isCrossRepository && !started.has(sha)) { // a fork's code never runs on this machine by itself
+    started.add(sha);
+    if (!rest(`repos/${project.repository}/commits/${sha}/statuses?per_page=100`).some(status => status.context === 'local-ci')) {
+      spawn(process.execPath, [localCi, '--cwd', projectDirectory, String(prNumber)], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      console.log(`local-ci: no status on ${sha.slice(0, 7)}, started it in the background`);
+    }
+  }
+  return result;
+}
+
+/**
  * There is no resident runner: after a merge into main or a release branch the project's `push` commands run here (sweep, release sync, pin),
  * after a merge in the kit the `kitPush` of the project that holds it as its submodule (`--cwd <project>/.vendor/workflow-kit`; a standalone kit clone knows no project). A merge is never undone by a failure here.
  */
@@ -2292,20 +2280,8 @@ async function merge() {
       return;
     }
   }
-  // No resident runner: a head without a `local-ci` status (Renovate, pin and human PRs, or the head after a base update) gets its run from here,
-  // once per head and in the background (a run outlasts a tool call); the looks below wait for its pending status. A run killed halfway leaves `pending`: start it again by hand.
   const started = new Set();
-  const look = () => {
-    const result = reviews(stallOption()), sha = result.pr.headRefOid;
-    if (!result.done && gate.localChecks && !result.pr.isCrossRepository && !started.has(sha)) { // a fork's code never runs on this machine by itself
-      started.add(sha);
-      if (!rest(`repos/${project.repository}/commits/${sha}/statuses?per_page=100`).some(status => status.context === 'local-ci')) {
-        spawn(process.execPath, [localCi, '--cwd', projectDirectory, String(number)], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-        console.log(`local-ci: no status on ${sha.slice(0, 7)}, started it in the background`);
-      }
-    }
-    return result;
-  };
+  const look = () => startLocalCi(reviews(stallOption()), number, started);
   // Like `wait`: look again until CI and the reviewers have finished (or --max-minutes runs out: exit 4); the gate then decides once.
   const polled = await poll(look);
   if (!polled) return;
@@ -2430,11 +2406,11 @@ function readyOptionsBounded() {
 }
 
 /** Mark a Draft PR ready only for the explicitly expected pushed commit; stale metadata is waited out, never trusted. */
-function ready() {
+function ready(prNumber = number, sha = value) {
   const attempts = numberOption('--attempts', 6), interval = numberOption('--interval', 5);
   const read = () => {
-    const pr = graphql(readyQuery, { owner, name, number }).repository.pullRequest;
-    assert.ok(pr?.id && pr.number === number, 'The PR is unreadable');
+    const pr = graphql(readyQuery, { owner, name, number: prNumber }).repository.pullRequest;
+    assert.ok(pr?.id && pr.number === prNumber, 'The PR is unreadable');
     assert.equal(typeof pr.isDraft, 'boolean', 'PR draft state is unreadable');
     return pr;
   };
@@ -2445,16 +2421,16 @@ function ready() {
   let pr;
   for (let attempt = 1; ; attempt++) {
     pr = read();
-    if (pr.state !== 'OPEN') return refuse(`PR #${number} is ${pr.state.toLowerCase()}`);
+    if (pr.state !== 'OPEN') return refuse(`PR #${prNumber} is ${pr.state.toLowerCase()}`);
     // A fork's or another repository's branch is not ours to mark ready.
     // GitHub reports the canonical spelling; the configured OWNER/REPO may differ in case.
-    if (pr.isCrossRepository || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) return refuse(`PR #${number} does not come from a branch of ${project.repository}`);
+    if (pr.isCrossRepository || pr.headRepository?.nameWithOwner?.toLowerCase() !== project.repository.toLowerCase()) return refuse(`PR #${prNumber} does not come from a branch of ${project.repository}`);
     if (!pr.isDraft) {
-      if (!pr.headRefOid.startsWith(value.toLowerCase())) return refuse(`PR #${number} is already ready with head ${pr.headRefOid.slice(0, 7)}, not ${value.slice(0, 7)}`);
-      return console.log(`READY #${number} head ${pr.headRefOid} (already ready)`);
+      if (!pr.headRefOid.startsWith(sha.toLowerCase())) return refuse(`PR #${prNumber} is already ready with head ${pr.headRefOid.slice(0, 7)}, not ${sha.slice(0, 7)}`);
+      return console.log(`READY #${prNumber} head ${pr.headRefOid} (already ready)`);
     }
-    if (pr.headRefOid.startsWith(value.toLowerCase())) break;
-    if (attempt >= attempts) return refuse(`PR #${number} still reports head ${pr.headRefOid.slice(0, 7)} after ${attempts} reads; expected ${value.slice(0, 7)}`);
+    if (pr.headRefOid.startsWith(sha.toLowerCase())) break;
+    if (attempt >= attempts) return refuse(`PR #${prNumber} still reports head ${pr.headRefOid.slice(0, 7)} after ${attempts} reads; expected ${sha.slice(0, 7)}`);
     sleep(interval);
   }
   // One more read narrows the window in which a new push could slip between check and mutation.
@@ -2468,7 +2444,7 @@ function ready() {
     assert.ok(attempt < attempts, `Ready read-back differs: draft ${done.isDraft}, head ${done.headRefOid.slice(0, 7)}`);
     sleep(interval);
   }
-  console.log(`READY #${number} head ${pr.headRefOid}`);
+  console.log(`READY #${prNumber} head ${pr.headRefOid}`);
 }
 // Waiting is over either way; FAILED keeps a red head from reading as a finished review.
 const outcome = ({ failed, reasons = [] }) => failed ? [['FAILED', ...reasons.length ? [reasons.join('; ')] : []].join(': '), 1] : ['DONE', 0];
@@ -2499,7 +2475,7 @@ const quotaLine = () => quota && `quota: ${quota.remaining} left, ${spent} point
  */
 function lookAtHead(pr, threads) {
   const expected = headOption()?.toLowerCase();
-  if (!expected || pr.state !== 'OPEN' || pr.headRefOid.startsWith(expected)) return reviews(stallOption(), Date.now(), number, pr, undefined, threads ?? (current => unresolvedThreads(current.number, current.reviewThreads)));
+  if (!expected || pr.state !== 'OPEN' || pr.headRefOid.startsWith(expected)) return reviews(stallOption(), Date.now(), pr.number, pr, undefined, threads ?? (current => unresolvedThreads(current.number, current.reviewThreads)));
   return { done: false, lines: [`#${pr.number} ${pr.state} head ${pr.headRefOid.slice(0, 7)}`,
     `waiting: PR still shows head ${pr.headRefOid.slice(0, 7)}, expected ${expected.slice(0, 7)}`] };
 }
@@ -2511,9 +2487,9 @@ function lookAtHead(pr, threads) {
  * REST answered (pausedRound shows them). Undefined when REST cannot say.
  * ponytail: checks stop at 100 like the GraphQL query; replace when that query paginates.
  */
-function changeMarker() {
+function changeMarker(prNumber) {
   try {
-    const pull = rest(`repos/${project.repository}/pulls/${number}`), commit = `repos/${project.repository}/commits/${pull.head.sha}`;
+    const pull = rest(`repos/${project.repository}/pulls/${prNumber}`), commit = `repos/${project.repository}/commits/${pull.head.sha}`;
     const listed = (path, key) => rest(`${commit}/${path}?per_page=100`)[key];
     const [runs, suites, statuses] = [listed('check-runs', 'check_runs'), listed('check-suites', 'check_suites'), listed('status', 'statuses')];
     return { head: pull.head.sha, pull, runs, statuses, text: JSON.stringify([pull.head.sha, pull.updated_at, pull.state, pull.draft, pull.mergeable_state,
@@ -2552,14 +2528,14 @@ const fullReadEvery = 5 * 60_000;
  * while it still says "waiting": every end (DONE, FAILED, a closed PR) is confirmed by a full read, whose result is what is printed.
  * Review thread resolutions leave no mark in REST, which is why no end is taken from the cache.
  */
-function reviewsForHead() {
-  const marker = changeMarker(), started = Date.now();
+function reviewsForHead(prNumber = number) {
+  const marker = changeMarker(prNumber), started = Date.now();
   try {
     if (marker && lastRead?.marker?.text === marker.text && started - lastRead.at < fullReadEvery) {
       const result = lookAtHead(lastRead.pr, () => lastRead.threads);
       if (!result.done) return result;
     }
-    const pr = readPr(number), result = lookAtHead(pr);
+    const pr = readPr(prNumber), result = lookAtHead(pr);
     // A PR that shows another head than REST is still catching up, and a result that ended early has no threads: read both again next round.
     lastRead = marker && pr.headRefOid === marker.head && result.threads && { marker, pr, threads: result.threads, at: started };
     return result;
@@ -2656,29 +2632,132 @@ function sub() {
   console.log(`${project.repository}#${number} has sub-issue ${childOwner}/${childName}#${childNumber}`);
 }
 
-const commands = { next, sweep, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, status: () => set('Status'), priority: () => set('Priority'), field: setField, new: create,
+const restPost = (path, args, input) => execFileSync(gh.file, ['api', path, '-X', 'POST', ...args], { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input });
+const sameLogin = (a, b) => a?.toLowerCase() === b?.toLowerCase();
+
+/**
+ * `start ISSUE`: everything from Ready to a Draft PR that closes the issue. The check of the issue decides first (BLOCKED, UNKNOWN: nothing is written),
+ * then assignment, claim, In progress, the issue-linked branch on the right base (the Project's base field, the base PR of a stack, else the default
+ * branch), the kit at its pin and a Draft PR with its link; every write is read back. A step that is already done is skipped, so a resume is the same call.
+ * The session is `--session`, else the `agent-<id>` of a Claude Code worktree, else CODEX_THREAD_ID, else CLAUDE_CODE_SESSION_ID (the session itself, not a subagent).
+ */
+function start() {
+  const agent = process.env.CODEX_THREAD_ID ? 'codex' : 'claude', modules = join(projectDirectory, '.gitmodules');
+  const session = sessionOption() ?? process.env.CODEX_THREAD_ID ?? /[\\/]agent-(\w+)(?:[\\/]|$)/.exec(process.cwd())?.[1] ?? process.env.CLAUDE_CODE_SESSION_ID;
+  assert.match(session ?? '', /^\w[\w.-]*$/, 'start needs your session id: pass --session ID');
+  // One checkout-wide setting each, so a kit commit never rides along with a project push and a branch switch follows the kit pin.
+  if (existsSync(modules)) for (const [key, want] of [['submodule.recurse', 'true'], ['push.recurseSubmodules', 'no']]) {
+    const read = () => { try { return git('config', '--get', key); } catch { return ''; } };
+    if (read() !== want) git('config', '--local', key, want);
+    assert.equal(read(), want, `${key} must be ${want} but is overridden outside this clone's config; fix that override`);
+  }
+  const issue = readIssue();
+  if (!mayStart(check(issue, { session }))) return;
+  const stacked = stackedOn, login = issue.viewer.login;
+  if (!issue.assignees.nodes.some(user => sameLogin(user.login, login))) restPost(`repos/${project.repository}/issues/${number}/assignees`, ['-f', `assignees[]=${login}`]);
+  const { claim } = claimReasons(issue, session);
+  if (claim?.session !== session) {
+    restPost(`repos/${project.repository}/issues/${number}/comments`, ['-F', 'body=@-'],
+      `Agent: ${agent}, Session: ${session}\n${claim?.session ? `Takeover of stale claim ${claim.session}\n` : ''}`);
+    const read = claimReasons(issue, session);
+    assert.ok(!read.blocked.length && read.claim?.session === session, 'Claim comment read-back differs');
+  }
+  set('Status', 'In progress');
+  const base = stacked ? (stacked.state === 'MERGED' ? stacked.baseRefName : stacked.headRefName)
+    : baseOf(issue).branch || (defaultBranch ??= rest(`repos/${project.repository}`).default_branch);
+  // An own branch of this issue is continued (a resume), a foreign one is left alone.
+  const branch = workBranches(issue).find(existing => existing.startsWith(`${agent}/`))
+    ?? `${agent}/${number}-${issue.title.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '')}`;
+  if (!workBranches(issue).includes(branch)) execFileSync(gh.file, ['issue', 'develop', String(number), '--repo', project.repository, '--name', branch, '--base', base], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
+  git('fetch', 'origin');
+  if (git('branch', '--show-current') !== branch) {
+    let local = true;
+    try { git('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`); } catch { local = false; }
+    git('switch', ...local ? [branch] : ['--track', `origin/${branch}`]);
+  }
+  if (existsSync(modules) && readFileSync(modules, 'utf8').includes('.vendor/workflow-kit')) git('submodule', 'update', '--init', '.vendor/workflow-kit');
+  let pr = currentIssuePr(issue).number;
+  if (pr === undefined) {
+    // GitHub opens no PR without a commit of its own: the first one only says that the work began.
+    if (git('rev-list', '--count', `origin/${base}..HEAD`) === '0') git('commit', '--allow-empty', '-m', `Arbeit an #${number} beginnen`);
+    git('push', '--set-upstream', 'origin', branch);
+    pr = JSON.parse(restPost(`repos/${project.repository}/pulls`, ['-f', `title=${issue.title}`, '-f', `head=${branch}`, '-f', `base=${base}`, '-F', 'draft=true', '-F', 'body=@-'], `Closes #${number}\n`)).number;
+    linkIssue(number, pr);
+  }
+  const final = readIssue();
+  assert.equal(projectItem(final)?.status?.name, 'In progress', 'In progress status read-back differs');
+  assert.ok(final.assignees.nodes.some(user => sameLogin(user.login, login)), 'Assignment read-back differs');
+  console.log(`START #${number} session ${session} branch ${branch} base ${base} PR #${pr}${stacked && stacked.state !== 'MERGED' ? ` (stack: link it above PR #${stacked.number}, docs/CONTRIBUTING.md#stacked-pull-requests)` : ''}`);
+}
+
+/**
+ * `done ISSUE [PR] [FILE]`: everything from the last push to Human review. The targeted tests of the changed files (a project with `localChecks`
+ * gets its checks from local-ci instead), the PR ready for exactly the pushed head, the acceptance boxes ticked, Automated review, the local-ci run
+ * once per head, the wait for CI and reviewers (`still waiting: call done again`, exit 4, after --max-minutes), the handoff comment from FILE
+ * (result sentence and the `### Retro` list; heading and head line are added here) and the handoff gate with its Sonar issue count. Every call
+ * does what is still open, so a repeated call after a push or a wait is the same call. PR: the one open PR that closes the issue.
+ * `--refs`: a PR that only names the issue (a part for another base): its gate runs, the issue status stays.
+ */
+async function done() {
+  const args = process.argv.slice(4), words = args.filter((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--max-minutes');
+  const given = /^\d+$/.test(words[0] ?? '') ? Number(words.shift()) : undefined, file = words.shift();
+  assert.ok(!words.length, 'done takes ISSUE [PR] [FILE]');
+  const issue = readIssue(), found = currentIssuePr(issue);
+  const prNumber = given ?? found.number;
+  assert.ok(prNumber !== undefined, found.unknown ?? `no open PR closes #${number}: run board.mjs start ${number}, or name the PR (done ${number} PR)`);
+  const pull = rest(`repos/${project.repository}/pulls/${prNumber}`), sha = localHead();
+  const partial = process.argv.includes('--refs') || isPartialPr(issue, prNumber);
+  const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
+  // The tests of this head ran once: a call that only waits does not repeat them.
+  const tested = resolve(projectDirectory, git('rev-parse', '--git-path', 'board-done-tested'));
+  if (!project.localChecks && !(existsSync(tested) && readFileSync(tested, 'utf8') === sha)) {
+    try {
+      execFileSync(process.execPath, [fileURLToPath(new URL('affected-tests.mjs', import.meta.url)), '--cwd', projectDirectory, '--run', '--base', `origin/${pull.base.ref}`], { stdio: 'inherit' });
+    } catch { return fail('the targeted tests of the changed files failed (output above); fix them, push, then run done again'); }
+    writeFileSync(tested, sha);
+  }
+  ready(prNumber, sha);
+  if (process.exitCode) return;
+  if (!partial) writeBody(before => tickAcceptance(before));
+  value = String(prNumber);
+  delivered = [value];
+  const status = projectItem(issue)?.status?.name;
+  if (partial) postBacklink(number, pull.html_url);
+  else if (!['Automated review', 'Human review'].includes(status)) set('Status', 'Automated review');
+  const started = new Set();
+  const result = await poll(() => startLocalCi(reviewsForHead(prNumber), prNumber, started));
+  if (!result) return;
+  if (result.failed) {
+    process.exitCode = outcome(result)[1];
+    return console.log([outcome(result)[0], ...result.lines, quotaLine()].filter(Boolean).join('\n'));
+  }
+  const head = result.pr.headRefOid;
+  if (file && !findHandoffComment(result.comments, issue.viewer, head)) {
+    restPost(`repos/${project.repository}/issues/${prNumber}/comments`, ['-F', 'body=@-'], `## Übergabe\n\nHead: ${head.slice(0, 7)}\n\n${lines(file)}\n`);
+  }
+  handoff();
+}
+
+// check, reviews, handoff, ready and link are the steps `start` and `done` take; they stay callable for those two and for the tests, but nobody runs them by hand, so the usage leaves them out.
+const commands = { start, done, next, sweep, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, field: setField, new: create,
   reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, 'stack-sync': stackSync, ready, link, body, 'body-replace': bodyReplace };
-const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] next [--session ID] | sweep | check ISSUE [--session ID] | status ISSUE "In progress" | priority ISSUE High | field ISSUE NAME VALUE [NAME VALUE ...]'
-  + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--status S] [--field NAME=VALUE ...] [--start --agent claude|codex --session ID]'
-  + ' | new --from FILE'
-  + ' | status ISSUE "Automated review" PR [OTHER_ISSUE...] | field ISSUE Status "Automated review" PR [OTHER_ISSUE...]'
-  + ' | block ISSUE BLOCKER | sub PARENT CHILD | reviews PR [--stall MINUTES] [--grace MINUTES] | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
-  + ' | quota-wait [--max-minutes N]'
-  + ' | handoff ISSUE PR [--refs (PR liefert das Issue nicht; Status bleibt)] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS] (needs the comment "## Übergabe" with "Head: <sha>" on the PR, not the issue: gh pr comment PR --body-file FILE)'
-  + ' | merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N]'
-  + ' | stack-sync TOP'
-  + ' | ready PR SHA|--local [--attempts N] [--interval SECONDS]'
-  + ' | link ISSUE PR [--refs (PR liefert das Issue nicht; Status bleibt)] | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
+const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] start ISSUE [--session ID] | done ISSUE [PR] [FILE] [--refs] [--max-minutes N]'
+  + ' | next [--session ID] | sweep | field ISSUE NAME VALUE [NAME VALUE ...]'
+  + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--status S] [--field NAME=VALUE ...] | new --from FILE'
+  + ' | block ISSUE BLOCKER | sub PARENT CHILD | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
+  + ' | quota-wait [--max-minutes N] | merge PR [--stack] [--stall MINUTES] [--grace MINUTES] [--interval SECONDS (0-60)] [--max-minutes N] | stack-sync TOP'
+  + ' | body ISSUE FILE BASE_FILE | body-replace ISSUE --from FILE --to FILE';
 // --help (-h) is the one flag that never writes: usage on stdout, success.
 if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
   console.log(usage);
   process.exit(0);
 }
 // A writing command takes only its own flags (value 1: followed by a value) and as many plain words as it names (the issue or PR
-// included); any other argument is a mistake that must not reach a write. `field` and `status ISSUE "Automated review"` check their own trailing words.
-const writeArgs = { sweep: { words: 0 }, status: { words: 2 }, priority: { words: 2 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2, flags: { '--refs': 0 } },
+// included); any other argument is a mistake that must not reach a write. `field` checks its own trailing words.
+const writeArgs = { start: { words: 1, flags: { '--session': 1 } }, done: { words: 3, flags: { '--refs': 0, '--max-minutes': 1 } },
+  sweep: { words: 0 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2, flags: { '--refs': 0 } },
   body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
-  new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--start': 0, '--agent': 1, '--session': 1, '--from': 1, '--status': 1 } },
+  new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--from': 1, '--status': 1 } },
   ready: { words: 2, flags: { '--local': 0, '--attempts': 1, '--interval': 1 } }, handoff: { words: 2, flags: { '--stall': 1, '--grace': 1, '--interval': 1, '--refs': 0 } },
   merge: { words: 1, flags: { '--stack': 0, '--stall': 1, '--grace': 1, '--interval': 1, '--max-minutes': 1 } }, 'stack-sync': { words: 1 } };
 function refusesArguments() {
@@ -2689,18 +2768,17 @@ function refusesArguments() {
     else if (/^-./.test(args[index])) return true; // a lone "-" is a file name (`body ISSUE - BASE`), not a flag
     else given++;
   }
-  const allowed = command === 'status' && /^automated review$/i.test(value ?? '') ? Infinity : words - (args.includes('--local') ? 1 : 0);
-  return given > allowed;
+  return given > words - (args.includes('--local') ? 1 : 0);
 }
 if (Object.hasOwn(writeArgs, command) && refusesArguments()) {
   console.error(usage);
   process.exit(2);
 }
-if (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(Number.isFinite(projectGrace) && projectGrace >= 0)) {
+if (['reviews', 'wait', 'handoff', 'merge', 'done'].includes(command) && !(Number.isFinite(projectGrace) && projectGrace >= 0)) {
   console.error('reviewerGraceMinutes in .github/workflow-project.json must be a number of minutes, 0 or more (0 turns the grace off); omit the field for the default');
   process.exit(2);
 }
-if (['next', 'check'].includes(command) && !(Number.isFinite(staleHours) && staleHours >= 0)) {
+if (['next', 'check', 'start'].includes(command) && !(Number.isFinite(staleHours) && staleHours >= 0)) {
   console.error('staleHours in .github/workflow-project.json must be a number of hours, 0 or more; omit the field for the default of 6');
   process.exit(2);
 }
@@ -2714,12 +2792,12 @@ if (command === 'wait' && Number.isSafeInteger(number) && value !== '--merged' &
   process.exit(2);
 }
 if (!commands[command] || (!['next', 'sweep', 'new', 'quota-wait'].includes(command) && !Number.isSafeInteger(number))
-  || (['status', 'priority'].includes(command) && !/^[\w -]+$/.test(value ?? ''))
   // Field names and options travel as GraphQL variables, so any printable text works (Größe, Area/Team, P0: urgent).
   || (command === 'field' && !(process.argv.length > 5 && process.argv.slice(4).every(text => /^[^\p{Cc}-][^\p{Cc}]*$/u.test(text))))
   // A misspelled flag must not silently turn the session check off.
   || (command === 'next' && process.argv.length > 3 && !(process.argv.length === 5 && process.argv[3] === '--session' && /^\w[\w.-]*$/.test(process.argv[4])))
   || (command === 'check' && process.argv.length > 4 && !(process.argv.length === 6 && process.argv[4] === '--session' && /^\w[\w.-]*$/.test(process.argv[5])))
+  || (command === 'start' && process.argv.includes('--session') && !/^\w[\w.-]*$/.test(sessionOption() ?? ''))
   || (['reviews', 'wait', 'handoff', 'merge'].includes(command) && !(stallOption() > 0 && graceOption() >= 0 && Number.isFinite(graceOption())))
   // sleep(NaN) would wait forever.
   || (['handoff', 'merge'].includes(command) && !(numberOption('--interval', 3) >= 0 && numberOption('--interval', 3) <= 60))
@@ -2728,7 +2806,7 @@ if (!commands[command] || (!['next', 'sweep', 'new', 'quota-wait'].includes(comm
   // --head is the id of the pushed commit (git rev-parse HEAD, 7 to 40 characters), as for ready; a missing one would wait on a head that never matches.
   || (headOption() !== undefined && (command !== 'wait' || value === '--merged' || !/^[0-9a-f]{7,40}$/i.test(headOption())))
   // 0 = no limit; a missing or non-numeric value must not silently mean that.
-  || (process.argv.includes('--max-minutes') && (!['wait', 'merge', 'quota-wait'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
+  || (process.argv.includes('--max-minutes') && (!['wait', 'merge', 'quota-wait', 'done'].includes(command) ||!(numberOption('--max-minutes', 9) >= 0 && Number.isFinite(numberOption('--max-minutes', 9)))))
   || (['handoff', 'link'].includes(command) && (!/^\d+$/.test(value ?? '') || !Number.isSafeInteger(Number(value)) || Number(value) < 1))
   || (command === 'ready' && (!/^[0-9a-f]{7,40}$/i.test(value ?? '') || !readyOptionsBounded()))
   || (command === 'body' && !(value && process.argv[5]))
@@ -2737,10 +2815,10 @@ if (!commands[command] || (!['next', 'sweep', 'new', 'quota-wait'].includes(comm
   console.error(usage);
   process.exit(2);
 }
-// field, status, priority and new report a failure as one "ERROR - reason" line: their output (verdicts, backlinks, confirmations)
+// field and new report a failure as one "ERROR - reason" line: their output (verdicts, backlinks, confirmations)
 // is held until the command succeeds, so no failed call shows a write or a check as confirmed. The other commands keep ERROR
 // with "- reason" below it.
-const oneLine = ['field', 'status', 'priority', 'new'].includes(command), print = console.log, held = [];
+const oneLine = ['field', 'new'].includes(command), print = console.log, held = [];
 if (oneLine) console.log = (...parts) => held.push(parts.join(' '));
 try {
   await commands[command]();
@@ -2749,7 +2827,7 @@ try {
 } catch (error) {
   console.log = print;
   // A failed read is never "no blockers" and never a finished review.
-  if (!['check', 'reviews', 'wait', 'quota-wait', 'handoff', 'merge', 'stack-sync', 'ready', 'link', 'body', 'body-replace', 'field', 'status', 'priority', 'new'].includes(command)) throw error;
+  if (!['start', 'done', 'check', 'reviews', 'wait', 'quota-wait', 'handoff', 'merge', 'stack-sync', 'ready', 'link', 'body', 'body-replace', 'field', 'new'].includes(command)) throw error;
   const message = String(error.stderr || error.message).trim();
   console.log(oneLine ? `ERROR - ${message.replace(/\s*\n\s*/g, ' ')}` : `${command === 'check' ? 'UNKNOWN' : 'ERROR'}\n- ${message}`);
   process.exitCode = 2;

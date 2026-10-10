@@ -1,38 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
-import { codeBlock, handoffFixture, handoffComment, handoffPr, issue, list, reference, task, test } from './board-fixture.mjs';
-
-test('handoff only notes open acceptance without an issue reference, one note per line', t => {
-  const { checkout, run, writeIssue } = handoffFixture(t);
-  const ready = { ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } };
-  writeFileSync(join(checkout, 'handoff-fixture'), '');
-  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
-  const open = [
-    [list([task('first'), task('second ' + reference), task('third')]), ['first', 'third']],
-    [list([task('color #123abc and revisit #12later')]), ['color #123abc and revisit #12later']],
-    [list([task('url <a href="https://example.com/page#12">https://example.com/page#12</a>')]), ['url https://example.com/page#12']],
-    [list([task('a &lt; b')]), ['a < b']],
-    [`<ul>\n<li>Phase<br>\nCriteria:\n${list([task('nested')])}\n</li>\n</ul>`, ['nested']],
-    [codeBlock + list([task('after code')]), ['after code']],
-  ];
-  for (const [bodyHTML, lines] of open) {
-    writeIssue({ ...ready, bodyHTML });
-    const result = run('handoff', '1', '7');
-    assert.equal(result.status, 0, bodyHTML + result.stdout + result.stderr);
-    for (const line of lines) assert.ok(result.stdout.includes('note: open acceptance without an issue reference: ' + line), result.stdout);
-    assert.doesNotMatch(result.stdout, /sample in code|second/);
-  }
-  // No list, only code, checked off, or moved to a follow-up: the issue may go to Human review.
-  for (const bodyHTML of ['', '<p>no list</p>', codeBlock, list([task('done', true)]), list([task('moved to ' + reference), task('b', true)])]) {
-    writeIssue({ ...ready, bodyHTML });
-    const result = run('handoff', '1', '7');
-    assert.equal(result.status, 0, bodyHTML + result.stdout + result.stderr);
-    assert.doesNotMatch(result.stdout, /^note:/m);
-  }
-  writeIssue({ ...ready, bodyHTML: undefined });
-  assert.equal(run('handoff', '1', '7').status, 2, 'An unreadable rendered body is unknown, never a handoff');
-});
+import { handoffFixture, handoffComment, handoffPr, issue, test } from './board-fixture.mjs';
 
 
 test('handoff needs the driver handoff comment that names the current head', t => {
@@ -54,7 +23,7 @@ test('handoff needs the driver handoff comment that names the current head', t =
     const result = run('handoff', '1', '7');
     assert.equal(result.status, 1, `${label}: ${result.stdout}${result.stderr}`);
     assert.match(result.stdout, /^FAILED$/m, label);
-    assert.match(result.stdout, /gh pr comment 7 .*--body-file <file>\nTemplate:\n## Übergabe\n[^]*\nHead: abcdef1\n/, `${label}: the ready command and template`);
+    assert.match(result.stdout, /no handoff comment for head abcdef1.*board\.mjs done 1 FILE/, `${label}: names the command that posts it`);
     assert.equal(existsSync(mutations), false, `${label}: the status stays untouched`);
   }
   // No timestamp is involved: a head without any check suite (CI reported only as a status) works, and so does a comment
@@ -121,12 +90,10 @@ test('handoff notes a retro section whose lines do not end with a resolution, an
     assert.doesNotMatch(result.stdout, /^note:/m, label);
   }
   assert.equal(handoff(undefined).status, 2, 'An unreadable rendered comment is unknown, never a handoff');
-  // Both notes in one run, and the handoff still goes through.
-  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
-  const both = handoff('<h2 dir="auto">Übergabe</h2>');
-  assert.equal(both.status, 0, both.stdout + both.stderr);
-  assert.match(both.stdout, /^note: open acceptance .*open box$/m);
-  assert.match(both.stdout, /^note: the handoff comment has no "Retro"/m);
+  // The Retro note still appears and the handoff goes through.
+  const missing = handoff('<h2 dir="auto">Übergabe</h2>');
+  assert.equal(missing.status, 0, missing.stdout + missing.stderr);
+  assert.match(missing.stdout, /^note: the handoff comment has no "Retro"/m);
 });
 
 

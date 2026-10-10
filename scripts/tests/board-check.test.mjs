@@ -59,10 +59,10 @@ test('an issue held only by open predecessors is STACKABLE on the one open, read
   // status accepts STACKABLE and still rejects BLOCKED.
   const assigned = changes => ({ ...issue('Ready', [open(2, [pr(5)])]), assignees: { nodes: [{ login: 'worker' }] }, ...changes });
   writeIssue(assigned({ blockedBy: { totalCount: 1, nodes: [open(2, [])] } }));
-  assert.notEqual(run('status', '1', 'In progress').status, 0);
+  assert.notEqual(run('field', '1', 'Status', 'In progress').status, 0);
   assert.equal(existsSync(join(checkout, 'mutations')), false);
   writeIssue(assigned());
-  assert.equal(run('status', '1', 'In progress').status, 0);
+  assert.equal(run('field', '1', 'Status', 'In progress').status, 0);
   assert.equal(readFileSync(join(checkout, 'mutations'), 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 1);
 
   // The upper layer may reach Human review before the base is merged, but only as a layer on that base.

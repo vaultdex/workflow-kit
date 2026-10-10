@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { handoffFixture, handoffPr, issue, list, predecessor, task, test } from './board-fixture.mjs';
+import { handoffFixture, handoffPr, issue, predecessor, test } from './board-fixture.mjs';
 
 test('handoff diagnoses draft and unreadable draft state before waiting for CI', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
@@ -182,7 +182,7 @@ test('handoff passes a Refs PR beside the one closing PR through its own gate an
   writeFileSync(join(checkout, 'issues-comments.json'), '[]');
   const uncommented = attempt(links(link(8)));
   assert.equal(uncommented.status, 1);
-  assert.match(uncommented.stdout, /post the handoff comment/);
+  assert.match(uncommented.stdout, /no handoff comment/);
 
   // Two open closing PRs stay unknown, and so does a PR that nothing links.
   const two = attempt(links(link(8), link(9)));
@@ -204,7 +204,6 @@ test('handoff rechecks issue prerequisites after review and link reads, before m
     { ...ready, projectItems: issue('In progress').projectItems },
     { ...ready, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } },
     { ...ready, blockedBy: { totalCount: 1, nodes: [] } },
-    { ...ready, bodyHTML: task('added while waiting') },
     { ...ready, closedByPullRequestsReferences: { totalCount: 2, nodes: [
       { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/example' } },
     ] } },
@@ -267,12 +266,12 @@ test('handoff reports a failed status read-back instead of claiming delivery', t
 
 test('handoff names every missing point at once, issue side and PR side together', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
-  writeIssue({ ...issue('Automated review'), assignees: { nodes: [] }, bodyHTML: list([task('open box')]) });
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [] } });
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ linkPages: [[]] })));
   writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([]));
   const result = run('handoff', '1', '7', '--interval', '0');
   assert.equal(result.status, 1, result.stdout + result.stderr);
-  for (const part of [/not assigned/, /open acceptance .*open box/, /post the handoff comment/, /not natively linked/]) assert.match(result.stdout, part);
+  for (const part of [/not assigned/, /no handoff comment/, /not natively linked/]) assert.match(result.stdout, part);
   assert.equal(existsSync(join(checkout, 'mutations')), false);
 });
 
@@ -323,13 +322,12 @@ test('handoff reads an undetermined merge state again before it gives up', t => 
 
 test('handoff lists merge conflicts that GitHub reports only after an undetermined state', t => {
   const { checkout, run, writeIssue } = handoffFixture(t);
-  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] }, bodyHTML: list([task('open box')]) });
+  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
   writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
   writeFileSync(join(checkout, 'pr-reads.json'), JSON.stringify([{ mergeStateStatus: 'UNKNOWN' }, { mergeStateStatus: 'DIRTY' }]));
   const result = run('handoff', '1', '7', '--interval', '0');
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /blocker: merge conflicts/);
-  assert.match(result.stdout, /open acceptance .*open box/);
   assert.doesNotMatch(result.stdout, /WAITING|not determined/);
 });
 

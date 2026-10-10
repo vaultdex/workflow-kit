@@ -72,7 +72,7 @@ finishes (SonarCloud), list the app slug in `"awaitApps"`, for example
 `"awaitApps": ["sonarqubecloud"]`, so `board.mjs wait` waits for it. A review bot the
 project does not depend on (CodeRabbit on a free plan that is mostly rate limited) goes in
 `"optionalReviewers"`, a list of bot logins or app slugs, for example
-`"optionalReviewers": ["coderabbitai"]`: `board.mjs wait`, `reviews` and `handoff` never
+`"optionalReviewers": ["coderabbitai"]`: `board.mjs wait` and `done` never
 wait for it or call it stalled, and agents neither re-request nor replace its review.
 Its findings, open threads and change requests still count, and its 👀 reaction is
 shown as a note. An analyzer such as SonarCloud listed there still reports its open issues
@@ -80,15 +80,15 @@ as a blocker, because they are findings, not waiting. A `null` or other non-list
 ERROR; omit the field instead. A check that only asks for the base to be merged (the retarget restart check of a
 stacked PR) goes in `"updateBranchChecks"`, a list of check names: `board.mjs merge` then merges the base into the PR
 branch instead of ending `FAILED`. The script keeps these settings too.
-`board.mjs wait`, `reviews` and `handoff` also keep waiting a few minutes after Ready and after each push, because a
+`board.mjs wait` and `done` also keep waiting a few minutes after Ready and after each push, because a
 review bot may start late (`"reviewerGraceMinutes"`, default 3). The wait ends sooner when a required bot has answered on
 the head, a limit notice included. A project whose bots do not start on their own sets
 `"reviewerGraceMinutes": 0`; a non-number or negative value is an ERROR.
-`"staleHours"` (default 6) is how long work may lie without any activity before `board.mjs next` lists it as abandoned and `check` lets a new
+`"staleHours"` (default 6) is how long work may lie without any activity before `board.mjs next` lists it as abandoned and `start` lets a new
 session take over its claim; a non-number or negative value is an ERROR. The automatic `sweep` is the opt-in workflow [docs/board-sweep.yml](docs/board-sweep.yml).
-`"specLabel"` (default `spec`) names the label of a spec: `board.mjs` never closes such an issue, refuses its status Done and Human review, and a PR text with a closing keyword for it fails the handoff.
+`"specLabel"` (default `spec`) names the label of a spec: `board.mjs` never closes such an issue, refuses its status Done and Human review, and a PR text with a closing keyword for it fails `done`.
 `"selfReview"` lists the self-checks the PR body must name in its `## Selbstprüfung` section before
-`board.mjs handoff` or `merge` passes, for example `"selfReview": ["ponytail-review", "code-review"]`; omit it to ask
+`board.mjs done` or `merge` passes, for example `"selfReview": ["ponytail-review", "code-review"]`; omit it to ask
 nothing. A `null` or other non-list value is an ERROR.
 Likewise `"requiredFields": ["Size"]` names Project fields that
 `board.mjs new` demands besides Priority.
