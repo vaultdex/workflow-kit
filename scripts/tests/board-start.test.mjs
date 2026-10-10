@@ -12,6 +12,9 @@ test('start takes a Ready issue to a Draft PR that closes it, and the same call 
   const origin = join(dirname(checkout), 'origin.git');
   git(dirname(checkout), 'init', '-q', '--bare', origin);
   git(checkout, 'init', '-q', '-b', 'main');
+  // start commits too, so the identity lives in the checkout (a CI runner has none).
+  git(checkout, 'config', 'user.name', 't');
+  git(checkout, 'config', 'user.email', 't@t');
   git(checkout, 'commit', '--allow-empty', '-q', '-m', 'base');
   git(checkout, 'remote', 'add', 'origin', origin);
   // The branch `gh issue develop` makes on GitHub.
