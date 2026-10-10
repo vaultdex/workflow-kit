@@ -210,6 +210,12 @@ function api(argv, input, stdout, stderr, exit) {
       stdout(JSON.stringify({ workflow_runs: fs.existsSync('runs.json') ? JSON.parse(fs.readFileSync('runs.json')) : [] }));
       exit(0);
     }
+    if (parts[3] === 'pulls' && parts.length === 5 && argv.includes('PATCH')) {
+      // A PR closed by `done` (no change): the state is kept in pr.json.
+      fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'CLOSED' }));
+      stdout('{}');
+      exit(0);
+    }
     if (parts[3] === 'pulls' && parts.length === 5) {
       // The PR as REST shows it, derived from pr.json so GraphQL and REST agree. Each read takes the next overlay of pr-rest-reads.json
       // (the last one stays) and applies it to pr.json: a change that becomes visible between two rounds of `wait`. Reads are counted in rest-reads.
@@ -221,7 +227,7 @@ function api(argv, input, stdout, stderr, exit) {
         fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...overlay }));
       }
       const pr = JSON.parse(fs.readFileSync('pr.json'));
-      stdout(JSON.stringify({ number: pr.number, html_url: pr.url, state: pr.state === 'OPEN' ? 'open' : 'closed', merged: pr.state === 'MERGED', draft: pr.isDraft, updated_at: pr.updatedAt ?? 'u',
+      stdout(JSON.stringify({ number: pr.number, html_url: pr.url, state: pr.state === 'OPEN' ? 'open' : 'closed', merged: pr.state === 'MERGED', draft: pr.isDraft, changed_files: pr.changedFiles, updated_at: pr.updatedAt ?? 'u',
         mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid }, base: { ref: pr.baseRefName } }));
       exit(0);
     }

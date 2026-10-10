@@ -33,8 +33,13 @@ test('start takes a Ready issue to a Draft PR that closes it, and the same call 
   for (const written of ['develops', 'comment-writes', 'created-pr', 'stored']) assert.equal(existsSync(file(written)), false, written);
 
   writeIssue(issue('Ready'));
+  // A change the driver staged before the start is theirs: the first commit of start does not take it.
+  writeFileSync(file('staged.txt'), 'x');
+  git(checkout, 'add', 'staged.txt');
   result = run('start', '1', '--session', 'S1');
   assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(git(checkout, 'diff', '--cached', '--name-only'), 'staged.txt', 'still staged');
+  assert.equal(git(checkout, 'ls-tree', '-r', '--name-only', 'origin/claude/1-fixture'), '', 'not in the pushed commit');
   assert.match(result.stdout, /^START #1 session S1 branch claude\/1-fixture base main PR #7$/m);
   assert.equal(text('stored'), 'In progress');
   assert.equal(JSON.parse(text('issue.json')).assignees.nodes[0].login, 'worker');
