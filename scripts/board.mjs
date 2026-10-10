@@ -1254,7 +1254,7 @@ function useBaseSettings(pr) {
   const file = rest(`repos/${project.repository}/contents/.github/workflow-project.json?ref=${encodeURIComponent(pr.baseRefName)}`);
   assert.equal(file?.encoding, 'base64', `.github/workflow-project.json on ${pr.baseRefName} is unreadable`);
   const base = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
-  gate = { ...project, ...Object.fromEntries(['push', 'awaitApps', 'optionalReviewers', 'updateBranchChecks'].map(key => [key, base[key]])) };
+  gate = { ...project, ...Object.fromEntries(['awaitApps', 'optionalReviewers', 'updateBranchChecks'].map(key => [key, base[key]])) };
   optional = undefined;
 }
 // "optionalReviewers" lists bot logins or app slugs whose traces are shown but never awaited, stalled or counted as red
@@ -2213,34 +2213,41 @@ function deleteHeadBranch(pr) {
   return `branch deleted: ${branch}`;
 }
 
+
 /**
- * After a merge into main or a release branch the `push` commands of `.github/workflow-project.json` (as on the merge commit) run here, in the
+ * After a merge into main or a release branch the `push` commands of `.github/workflow-project.json` as on the merge commit run here, in the
  * foreground (sweep, release sync, pin); after a merge in the kit (`--cwd <project>/.vendor/workflow-kit`) the `kitPush` commands of the project that
- * holds it as its submodule, as on its origin/main. They run with BRANCH in a throwaway worktree on that commit, without setup (only the kit submodule is
- * fetched). A merge is never undone by a failure here.
- * ponytail: the commands run in bash, on Windows the one of Git for Windows (not WSL's), elsewhere /bin/bash.
+ * holds it as its submodule, as on its main. They run with BRANCH in a throwaway worktree on that commit, without setup (only the kit submodule is
+ * fetched), and a project without such commands touches no git at all. A merge is never undone by a failure here.
+ * ponytail: the commands run in bash, on Windows the one of Git for Windows (not WSL's), elsewhere /bin/bash; the 30 minutes kill bash, not the children it started;
+ * replace when a project needs another shell or tree-kill.
  */
 function runPush(branch, merged) {
   if (!merged || (branch !== 'main' && !branch.startsWith('release/'))) return;
   const here = resolve(projectDirectory), superproject = basename(dirname(here)) === '.vendor' ? dirname(dirname(here)) : ''; // the kit sits in <project>/.vendor/workflow-kit
-  if (superproject ? branch !== 'main' : !gate.push?.length) return; // a project without push commands (as on the base before the merge) needs no fetch
-  const root = superproject || projectDirectory, tool = externalTool('git', process.cwd(), root);
-  const run = (cwd, ...args) => execFileSync(tool.file, ['-C', cwd, ...args], { encoding: 'utf8', env: tool.env, stdio: 'pipe' }).trim();
-  let work;
+  if (superproject && branch !== 'main') return;
+  let work, root;
+  const run = (cwd, ...args) => {
+    const tool = externalTool('git', process.cwd(), cwd);
+    return execFileSync(tool.file, ['-C', cwd, ...args], { encoding: 'utf8', env: tool.env, stdio: 'pipe' }).trim();
+  };
   try {
-    run(root, 'fetch', '--quiet', 'origin', branch);
-    const sha = superproject ? run(root, 'rev-parse', 'FETCH_HEAD') : merged;
-    const commands = JSON.parse(run(root, 'show', `${sha}:.github/workflow-project.json`))[superproject ? 'kitPush' : 'push'] ?? [];
+    root = superproject || projectDirectory;
+    const repository = superproject ? JSON.parse(readFileSync(join(root, '.github/workflow-project.json'), 'utf8')).repository : project.repository;
+    const file = rest(`repos/${repository}/contents/.github/workflow-project.json?ref=${superproject ? 'main' : merged}`);
+    const commands = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'))[superproject ? 'kitPush' : 'push'] ?? [];
     if (!commands.length) return;
+    run(root, 'fetch', '--quiet', 'origin', branch);
+    const sha = superproject ? run(root, 'rev-parse', `refs/remotes/origin/${branch}`) : merged;
     work = mkdtempSync(join(tmpdir(), 'board-push-'));
     run(root, 'worktree', 'add', '--quiet', '--detach', work, sha);
     if (run(work, 'ls-files', '--stage', '--', '.vendor/workflow-kit').startsWith('160000')) run(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // the scripts need the kit
     const bash = process.platform === 'win32' ? resolve(run(root, '--exec-path'), '..', '..', '..', 'bin', 'bash.exe') : '/bin/bash';
     for (const command of commands) execFileSync(bash, ['-c', command], { cwd: work, env: { ...process.env, BRANCH: branch }, stdio: 'inherit', windowsHide: true, timeout: 30 * 60_000 });
-  } catch (error) { console.log(`note: the push commands of ${branch} failed (${String(error.message).split('\n')[0]})`); }
-  if (work) {
-    rmSync(work, { recursive: true, force: true });
-    try { run(root, 'worktree', 'prune'); } catch { /* only tidiness */ }
+  } catch (error) {
+    console.log(`note: the push commands of ${branch} failed (${String(error.message).split('\n')[0]})`);
+  } finally {
+    if (work) try { rmSync(work, { recursive: true, force: true }); run(root, 'worktree', 'prune'); } catch { /* only tidiness */ }
   }
 }
 
