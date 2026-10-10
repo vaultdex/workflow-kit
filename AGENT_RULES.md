@@ -112,7 +112,7 @@ work between them:
    off. A repeated call resumes. Work on a ticket does not end at Human review: call `next` in your
    loop and handle its **Rückmeldungen** first (a comment, review or thread after your handoff, a
    push-back to In progress or Automated review, an @mention). Answer in the ticket with a comment
-   whose first line is `Agent: claude|codex, Session: ID`, or hand off again with `done`.
+   that has the line `Agent: claude|codex, Session: ID` (last line), or hand off again with `done`.
 2. Implement and push. `node .vendor/workflow-kit/scripts/board.mjs done ISSUE FILE` then runs the
    targeted tests, marks the PR ready for the pushed head, ticks the acceptance boxes, sets Automated
    review, waits for CI and every non-optional reviewer ([review loop](docs/CONTRIBUTING.md#review-loop)),
@@ -152,7 +152,7 @@ Its nested submodules stay empty: tests that need them skip with the reason
 | Ready | `board.mjs start` ([Start or resume](#start-or-resume)). |
 | In progress | Implement on the issue-linked branch; the PR stays Draft until `board.mjs done`. |
 | Automated review | `done` waits for CI and every non-optional reviewer with a trace on the head ([review loop](docs/CONTRIBUTING.md#review-loop)); fix or link each finding, push, run `done` again; run the retro before handoff (drivers: at most 3 friction lines instead). |
-| Human review | `done` handed off. A human accepts and merges. |
+| Human review | `done` handed off. A human accepts and merges; feedback meanwhile shows up in `next` (Rückmeldungen). |
 | Done | Merged and accepted. |
 
 Run [board commands](README.md#board-commands) in the project with authenticated `gh`.

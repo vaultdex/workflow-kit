@@ -100,16 +100,16 @@ test('next lists the own unfinished work, then abandoned and conflicting work, b
 
 
 // workflow-kit #554: nobody noticed comments or a push-back after the handoff.
-test('next lists feedback after the handoff: a comment, a push-back, a mention; a reply or a resolved thread clears it', t => {
+test('next lists feedback after the handoff: a comment, a push-back, a mention; a reply clears it', t => {
   const { checkout, run } = fixture(t);
   const at = minute => `2026-10-10T10:${String(minute).padStart(2, '0')}:00Z`;
   const note = (minute, body) => ({ createdAt: at(minute), url: `https://example.test/c${minute}`, body });
   const handoff = note(1, '## Übergabe\n\nHead: abcdef1');
-  const row = (number, status, assignee, { issueComments = [], prComments = [], reviews = [], reviewThreads = [] } = {}) => ({ ...issue(status), number, issueFieldValues: { nodes: [] },
+  const row = (number, status, assignee, { issueComments = [], prComments = [], reviews = [] } = {}) => ({ ...issue(status), number, issueFieldValues: { nodes: [] },
     assignees: { nodes: [{ login: assignee }] }, comments: { nodes: issueComments },
     closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: number + 100, state: 'OPEN', body: 'Agent: claude, Session: S1', repository: { nameWithOwner: 'test/example' },
-      comments: { nodes: prComments }, reviews: { nodes: reviews }, reviewThreads: { nodes: reviewThreads } }] } });
-  const feedback = () => {
+      comments: { nodes: prComments }, reviews: { nodes: reviews } }] } });
+  const section = () => {
     const result = run('next', '--session', 'S1');
     assert.equal(result.status, 0, result.stdout + result.stderr);
     return result.stdout.startsWith('Rückmeldungen') ? result.stdout.split('\n\n')[0] : '';
@@ -117,28 +117,26 @@ test('next lists feedback after the handoff: a comment, a push-back, a mention; 
   const list = rows => writeFileSync(join(checkout, 'search.json'), JSON.stringify(rows));
 
   list([row(20, 'Human review', 'worker', { prComments: [handoff] })]);
-  assert.equal(feedback(), '', 'a handoff alone is no feedback');
+  assert.equal(section(), '', 'a handoff alone is no feedback');
   list([row(20, 'Human review', 'worker', { prComments: [handoff, note(2, 'Please change X')] })]);
-  assert.match(feedback(), /^#20 \[Human review\] .*1 new comment\(s\).* https:\/\/example\.test\/c2$/m, 'a comment after the handoff');
+  assert.match(section(), /^#20 \[Human review\] .*1 new comment\(s\).* https:\/\/example\.test\/c2$/m, 'a comment after the handoff');
   list([row(20, 'Human review', 'worker', { prComments: [handoff], reviews: [note(3, '')] })]);
-  assert.match(feedback(), /c3$/m, 'a review after the handoff');
-  list([row(20, 'Human review', 'worker', { prComments: [handoff], reviewThreads: [{ isResolved: false, comments: { nodes: [note(4, 'nit')] } }] })]);
-  assert.match(feedback(), /c4$/m, 'an open review thread');
-  list([row(20, 'Human review', 'worker', { prComments: [handoff], reviewThreads: [{ isResolved: true, comments: { nodes: [note(4, 'nit')] } }] })]);
-  assert.equal(feedback(), '', 'a resolved thread is done');
+  assert.match(section(), /c3$/m, 'a review after the handoff');
+  list([row(20, 'Human review', 'worker', { prComments: [handoff, note(2, 'Please change X')], issueComments: [note(4, '> Agent: claude, Session: S1 (quoted)')] })]);
+  assert.match(section(), /c4$/m, 'a quoted marker is no answer');
   list([row(20, 'Human review', 'worker', { prComments: [handoff, note(2, 'Please change X')], issueComments: [note(5, 'Agent: claude, Session: S1\n\nDone')] })]);
-  assert.equal(feedback(), '', 'a reply with the agent marker answers it');
+  assert.equal(section(), '', 'a reply with the agent marker answers it');
 
   list([row(20, 'Automated review', 'worker', { prComments: [handoff] })]);
-  assert.match(feedback(), /^#20 \[Automated review\] .*back in Automated review after the handoff .*c1$/m, 'a pushed-back issue');
+  assert.match(section(), /^#20 \[Automated review\] .*back in Automated review after the handoff .*c1$/m, 'a pushed-back issue');
   list([row(20, 'Automated review', 'worker', { prComments: [handoff], issueComments: [note(5, 'Agent: claude, Session: S1\n\nOn it')] })]);
-  assert.equal(feedback(), '', 'a reply answers the push-back');
+  assert.equal(section(), '', 'a reply answers the push-back');
 
   list([row(21, 'Human review', 'someone', { prComments: [handoff, note(2, 'ping @worker, please look'), note(3, 'no mention of @workers-union')] })]);
-  assert.match(feedback(), /^#21 .*mentions @worker .*c2$/m, 'a mention of the login, on an issue of someone else');
+  assert.match(section(), /^#21 .*mentions @worker .*c2$/m, 'a mention of the login, on an issue of someone else');
   list([row(21, 'Human review', 'someone', { prComments: [note(0, 'ping @worker'), handoff] })]);
-  assert.equal(feedback(), '', 'a mention before the last handoff is old');
+  assert.equal(section(), '', 'a mention before the last handoff is old');
   list([{ ...row(22, 'Human review', 'worker', { prComments: [handoff, note(2, 'late')] }), closedByPullRequestsReferences: { nodes: [{ state: 'OPEN', body: 'Agent: claude, Session: S9',
     repository: { nameWithOwner: 'test/example' }, comments: { nodes: [handoff, note(2, 'late')] } }] } }]);
-  assert.equal(feedback(), '', 'the issue of another session is not mine');
+  assert.equal(section(), '', 'the issue of another session is not mine');
 });

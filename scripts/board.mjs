@@ -471,28 +471,28 @@ function ownWork(rows, login, session) {
     && row.assignees.nodes.some(assignee => assignee.login.toLowerCase() === login.toLowerCase()) && ownPr(row, session));
 }
 
-// Feedback after a handoff (#554): the newest comments, reviews and open threads of the issue and its open PRs, read with the searches of `next` and `check`.
+// Feedback after a handoff (#554): the newest comments and reviews of the issue and its open PRs, read with the searches of `next` and `check`.
+// A review carries its inline threads; the page costs about 7 more points (one per 100 assumed connection nodes), so no thread connection.
 const feedbackNode = 'createdAt url body';
 const issueFeedback = `comments(last:10){nodes{${feedbackNode}}}`;
-const prFeedback = `${issueFeedback} reviews(last:5){nodes{${feedbackNode}}} reviewThreads(last:5){nodes{isResolved comments(last:1){nodes{${feedbackNode}}}}}`;
-const handoffHeading = /^## Übergabe\s*$/m;
+const prFeedback = `comments(last:5){nodes{${feedbackNode}}} reviews(last:5){nodes{${feedbackNode}}}`;
+const handoffHeading = /^## Übergabe\s*$/m, replyLine = /^Agent:[ \t]*(claude|codex)\b/im;
 
 /**
- * What happened on a ticket since the agent's last word, or undefined. The agent's word is a comment the tooling writes or the rules ask for (the "## Übergabe" handoff,
- * the backlink "PR: URL", or an "Agent: …, Session: …" line), never the login: agents and humans share it. Counts for an issue assigned to the login (and, with SESSION,
- * claimed by it): everything after that word, and the issue back in In progress or Automated review after the handoff. Any issue: an @mention of the login after it.
- * ponytail: reads the last 10 comments, 5 reviews and 5 open threads; older feedback is missed. A reply inside a thread needs the marker line to count as answered.
+ * What happened on a ticket since the agent's last word, or undefined. The agent's word is the "## Übergabe" handoff or a comment with an "Agent: claude|codex" line,
+ * never the login: agents and humans share it. Counts for an issue assigned to the login (and, with SESSION, claimed by it): everything after that word, and the issue
+ * back in In progress or Automated review after the handoff. Any issue: an @mention of the login after it.
+ * ponytail: reads the last 10 issue comments, 5 PR comments and 5 reviews, and any agent's marker answers; replace when feedback is missed or a second agent shares a ticket.
  */
 function feedback(issue, login, session) {
   const mine = issue.assignees.nodes.some(assignee => assignee.login.toLowerCase() === login.toLowerCase()) && (!session || ownPr(issue, session));
-  const events = [...(issue.comments?.nodes ?? []), ...openPrs(issue).flatMap(pr => [...(pr.comments?.nodes ?? []), ...(pr.reviews?.nodes ?? []),
-    ...(pr.reviewThreads?.nodes ?? []).filter(thread => !thread.isResolved).flatMap(thread => thread.comments.nodes)])]
+  const events = [...(issue.comments?.nodes ?? []), ...openPrs(issue).flatMap(pr => [...(pr.comments?.nodes ?? []), ...(pr.reviews?.nodes ?? [])])]
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const anchor = events.findLastIndex(event => handoffHeading.test(event.body) || claimField.test(event.body) || event.body.startsWith('PR: http'));
-  const mention = new RegExp(`(?<![\\w-])@${RegExp.escape(login)}(?![\\w-])`, 'i'), status = projectItem(issue)?.status?.name, all = mine && anchor >= 0;
-  const seen = events.slice(anchor + 1).filter(event => all || mention.test(event.body));
-  const why = [all && handoffHeading.test(events[anchor].body) && ['In progress', 'Automated review'].includes(status) && `back in ${status} after the handoff`,
-    seen.length && (all ? `${seen.length} new comment(s), review(s) or thread(s) since your last reply or handoff` : `mentions @${login}`)].filter(Boolean);
+  const anchor = events.findLastIndex(event => handoffHeading.test(event.body) || replyLine.test(event.body));
+  const mention = new RegExp(`(?<![\\w-])@${RegExp.escape(login)}(?![\\w-])`, 'i'), status = projectItem(issue)?.status?.name, tracked = mine && anchor >= 0;
+  const seen = events.slice(anchor + 1).filter(event => tracked || mention.test(event.body));
+  const why = [tracked && handoffHeading.test(events[anchor].body) && ['In progress', 'Automated review'].includes(status) && `back in ${status} after the handoff`,
+    seen.length && (tracked ? `${seen.length} new comment(s) or review(s) since your last reply or handoff` : `mentions @${login}`)].filter(Boolean);
   return why.length ? { reason: why.join('; '), url: (seen.at(-1) ?? events[anchor]).url } : undefined;
 }
 
@@ -624,13 +624,14 @@ function check(issue = readIssue(), claims, currentPrNumber) {
   if (claims?.session && !blocked.length && !unknown.length && !ownPr(issue, claims.session)) try {
     const login = issue.viewer.login, rows = assignedIssues(login), work = ownWork(rows, login, claims.session);
     // Feedback on a handed-off issue of the own session comes before new work too (#554).
-    const answer = own => feedback(own, login, claims.session);
-    const mine = [...work, ...rows.filter(row => !work.includes(row) && ownPr(row, claims.session) && answer(row))].filter(own => own.number !== issue.number);
+    const mine = work.map(own => [own, `it is your open work (${projectItem(own).status.name}); hand it off before starting another issue`]);
+    for (const row of rows.filter(row => !work.includes(row) && ownPr(row, claims.session))) {
+      const found = feedback(row, login, claims.session);
+      if (found) mine.push([row, `it has feedback (${found.reason}, ${found.url}); answer it in the ticket or hand it off again before starting another issue`]);
+    }
     // Own work that is the base of the stack is continued, not left behind; any other own issue still comes first.
     const base = own => stackedOn && predecessors.open.some(open => open.number === own.number && open.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
-    blocked.push(...mine.filter(own => !base(own)).map(own => `finish #${own.number} first: ${work.includes(own)
-      ? `it is your open work (${projectItem(own).status.name}); hand it off before starting another issue`
-      : `it has feedback (${answer(own).reason}, ${answer(own).url}); answer it in the ticket or hand it off again before starting another issue`}`));
+    blocked.push(...mine.filter(([own]) => own.number !== issue.number && !base(own)).map(([own, why]) => `finish #${own.number} first: ${why}`));
   } catch (error) { unknown.push(`own open work is unreadable: ${String(error.stderr || error.message).trim()}`); }
   const plain = verdictOf({ blocked, unknown });
   const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;
