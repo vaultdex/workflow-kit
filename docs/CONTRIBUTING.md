@@ -426,7 +426,7 @@ related references do not expand the declared scope. Creating a backlink never c
    reviewer is still running. It merges exactly the checked head by its full commit id
    (`gh pr merge --merge --match-head-commit`, or `merge-async` when GitHub refuses a PR with stacked children as "part of a stack" or HTTP 403)
    and reads the merge back. A single PR is merged even when the base changed the same files;
-   only a red check on a head the base has left behind makes it merge the base first (README, `merge`); afterwards it deletes the head branch (not a stack base, not the default branch, not
+   it merges the base first only for a red check: one listed in `"updateBranchChecks"` (even if the base did not move) or any red check on a head the base has left behind (README, `merge`); afterwards it deletes the head branch (not a stack base, not the default branch, not
    where the repository deletes it itself). Codex is the only
    required review bot; CodeRabbit is optional and is neither awaited nor re-requested.
 8. After the merge, confirm the delivered scope is accepted and the issue is
