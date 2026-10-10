@@ -101,6 +101,18 @@ test('done merges a base the branch is behind, pushes it and tests the merged he
   assert.match(text('affected-tests-calls'), /--run/);
 });
 
+test('done does not merge a base that moved after the tests of this head: repeated calls only wait', t => {
+  const { run, head, git, checkout, file, json } = delivery(t, handoffFixture);
+  moveBase(git, checkout);
+  const own = git('rev-parse', 'HEAD');
+  writeFileSync(join(checkout, '.git', 'board-done-tested'), own);
+  showPr(file, json, { isDraft: false, headRefOid: own });
+  const result = run('done', '1', 'result.md');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(git('rev-parse', 'HEAD'), own, 'no merge');
+  assert.match(git('ls-remote', 'origin', 'refs/heads/work'), new RegExp(`^${head}`), 'no push');
+});
+
 test('done fails on a conflict with the base, names the files and leaves no merge behind', t => {
   const { run, git, checkout, text } = delivery(t, handoffFixture);
   moveBase(git, checkout, { 'a.txt': 'theirs' }, { 'a.txt': 'mine' });

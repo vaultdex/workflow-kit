@@ -2700,27 +2700,27 @@ async function done() {
     return console.log(pull ? `CLOSED PR #${prNumber} (no change); the result is in the comment on #${number}` : `DONE #${number} (no PR); the result is in the comment on #${number}`);
   }
   const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
-  // The tests must see what will be merged (#558): a branch behind its base gets the base merged and pushed first. A conflict is aborted, the branch stays as it was.
-  const base = `origin/${pull.base.ref}`, failure = error => String(error.stderr || error.message).trim();
-  try { git('fetch', 'origin'); } catch (error) { return fail(`cannot fetch the base ${base}: ${failure(error)}`); }
-  let behind = false;
-  try { git('merge-base', '--is-ancestor', base, 'HEAD'); } catch { behind = true; }
-  if (behind) {
+  // The tests of a head run once: a call that only waits (after exit 4) neither repeats them nor merges a base that moved meanwhile.
+  const tested = resolve(projectDirectory, git('rev-parse', '--git-path', 'board-done-tested'));
+  const isTested = () => existsSync(tested) && readFileSync(tested, 'utf8') === localHead();
+  // The tests must see what will be merged (#558): an untested branch behind its base gets the base merged and pushed first. A conflict is aborted, the branch stays as it was.
+  if (!isTested()) {
+    const base = `origin/${pull.base.ref}`, failure = error => String(error.stderr || error.message).trim();
+    try { git('fetch', 'origin'); } catch (error) { return fail(`cannot fetch the base ${base}: ${failure(error)}`); }
+    // A branch that has the base stays as it is ("Already up to date", no commit).
     try { git('merge', '--no-edit', base); } catch (error) {
       const files = git('diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
       try { git('merge', '--abort'); } catch { /* no merge was started */ }
       return fail(`merging ${base} conflicts${files.length ? ` in ${files.join(', ')}` : `: ${failure(error)}`}; merge it yourself, push, then run done again`);
     }
-    try { git('push', 'origin', 'HEAD'); } catch (error) { return fail(`merged ${base}, but the push failed: ${failure(error)}`); }
+    try { git('push', 'origin', 'HEAD'); } catch (error) { return fail(`cannot push HEAD after merging ${base}: ${failure(error)}`); }
   }
   const sha = localHead();
   // The handoff file is only needed while no comment for this head exists (a repeated call after exit 4 has one): refuse before the tests, not after.
   if (!file && !findHandoffComment(restAll(`repos/${project.repository}/issues/${prNumber}/comments`), issue.viewer, sha)) {
     return fail(`no handoff comment for head ${sha.slice(0, 7)} and no HANDOFF_FILE: write it (<Ergebnis in einem Satz>, then "### Retro"; README: Handoff comment) and run board.mjs done ${number} HANDOFF_FILE`);
   }
-  // The tests of this head ran once: a call that only waits does not repeat them.
-  const tested = resolve(projectDirectory, git('rev-parse', '--git-path', 'board-done-tested'));
-  if (!(existsSync(tested) && readFileSync(tested, 'utf8') === sha)) {
+  if (!isTested()) {
     try {
       execFileSync(process.execPath, [fileURLToPath(new URL('affected-tests.mjs', import.meta.url)), '--cwd', projectDirectory, '--run', '--base', `origin/${pull.base.ref}`], { stdio: 'inherit' });
     } catch { return fail('the targeted tests of the changed files failed (output above); fix them, push, then run done again'); }

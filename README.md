@@ -181,7 +181,7 @@ and then work in that directory, their relative paths (changed files given to `a
   with the same call: `start` writes the new session into the claim line of its PR. A handover is the same edit of the claim line by hand. A new start is BLOCKED with `finish #N first` while you have an own unfinished issue (a resume or a stack on its work is not).
 - `done ISSUE [PR] [HANDOFF_FILE] [--refs] [--max-minutes N]`: everything from the last push to Human review. PR defaults to the one open PR
   that closes the issue; name it for a partial PR (`Refs #N`, no closing link) or with `--refs` (the PR only names the issue, whether or not another PR closes it: only the PR gate runs, and the issue status, assignment and acceptance boxes stay untouched). In order, each step only if still open, so a repeated call after a push or a wait is the same call:
-  0. The PR base is fetched; a branch that does not contain it gets it merged and pushed, so the tests see what will be merged. A conflict ends in `FAILED` naming the files, the merge aborted: resolve it, push, call `done` again.
+  0. The PR base is fetched; an untested head (once per push, not on a repeated call that only waits) that does not contain it gets it merged and pushed, so the tests see what will be merged. A conflict ends in `FAILED` naming the files, the merge aborted: resolve it, push, call `done` again.
      Without HANDOFF_FILE and without a handoff comment for the (merged) head, `done` stops here (`FAILED`), before the tests.
   1. The targeted tests of the changed files (`affected-tests.mjs --run`, once per head, in the foreground).
   2. The Draft PR ready for exactly the pushed head (the local `HEAD` is compared with the PR head as a prefix; the PR is reread 6 times, 5 s apart,
