@@ -2617,7 +2617,7 @@ function start() {
   } else if (!ownPr(issue, session)) {
     // A stale PR of another session is taken over: the claim line in its body names this session from now on.
     const path = `repos/${project.repository}/pulls/${pr}`, body = rest(path).body ?? '';
-    execFileSync(gh.file, ['api', path, '-X', 'PATCH', '-F', 'body=@-'], { encoding: 'utf8', env: gh.env, input: claimField.test(body) ? body.replace(claimField, claimLine) : `${body}\n${claimLine}\n` });
+    execFileSync(gh.file, ['api', path, '-X', 'PATCH', '-F', 'body=@-'], { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: claimField.test(body) ? body.replace(claimField, claimLine) : `${body}\n${claimLine}\n` });
     assert.equal(claimOf(rest(path))?.[2], session, 'Claim in the PR body read-back differs');
   }
   const final = readIssue();
