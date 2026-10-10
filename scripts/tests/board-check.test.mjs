@@ -337,7 +337,7 @@ test('board check blocks a newer claim of another session of the same login unle
 
 // Vaultdex #1178: Codex claimed at the end of a sentence and had an open PR; check said STARTABLE and a second driver began.
 test('board check blocks an issue another agent works on: its open PR, its branch or a claim that names no session', t => {
-  const { checkout, run, writeIssue, queries } = fixture(t);
+  const { checkout, run, writeIssue, queries, env } = fixture(t);
   const pr = (state, changes) => ({ number: 7, state, repository: { nameWithOwner: 'test/example' }, headRefName: 'codex/1-work', ...changes });
   const comments = (...bodies) => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(bodies.map((body, id) => ({ id, user: { login: 'worker', type: 'User' },
     body, html_url: 'https://example.test/c1', created_at: new Date(Date.now() - 600_000).toISOString() }))));
@@ -359,6 +359,9 @@ test('board check blocks an issue another agent works on: its open PR, its branc
   comments('Agent: claude, Session: S2');
   assert.equal(check('--session', 'S2').status, 0, 'the own claim lifts it');
   assert.equal(check('--session', 'S3').status, 1, 'a claim of another session does not');
+  env.CLAUDE_CODE_SESSION_ID = 'S2';
+  assert.equal(check().status, 0, 'without --session, check knows the own session like start does');
+  env.CLAUDE_CODE_SESSION_ID = '';
   withWork([pr('MERGED'), pr('CLOSED')]);
   comments();
   assert.equal(check('--session', 'S2').status, 0, 'a merged or closed PR holds nothing');

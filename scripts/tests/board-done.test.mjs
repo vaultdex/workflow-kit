@@ -26,7 +26,7 @@ function delivery(t, fixtureOf) {
   writeFileSync(file('backlink-comments-1.json'), JSON.stringify([{ id: 1, body: 'https://github.com/test/example/pull/7', html_url: 'u' }]));
   writeFileSync(file('result.md'), 'Alles geliefert.\n\n### Retro\n\n- Keine Funde\n');
   writeIssue({ ...issue('In progress'), assignees: { nodes: [{ login: 'worker' }] } });
-  return { run, writeIssue, head, text, json };
+  return { run, writeIssue, head, file, text, json };
 }
 
 test('done takes the pushed work to Human review: tests, ready, ticked boxes, Automated review, wait, handoff comment', t => {
@@ -47,6 +47,18 @@ test('done takes the pushed work to Human review: tests, ready, ticked boxes, Au
   assert.equal(json('issues-comments.json').length, comments);
 });
 
+
+test('done closes a PR without a change, puts the result on the issue and moves it to Human review', t => {
+  const { run, file, text, json } = delivery(t, handoffFixture);
+  writeFileSync(file('pr.json'), JSON.stringify({ ...json('pr.json'), changedFiles: 0 }));
+  const result = run('done', '1', 'result.md');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^CLOSED PR #7 /m);
+  assert.equal(json('pr.json').state, 'CLOSED');
+  assert.match(json('issues-comments.json').at(-1).body, /^## Übergabe\n\nAlles geliefert\./);
+  assert.equal(text('stored'), 'Human review');
+  assert.equal(text('affected-tests-calls'), '', 'nothing to test');
+});
 
 test('done hands a partial PR off without a native link, status or ticked boxes, also when no other PR closes the issue', t => {
   const { run, writeIssue, text, json } = delivery(t, fixture);

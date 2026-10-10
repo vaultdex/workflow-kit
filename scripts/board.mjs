@@ -2382,7 +2382,9 @@ const stack = process.argv.includes('--stack');
 const projectGrace = project.reviewerGraceMinutes === undefined ? 3 : project.reviewerGraceMinutes;
 const graceOption = () => numberOption('--grace', projectGrace);
 const headOption = () => process.argv.includes('--head') ? process.argv[process.argv.indexOf('--head') + 1] ?? '' : undefined;
-const sessionOption = () => process.argv.includes('--session') ? process.argv[process.argv.indexOf('--session') + 1] : undefined;
+// The own session for start, check and next alike: `--session`, else the `agent-<id>` of a Claude Code worktree, else CODEX_THREAD_ID, else CLAUDE_CODE_SESSION_ID (the session itself, not a subagent).
+const sessionOption = () => (process.argv.includes('--session') ? process.argv[process.argv.indexOf('--session') + 1] : undefined)
+  ?? (process.env.CODEX_THREAD_ID || /[\\/]agent-(\w+)(?:[\\/]|$)/.exec(process.cwd())?.[1] || process.env.CLAUDE_CODE_SESSION_ID);
 
 /** Metadata that can still describe the previous push right after it: identity, branch, state, draft, head. */
 const readyQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
@@ -2633,11 +2635,11 @@ const sameLogin = (a, b) => a?.toLowerCase() === b?.toLowerCase();
  * `start ISSUE`: everything from Ready to a Draft PR that closes the issue. The check of the issue decides first (BLOCKED, UNKNOWN: nothing is written),
  * then assignment, claim, In progress, the issue-linked branch on the right base (the Project's base field, the base PR of a stack, else the default
  * branch), the kit at its pin and a Draft PR with its link; every write is read back. A step that is already done is skipped, so a resume is the same call.
- * The session is `--session`, else the `agent-<id>` of a Claude Code worktree, else CODEX_THREAD_ID, else CLAUDE_CODE_SESSION_ID (the session itself, not a subagent).
+ * The session is the one of `sessionOption`.
  */
 function start() {
   const agent = process.env.CODEX_THREAD_ID ? 'codex' : 'claude', modules = join(projectDirectory, '.gitmodules');
-  const session = sessionOption() ?? process.env.CODEX_THREAD_ID ?? /[\\/]agent-(\w+)(?:[\\/]|$)/.exec(process.cwd())?.[1] ?? process.env.CLAUDE_CODE_SESSION_ID;
+  const session = sessionOption();
   assert.match(session ?? '', /^\w[\w.-]*$/, 'start needs your session id: pass --session ID');
   // One checkout-wide setting each, so a kit commit never rides along with a project push and a branch switch follows the kit pin.
   if (existsSync(modules)) for (const [key, want] of [['submodule.recurse', 'true'], ['push.recurseSubmodules', 'no']]) {
@@ -2672,8 +2674,8 @@ function start() {
   if (existsSync(modules) && readFileSync(modules, 'utf8').includes('.vendor/workflow-kit')) git('submodule', 'update', '--init', '.vendor/workflow-kit');
   let pr = currentIssuePr(issue).number;
   if (pr === undefined) {
-    // GitHub opens no PR without a commit of its own: the first one only says that the work began.
-    if (git('rev-list', '--count', `origin/${base}..HEAD`) === '0') git('commit', '--allow-empty', '-m', `Arbeit an #${number} beginnen`);
+    // GitHub opens no PR without a commit of its own: the first one only says that the work began. --only: changes already staged stay staged, they are the driver's to commit.
+    if (git('rev-list', '--count', `origin/${base}..HEAD`) === '0') git('commit', '--allow-empty', '--only', '-m', `Arbeit an #${number} beginnen`);
     git('push', '--set-upstream', 'origin', branch);
     pr = JSON.parse(restPost(`repos/${project.repository}/pulls`, ['-f', `title=${issue.title}`, '-f', `head=${branch}`, '-f', `base=${base}`, '-F', 'draft=true', '-F', 'body=@-'], `Closes #${number}\n`)).number;
     linkIssue(number, pr);
@@ -2700,6 +2702,14 @@ async function done() {
   assert.ok(prNumber !== undefined, found.unknown ?? `no open PR closes #${number}: run board.mjs start ${number}, or name the PR (done ${number} PR)`);
   const pull = rest(`repos/${project.repository}/pulls/${prNumber}`), sha = localHead();
   const partial = process.argv.includes('--refs') || isPartialPr(issue, prNumber);
+  // A PR without a change (a check task: `start` opened it as the claim) delivers nothing to merge: the result goes to the issue, the PR closes.
+  if (pull.changed_files === 0 && !partial) {
+    assert.ok(file, `PR #${prNumber} has no change: name the FILE with the result for the issue`);
+    restPost(`repos/${project.repository}/issues/${number}/comments`, ['-F', 'body=@-'], `## Übergabe\n\n${lines(file)}\n`);
+    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${prNumber}`, '-X', 'PATCH', '-f', 'state=closed'], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
+    set('Status', 'Human review');
+    return console.log(`CLOSED PR #${prNumber} (no change); the result is in the comment on #${number}`);
+  }
   const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
   // The tests of this head ran once: a call that only waits does not repeat them.
   const tested = resolve(projectDirectory, git('rev-parse', '--git-path', 'board-done-tested'));

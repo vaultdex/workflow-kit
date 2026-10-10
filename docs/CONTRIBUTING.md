@@ -348,7 +348,8 @@ related references do not expand the declared scope. Creating a backlink never c
 2. Keep the PR Draft only while implementation or focused checks are unfinished.
    Then `board.mjs done` marks it Ready for Review for the commit you just pushed (it waits until GitHub reports that head, so CI
    starts for the right revision) and sets Automated review ([PR backlinks](#pr-backlinks)). Don't wait for optional
-   self-reviews; bots and CI start only outside Draft.
+   self-reviews; bots and CI start only outside Draft. A check task without code leaves a PR without a change: `done ISSUE FILE`
+   closes it, posts FILE as the result on the issue and sets Human review.
 3. `done` then waits for CI and every non-optional review with a trace on the current head, in the background (a driver subagent:
    foreground, see [parallel-drivers.md](parallel-drivers.md#driver-regeln) rule 4), not hand-written polling. Review bots run unreliably,
    so find out per head who reviews instead of assuming it. A trace is a check,
