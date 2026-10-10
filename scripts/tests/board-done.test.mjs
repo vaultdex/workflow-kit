@@ -101,6 +101,35 @@ test('done merges a base the branch is behind, pushes it and tests the merged he
   assert.match(text('affected-tests-calls'), /--run/);
 });
 
+// The origin answers the fetch of `done` by a script that fails `message` the first `fails` times (stderr like git's), then serves the real upload-pack; it counts its calls.
+function flakyFetch(git, checkout, fails, message) {
+  writeFileSync(join(checkout, 'upload-pack.sh'), `echo x >> attempts\n[ "$(wc -l < attempts)" -le ${fails} ] && { echo "${message}" >&2; exit 1; }\nexec git upload-pack "$1"\n`);
+  git('config', 'remote.origin.uploadpack', 'sh upload-pack.sh');
+  return () => readFileSync(join(checkout, 'attempts'), 'utf8').trim().split('\n').length;
+}
+
+test('done repeats the fetch of the base when a ref is locked by a parallel fetch, and goes on', t => {
+  const { run, head, git, checkout, file, json } = delivery(t, handoffFixture);
+  moveBase(git, checkout);
+  git('update-ref', 'refs/remotes/origin/release/0.1.1', head);
+  showPr(file, json, { isDraft: false });
+  const attempts = flakyFetch(git, checkout, 2, "error: cannot lock ref 'refs/remotes/origin/release/0.1.1': is at x but expected y");
+  run('done', '1', 'result.md');
+  assert.equal(attempts(), 3, 'two refusals, then the third try fetched');
+  git('merge-base', '--is-ancestor', 'origin/release/0.1.1', 'HEAD');
+});
+
+test('done does not repeat a fetch that fails for another reason', t => {
+  const { run, head, git, checkout, file, json } = delivery(t, handoffFixture);
+  moveBase(git, checkout);
+  git('update-ref', 'refs/remotes/origin/release/0.1.1', head);
+  showPr(file, json, { isDraft: false });
+  const attempts = flakyFetch(git, checkout, 9, 'fatal: Could not read from remote repository.');
+  const result = run('done', '1', 'result.md');
+  assert.equal(attempts(), 1);
+  assert.match(result.stdout, /cannot fetch the base origin\/release\/0\.1\.1/);
+});
+
 test('done does not merge a base that moved after the tests of this head: repeated calls only wait', t => {
   const { run, head, git, checkout, file, json } = delivery(t, handoffFixture);
   moveBase(git, checkout);

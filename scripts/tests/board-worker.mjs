@@ -18,8 +18,9 @@ function realExecFileSync(file, args, options) {
   const child = realSpawnSync(file, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
   if (child.stderr?.length) results.postMessage({ stream: 'stderr', text: String(child.stderr) });
   if (child.error) throw child.error;
-  // Like execFileSync with an inherited stderr: the message names the command, `stderr` is empty.
-  if (child.status !== 0) throw Object.assign(new Error(`Command failed: ${file} ${args.join(' ')}`), { status: child.status, signal: child.signal, stdout: child.stdout, stderr: null });
+  // The message names the command; `stderr` is empty when it was inherited, and the text of a piped one (board.mjs's git) when it was piped, as board.mjs reads it (#566).
+  const piped = options?.stdio?.[2] === 'pipe';
+  if (child.status !== 0) throw Object.assign(new Error(`Command failed: ${file} ${args.join(' ')}`), { status: child.status, signal: child.signal, stdout: child.stdout, stderr: piped ? String(child.stderr) : null });
   return options?.encoding ? String(child.stdout) : child.stdout;
 }
 // A `git` that board.mjs finds is an empty placeholder in the test's bin (the tests run with that bin as PATH); the call goes to the host's real git.
