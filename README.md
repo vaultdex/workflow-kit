@@ -177,7 +177,7 @@ and then work in that directory, their relative paths (changed files given to `a
   issue without an open PR, pushes an empty first commit and opens the Draft PR (`Closes #N`) with its native link. It ends with
   `START #N session … branch … base … PR #…`; for a stack it names the PR to link above. Abandoned work (below, `next`) is taken over
   with the same call. A new start is BLOCKED with `finish #N first` while you have an own unfinished issue (a resume or a stack on its work is not).
-- `done ISSUE [PR] [FILE] [--refs] [--max-minutes N]`: everything from the last push to Human review. PR defaults to the one open PR
+- `done ISSUE [PR] [HANDOFF_FILE] [--refs] [--max-minutes N]`: everything from the last push to Human review. PR defaults to the one open PR
   that closes the issue; name it for a partial PR (`Refs #N`, no closing link) or with `--refs` (the PR only names the issue, whether or not another PR closes it: only the PR gate runs, and the issue status, assignment and acceptance boxes stay untouched). In order, each step only if still open, so a repeated call after a push or a wait is the same call:
   1. The targeted tests of the changed files (`affected-tests.mjs --run`, once per head, in the foreground).
   2. The Draft PR ready for exactly the pushed head (the local `HEAD` is compared with the PR head as a prefix; the PR is reread 6 times, 5 s apart,
