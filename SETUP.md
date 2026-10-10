@@ -85,7 +85,7 @@ review bot may start late (`"reviewerGraceMinutes"`, default 3). The wait ends s
 the head, a limit notice included. A project whose bots do not start on their own sets
 `"reviewerGraceMinutes": 0`; a non-number or negative value is an ERROR.
 `"staleHours"` (default 6) is how long work may lie without any activity before `board.mjs next` lists it as abandoned and `start` lets a new
-session take over its claim; a non-number or negative value is an ERROR. The automatic `sweep` is the opt-in workflow [docs/board-sweep.yml](docs/board-sweep.yml).
+session take over its PR; a non-number or negative value is an ERROR. The automatic `sweep` is the opt-in workflow [docs/board-sweep.yml](docs/board-sweep.yml).
 `"specLabel"` (default `spec`) names the label of a spec: `board.mjs` never closes such an issue, refuses its status Done and Human review, and a PR text with a closing keyword for it fails `done`.
 `"selfReview"` lists the self-checks the PR body must name in its `## Selbstprüfung` section before
 `board.mjs done` or `merge` passes, for example `"selfReview": ["ponytail-review", "code-review"]`; omit it to ask

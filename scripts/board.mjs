@@ -134,7 +134,7 @@ const baseField = (setting = baseSetting()) => setting ? ` base:fieldValueByName
 const issueFields = predecessor => `id number title state body updatedAt repository{nameWithOwner} assignees(first:10){nodes{login}}
   projectItems(first:100){nodes{id project{id} updatedAt status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}${baseField()}}}
   blockedBy(first:100){totalCount nodes{${predecessor}}}`;
-// The login of the viewer comes along, so a claim check needs no query of its own. Sub-issues (only `check` lists them) are asked
+// The login of the viewer comes along, so the own-work check needs no query of its own. Sub-issues (only `check` lists them) are asked
 // for in the number given: each costs three lists, so the first page is short and a longer list is read again at 100.
 // ponytail: closedByPullRequestsReferences lists open PRs with a closing link only (a plain mention is none); sub-issues stop at 100, shown with a note.
 // `refs` finds the branches `<agent>/<number>-…` of the issue: a name filter on one flat list, no nested list.
@@ -142,7 +142,7 @@ const issueQuery = subIssues => `query($owner:String!,$name:String!,$number:Int!
   refs(refPrefix:"refs/heads/",query:$branch,first:20){nodes{name}}
   issue(number:$number){
   ${issueFields(predecessorFields)}
-  closedByPullRequestsReferences(first:100){totalCount nodes{number state updatedAt mergeStateStatus repository{nameWithOwner} headRefName}}
+  closedByPullRequestsReferences(first:100){totalCount nodes{number state body updatedAt mergeStateStatus repository{nameWithOwner} headRefName}}
   labels(first:20){nodes{name}}
   ${subIssues ? `subIssues(first:${subIssues}){totalCount nodes{${issueFields('number state stateReason repository{nameWithOwner}')}}}` : ''}}}}`;
 /** Names the issue in failures (a bare "Could not resolve to an Issue" hides which repository was meant). */
@@ -178,7 +178,7 @@ assert.ok(typeof specLabel === 'string' && specLabel.trim(), 'specLabel in .gith
 const isSpec = issue => Boolean(issue.labels?.nodes?.some(label => label?.name?.toLowerCase() === specLabel.toLowerCase()));
 const specRefusal = (issueNumber, what) => `BLOCKED: #${issueNumber} is a spec (label "${specLabel}"); ${what}. Only a human closes a spec or sets Done; record the acceptance in a comment on the spec (AGENT_RULES.md, Hard rules).`;
 
-// "staleHours" in the project file (default 6): after that long without activity a claim has expired and the work counts as abandoned (#400).
+// "staleHours" in the project file (default 6): after that long without activity the work counts as abandoned and a new session may take it over (#400).
 const staleHours = project.staleHours === undefined ? 6 : project.staleHours;
 /**
  * Milliseconds since the last activity: the newest of the issue (comments), its Project item (status) and its open PR (push, comments, reviews),
@@ -206,12 +206,10 @@ const conflictLine = pr => {
   return `blocker: merge conflicts${lower ? ` in a lower stack layer, which locks the whole stack: ${stackOrderText}` : ''}`;
 };
 const conflicting = issue => projectItem(issue)?.status?.name === 'Human review' && openPr(issue)?.mergeStateStatus === 'DIRTY';
-/** Abandoned: no activity for staleHours, or a Human-review PR with conflicts (it is not mergeable, so nobody finishes it). A claim on such an issue has expired. */
+/** Abandoned: no activity for staleHours, or a Human-review PR with conflicts (it is not mergeable, so nobody finishes it). Work on such an issue has expired. */
 const isStale = (issue, idle = idleMs(issue)) => idle > staleHours * 3_600_000 || conflicting(issue);
 const openPrs = issue => (issue.closedByPullRequestsReferences?.nodes ?? []).filter(pr => pr?.state === 'OPEN');
 const workBranches = issue => (issue.branches ?? []).map(branch => branch.name).filter(name => new RegExp(`^[\\w.-]+/${issue.number}-`).test(name));
-/** How long a claim has been idle. Without an open PR and a branch nothing shows work, so only the claim comment's own age counts: board changes by others do not renew it (#497). */
-const claimIdleMs = (issue, holder) => openPrs(issue).length || workBranches(issue).length ? idleMs(issue) : Date.now() - Date.parse(holder.comment.created_at);
 
 /** Why native predecessors still hold an issue: open, closed without delivery, or unreadable. */
 function predecessorReasons({ totalCount, nodes }) {
@@ -411,54 +409,33 @@ function waitReasons(body) {
   return { blocked, unknown };
 }
 
-// Claim comments of the own login carry "Agent: claude|codex, Session: ID"; "Handover: ID" passes the claim to that session.
-// The field may stand anywhere in a line (Codex wrote it at the end of a sentence), not quoted in code, and "Agent: codex" alone is
-// a claim of an unknown session: it can never be the caller's, so it holds the issue until a handover.
+// The Draft PR that `start` opens is the claim: its body carries "Agent: claude|codex, Session: ID". The field may stand anywhere in a line
+// (Codex wrote it at the end of a sentence), not quoted in code, and "Agent: codex" alone is the claim of an unknown session: it can never be
+// the caller's, so it holds the issue until the line in the PR body is edited to the new session (a handover).
 const claimField = /(?<![\w`])Agent:[ \t]*(claude|codex)(?![\w-])(?:[ \t]*,[ \t]*Session:[ \t]*(\w[\w.-]*)(?![\w.-]))?/i;
-const handoverField = /^Handover:[ \t]*(\w[\w.-]*)[ \t]*$/im;
+const claimOf = pr => claimField.exec(pr.body ?? '');
 // ponytail: sessions are told apart by the id the driver passes, not authenticated; Claude and Codex share one login.
-/** Blocks when the newest claim or handover of the own login belongs to another session; claims without the field only note. */
-function claimReasons(issue, session) {
-  const viewer = issue.viewer ?? graphql('query{viewer{login}}').viewer;
-  assert.ok(viewer?.login, 'Cannot verify the authenticated GitHub user');
-  let holder, legacy;
-  // GitHub lists comments oldest first, so for equal times the later one in order wins.
-  for (const comment of restAll(`repos/${project.repository}/issues/${issue.number}/comments`)) {
-    if (comment.user?.login?.toLowerCase() !== viewer.login.toLowerCase()) continue;
-    const body = comment.body ?? '', claim = claimField.exec(body), handover = handoverField.exec(body);
-    if (handover) [holder, legacy] = [{ session: handover[1], comment }, undefined];
-    else if (claim) [holder, legacy] = [{ agent: claim[1].toLowerCase(), session: claim[2], comment }, undefined];
-    // A claim without the field names no session: it never lifts a known holder, it is only shown.
-    else if (/^Claim:/m.test(body)) legacy = comment;
-  }
-  const notes = [], blocked = [];
-  const about = ({ agent, session: id, comment }) => `${agent ? `Agent ${agent}, ` : ''}${id ? `Session ${id}` : 'no session named'}, ${comment.created_at}, ${comment.html_url}`;
-  // A claim without activity for staleHours has expired: the new session takes it over and says so in its claim comment.
-  const idle = holder && claimIdleMs(issue, holder);
-  if (holder && session && holder.session !== session && isStale(issue, idle)) notes.push(`stale claim of another session (${about(holder)}), no activity for ${ago(idle)}: write "Takeover of stale claim ${holder.session ?? 'unknown'}" in your claim comment`);
-  else if (holder && session && holder.session !== session) blocked.push(`claimed by another session (${about(holder)}); needs a handover to ${session}`);
-  else if (holder && !session) notes.push(`newest claim: ${about(holder)}; pass --session ID to compare it with yours`);
-  if (legacy) notes.push(`claim without Agent/Session field, session unknown: ${legacy.html_url}`);
-  return { blocked, notes, claim: holder ?? (legacy && { session: undefined, comment: legacy }) };
-}
+/** The open PR of the issue whose claim names SESSION. */
+const ownPr = (issue, session) => session ? openPrs(issue).find(pr => claimOf(pr)?.[2] === session) : undefined;
 
 /**
- * Work of someone on the issue that a claim comment may not show: an open PR that closes it (a Draft too) or a branch
- * `<agent>/<number>-…`. Only the newest claim being the caller's own session lifts it, so a driver cannot start in parallel to
- * an agent whose claim is missing, worded differently or posted after its branch.
+ * Work of someone on the issue: an open PR that closes it (a Draft too) or a branch `<agent>/<number>-…`. Only the claim of the
+ * caller's own session on a PR lifts it, so a driver cannot start in parallel to an agent whose PR names another session or none.
  */
 function workReasons(issue, session) {
   const own = session ? `no claim of session ${session}` : 'pass --session ID to prove it is yours';
   const prs = openPrs(issue);
-  // An abandoned PR (see isStale) may be taken over with --session.
+  // An abandoned PR (see isStale) may be taken over with --session: start writes the session into its body.
   const mayTake = session && prs.length && isStale(issue);
   const heads = new Set(prs.map(pr => pr.headRefName));
-  const blocked = (mayTake ? [] : prs).map(pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName})` : ''} closes this issue; ${own}`), notes = [];
+  const describe = pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName}${claimOf(pr) ? `, ${claimOf(pr)[0]}` : ''})` : ''}`;
+  const blocked = mayTake ? [] : prs.map(pr => `${describe(pr)} closes this issue; ${own}`);
+  const notes = mayTake ? prs.map(pr => `stale ${describe(pr)}: no activity for ${ago(idleMs(issue))}; start takes it over`) : [];
   // A branch without an open PR (#504): without own commits it holds nothing, without a commit for staleHours it is orphaned (a note), else it holds.
   for (const branch of workBranches(issue).filter(branch => !heads.has(branch))) {
     const { ahead, idle } = branchWork(issue, branch), agent = branch.split('/')[0];
     if (!ahead) continue;
-    if (idle !== undefined && isStale(issue, idle)) notes.push(`orphaned branch ${branch} (agent ${agent}): no open PR, no commit for ${ago(idle)}; write "Takeover of orphaned branch ${branch}" in your claim comment and continue on it or branch anew`);
+    if (idle !== undefined && isStale(issue, idle)) notes.push(`orphaned branch ${branch} (agent ${agent}): no open PR, no commit for ${ago(idle)}; continue on it or branch anew`);
     else blocked.push(`branch ${branch} (agent ${agent}${idle === undefined ? '' : `, last commit ${ago(idle)} ago`}) belongs to this issue; ${own}`);
   }
   return { blocked, notes };
@@ -480,22 +457,13 @@ function branchWork(issue, branch) {
   return { ahead, idle: Number.isFinite(newest) ? Date.now() - newest : undefined };
 }
 
-/** What the claim comments and the work on an issue hold against a start by SESSION: one rule for `check` and `next`. */
-function startReasons(issue, session) {
-  const found = claimReasons(issue, session);
-  if (session && found.claim?.session === session) return found;
-  const work = workReasons(issue, session);
-  return { ...found, blocked: [...found.blocked, ...work.blocked], notes: [...found.notes, ...work.notes] };
-}
+/** What the open PRs and branches of an issue hold against a start by SESSION: one rule for `check` and `next`. */
+const startReasons = (issue, session) => ownPr(issue, session) ? { blocked: [], notes: [] } : workReasons(issue, session);
 
-/**
- * Unfinished work of the caller: rows (number, assignees, projectItems) in In progress or Automated review that are assigned to the login
- * and whose newest claim names SESSION. The login is shared by all agents, so only the claim tells sessions apart (one comment read per candidate).
- */
+/** Unfinished work of the caller: rows (number, assignees, projectItems, closedByPullRequestsReferences) in In progress or Automated review that are assigned to the login and whose open PR names SESSION. */
 function ownWork(rows, login, session) {
   return rows.filter(row => ['In progress', 'Automated review'].includes(projectItem(row)?.status?.name)
-    && row.assignees.nodes.some(assignee => assignee.login.toLowerCase() === login.toLowerCase())
-    && claimReasons({ ...row, viewer: { login } }, session).claim?.session === session);
+    && row.assignees.nodes.some(assignee => assignee.login.toLowerCase() === login.toLowerCase()) && ownPr(row, session));
 }
 
 /** The open issues assigned to the login, for `check` (one paged search); `next` already holds all open issues. */
@@ -504,6 +472,7 @@ function assignedIssues(login) {
   for (let after; ;) {
     const { search } = graphql(`query($q:String!,$after:String){search(query:$q,type:ISSUE_ADVANCED,first:30,after:$after){
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title assignees(first:10){nodes{login}}
+      closedByPullRequestsReferences(first:10){nodes{state body}}
       projectItems(first:100){nodes{project{id} status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open assignee:${login}`, ...(after && { after }) });
     rows.push(...search.nodes);
@@ -582,7 +551,7 @@ function baseLines(issue, stacked) {
   return lines;
 }
 
-/** Without `claims` (status transitions) only the verdict prints; the `check` command adds claim age, PR and sub-issues. Information only. */
+/** Without `claims` (status transitions) only the verdict prints; the `check` command adds the open PRs with their claims and sub-issues. Information only. */
 function check(issue = readIssue(), claims, currentPrNumber) {
   let current = currentIssuePr(issue);
   if (currentPrNumber !== undefined && !current.unknown && current.number !== currentPrNumber) {
@@ -590,14 +559,12 @@ function check(issue = readIssue(), claims, currentPrNumber) {
   }
   const { status, blocked, unknown, predecessors } = issueReasons(issue);
   const notes = [];
-  let claim;
   if (claims) try {
     const found = startReasons(issue, claims.session);
     blocked.push(...found.blocked);
     notes.push(...found.notes);
-    claim = found.claim;
-  } catch (error) { unknown.push(`claim comments or branches are unreadable: ${String(error.stderr || error.message).trim()}`); }
-  // Only open predecessors hold the issue (no other blocker, not even a claim or a status): look for the PR to stack on.
+  } catch (error) { unknown.push(`branches are unreadable: ${String(error.stderr || error.message).trim()}`); }
+  // Only open predecessors hold the issue (no other blocker, not even foreign work or a status): look for the PR to stack on.
   stackedOn = undefined;
   const heldOnlyByOpen = heldOnlyByOpenPredecessors(blocked, predecessors);
   if (current?.unknown && (currentPrNumber !== undefined || heldOnlyByOpen)) {
@@ -617,7 +584,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
     } else notes.push(...stack.refused.map(reason => `not stackable: ${reason}`), ...stack.unknown.map(reason => `unreadable: ${reason}`));
   }
   // Finish first: another issue of the caller in In progress or Automated review holds a new start (not a resume, not a stack on that very work).
-  if (claims?.session && !blocked.length && !unknown.length && claim?.session !== claims.session) try {
+  if (claims?.session && !blocked.length && !unknown.length && !ownPr(issue, claims.session)) try {
     const login = issue.viewer.login, mine = ownWork(assignedIssues(login), login, claims.session).filter(own => own.number !== issue.number);
     // Own work that is the base of the stack is continued, not left behind; any other own issue still comes first.
     const base = own => stackedOn && predecessors.open.some(open => open.number === own.number && open.repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase());
@@ -632,12 +599,12 @@ function check(issue = readIssue(), claims, currentPrNumber) {
     : `stack base: PR #${stackedOn.number}${stackedOn.stackNumber ? ` in stack #${stackedOn.stackNumber}` : ''} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
   for (const note of notes) console.log(`note: ${note}`);
   if (claims) for (const line of baseLines(issue, stackedOn)) console.log(line);
-  if (claim) {
+  if (claims) {
     const linked = issue.closedByPullRequestsReferences;
-    const prs = linked?.nodes?.filter(pr => pr.state === 'OPEN').map(pr => refOf(pr.repository, pr.number));
+    const prs = openPrs(issue).map(pr => `${refOf(pr.repository, pr.number)} (Session ${claimOf(pr)?.[2] ?? 'unknown'})`);
     // A list cut at 100 is never presented as complete.
     const cut = linked?.totalCount > linked?.nodes?.length ? ` (first ${linked.nodes.length} of ${linked.totalCount})` : '';
-    console.log(`claim: ${ago(Date.now() - Date.parse(claim.comment.created_at))} ago (Session ${claim.session ?? 'unknown'}), open PR: ${prs ? prs.join(', ') || 'none' : 'unknown'}${cut}`);
+    if (prs.length) console.log(`open PR: ${prs.join(', ')}${cut}`);
   }
   if (claims && issue.subIssues?.nodes?.length) {
     if (issue.subIssues.totalCount > issue.subIssues.nodes.length) console.log(`note: ${issue.subIssues.nodes.length} of ${issue.subIssues.totalCount} sub-issues listed`);
@@ -723,7 +690,7 @@ function next() {
       issueCount pageInfo{hasNextPage endCursor} nodes{...on Issue{number title body updatedAt assignees(first:10){nodes{login}}
       blockedBy(first:100){totalCount nodes{${predecessorFields}}}
       issueFieldValues(first:100){nodes{...on IssueFieldSingleSelectValue{name field{...on IssueFieldSingleSelect{name}}}}}
-      closedByPullRequestsReferences(first:10){nodes{number state updatedAt mergeStateStatus headRefName repository{nameWithOwner}}}
+      closedByPullRequestsReferences(first:10){nodes{number state body updatedAt mergeStateStatus headRefName repository{nameWithOwner}}}
       projectItems(first:100){nodes{project{id} updatedAt status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}${baseField()}
         priority:fieldValueByName(name:"Priority"){...on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}}`,
     { q: `repo:${project.repository} is:issue is:open ${blocking}`, ...(after && { after }) });
@@ -748,12 +715,12 @@ function next() {
         ?? issue.issueFieldValues.nodes.find(field => field.field?.name === 'Priority')?.name };
     })
     .sort((a, b) => order(a.priority) - order(b.priority) || a.number - b.number);
-  // A claim, an open PR or a branch holds an issue as in `check` (#497): read for the issues that would start or stack otherwise (REST only: the comments, one branch list).
+  // An open PR or a branch holds an issue as in `check` (#497): read for the issues that would start or stack otherwise (REST only: one branch list).
   let branches;
   for (const issue of ready.filter(issue => !issue.reasons.length || heldOnlyByOpenPredecessors(issue.reasons, issue.predecessors))) try {
     branches ??= restAll(`repos/${project.repository}/branches`);
     issue.reasons.push(...startReasons({ ...issue, branches, viewer: { login } }, sessionOption()).blocked);
-  } catch (error) { issue.reasons.push(`claim comments or branches are unreadable: ${String(error.stderr || error.message).trim()}`); }
+  } catch (error) { issue.reasons.push(`branches are unreadable: ${String(error.stderr || error.message).trim()}`); }
   const line = issue => `#${issue.number} [${issue.priority ?? 'no priority'}] ${issue.title}`
     + ` (assignees: ${issue.assignees.nodes.map(assignee => assignee.login).join(', ') || 'none'})`;
   const startable = ready.filter(issue => !issue.reasons.length);
@@ -763,7 +730,7 @@ function next() {
   const stackable = candidates.map(issue => ({ ...issue, base: stackBase(issue.predecessors.open).pr })).filter(issue => issue.base);
   const held = ready.filter(issue => issue.reasons.length && !stackable.some(candidate => candidate.number === issue.number));
   // Unfinished work comes first: the own (finish it before a new start), then work that nobody moves (a stale PR, a Human-review PR with conflicts),
-  // which a new session may take over (start ISSUE --session ID treats a stale claim as expired).
+  // which a new session may take over (start ISSUE --session ID).
   const status = issue => projectItem(issue)?.status?.name;
   const session = sessionOption(), mine = session ? ownWork(nodes, login, session) : [];
   const abandoned = nodes.filter(issue => ['In progress', 'Automated review', 'Human review'].includes(status(issue)) && !mine.includes(issue) && openPr(issue) && isStale(issue));
@@ -772,7 +739,7 @@ function next() {
   if (abandoned.length) console.log(`Stale or conflicting work, a new session may take it over (start ISSUE --session ID):\n${abandoned.map(issue => work(issue,
     conflicting(issue) ? 'merge conflicts' : `no activity for ${ago(idleMs(issue))}`)).join('\n')}\n`);
   for (const issue of startable) console.log(line(issue));
-  console.log(startable.length ? 'Run board.mjs start ISSUE to claim one.' : 'No Ready issue whose blockers are all completed.');
+  console.log(startable.length ? 'Run board.mjs start ISSUE to take one.' : 'No Ready issue whose blockers are all completed.');
   if (stackable.length) console.log('\nReady and stackable on an open PR (start ISSUE says STACKABLE; see docs/CONTRIBUTING.md#stacked-pull-requests):');
   for (const issue of stackable) console.log(`${line(issue)}\n  - base PR #${issue.base.number} (${issue.base.state === 'MERGED' ? `merged into ${issue.base.baseRefName}` : `branch ${issue.base.headRefName}`})`);
   if (held.length) console.log('\nReady but not startable:');
@@ -2606,8 +2573,8 @@ const restPost = (path, args, input) => execFileSync(gh.file, ['api', path, '-X'
 const sameLogin = (a, b) => a?.toLowerCase() === b?.toLowerCase();
 
 /**
- * `start ISSUE`: everything from Ready to a Draft PR that closes the issue. The check of the issue decides first (BLOCKED, UNKNOWN: nothing is written),
- * then assignment, claim, In progress, the issue-linked branch on the right base (the Project's base field, the base PR of a stack, else the default
+ * `start ISSUE`: everything from Ready to a Draft PR that closes the issue; the PR is the claim (its body names the session). The check of the issue decides first
+ * (BLOCKED, UNKNOWN: nothing is written), then assignment, In progress, the issue-linked branch on the right base (the Project's base field, the base PR of a stack, else the default
  * branch), the kit at its pin and a Draft PR with its link; every write is read back. A step that is already done is skipped, so a resume is the same call.
  * The session is the one of `sessionOption`.
  */
@@ -2625,13 +2592,6 @@ function start() {
   if (!mayStart(check(issue, { session }))) return;
   const stacked = stackedOn, login = issue.viewer.login;
   if (!issue.assignees.nodes.some(user => sameLogin(user.login, login))) restPost(`repos/${project.repository}/issues/${number}/assignees`, ['-f', `assignees[]=${login}`]);
-  const { claim } = claimReasons(issue, session);
-  if (claim?.session !== session) {
-    restPost(`repos/${project.repository}/issues/${number}/comments`, ['-F', 'body=@-'],
-      `Agent: ${agent}, Session: ${session}\n${claim?.session ? `Takeover of stale claim ${claim.session}\n` : ''}`);
-    const read = claimReasons(issue, session);
-    assert.ok(!read.blocked.length && read.claim?.session === session, 'Claim comment read-back differs');
-  }
   set('Status', 'In progress');
   const base = stacked ? (stacked.state === 'MERGED' ? stacked.baseRefName : stacked.headRefName)
     : baseOf(issue).branch || (defaultBranch ??= rest(`repos/${project.repository}`).default_branch);
@@ -2647,12 +2607,18 @@ function start() {
   }
   if (existsSync(modules) && readFileSync(modules, 'utf8').includes('.vendor/workflow-kit')) git('submodule', 'update', '--init', '.vendor/workflow-kit');
   let pr = currentIssuePr(issue).number;
+  const claimLine = `Agent: ${agent}, Session: ${session}`;
   if (pr === undefined) {
     // GitHub opens no PR without a commit of its own: the first one only says that the work began. --only: changes already staged stay staged, they are the driver's to commit.
     if (git('rev-list', '--count', `origin/${base}..HEAD`) === '0') git('commit', '--allow-empty', '--only', '-m', `Arbeit an #${number} beginnen`);
     git('push', '--set-upstream', 'origin', branch);
-    pr = JSON.parse(restPost(`repos/${project.repository}/pulls`, ['-f', `title=${issue.title}`, '-f', `head=${branch}`, '-f', `base=${base}`, '-F', 'draft=true', '-F', 'body=@-'], `Closes #${number}\n`)).number;
+    pr = JSON.parse(restPost(`repos/${project.repository}/pulls`, ['-f', `title=${issue.title}`, '-f', `head=${branch}`, '-f', `base=${base}`, '-F', 'draft=true', '-F', 'body=@-'], `Closes #${number}\n${claimLine}\n`)).number;
     linkIssue(number, pr);
+  } else if (!ownPr(issue, session)) {
+    // A stale PR of another session is taken over: the claim line in its body names this session from now on.
+    const path = `repos/${project.repository}/pulls/${pr}`, body = rest(path).body ?? '';
+    execFileSync(gh.file, ['api', path, '-X', 'PATCH', '-F', 'body=@-'], { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, input: claimField.test(body) ? body.replace(claimField, claimLine) : `${body}\n${claimLine}\n` });
+    assert.equal(claimOf(rest(path))?.[2], session, 'Claim in the PR body read-back differs');
   }
   const final = readIssue();
   assert.equal(projectItem(final)?.status?.name, 'In progress', 'In progress status read-back differs');

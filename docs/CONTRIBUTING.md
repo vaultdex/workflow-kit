@@ -37,27 +37,20 @@ claim and resume. Memory, an existing branch or Ready status does not replace it
 | BLOCKED | An open predecessor that is not STACKABLE (no open PR, only a Draft PR, a fork PR, several PRs, another repository), a predecessor closed as not planned or duplicate (needs a recorded decision), a closed issue, status Backlog or Done, an unmet `Wartet bis` condition, or work of another session (see Claims). |
 | UNKNOWN | API error, incomplete dependency data (including the PR list of an open predecessor), an inaccessible predecessor, an unset or unknown status, the issue is missing from the Project, or an unreadable `Wartet bis` line. Retry the read; never read it as "no blockers". |
 
-**Claims.** The check (`start ISSUE --session ID`) also reads the issue comments of the authenticated login
-(other authors are ignored). A claim carries `Agent: claude|codex, Session: ID` (anywhere in a line, not quoted in code); `Agent: codex`
-alone is a claim of an unknown session. A comment
-with the line `Handover: ID` (from the earlier session or the human handing over, under the same login) passes the claim to
-that session. The newest claim or handover decides, the later comment wins on equal times. If it names
-another session than `--session` (or no session), the check reports BLOCKED with agent, session, time and comment link.
-Without `--session`, or when the newest claim is an old one that lacks the field (no known session), the check only shows a note.
-A claim without activity (issue, Project status, open PR) for `staleHours` (project file, default 6) has expired: with `--session`, the check notes it
-instead of BLOCKED, also for the open PR and branch below; the new claim says `Takeover of stale claim OLD_SESSION` and the assignees stay. A claim with neither an open PR nor a branch expires by the age of its own comment
-(board changes by others do not renew it), and `next` lists no issue that the check blocks for a claim, PR or branch. A new start
+**Claims.** The Draft PR that `start` opens is the claim: its body carries `Agent: claude|codex, Session: ID` (anywhere in a line, not quoted in
+code; `Agent: codex` alone is a claim of an unknown session). The check (`start ISSUE --session ID`) reads it with the one issue query. Whatever
+the claims say, the check reports BLOCKED while an open PR closes the issue (a Draft too) or a branch `<agent>/<issue number>-…` exists, unless an
+open PR names `--session` (the own session resumes its own PR and branch); without `--session` nothing proves it. A PR of another session names its
+agent and session in the BLOCKED line. A handover is that line edited to the new session (by the earlier session or the human handing over).
+Work without activity (issue, Project status, open PR) for `staleHours` (project file, default 6) has expired: with `--session`, the check notes the
+stale PR instead of BLOCKED, and `start` writes the new session into its claim line; the assignees stay. A branch without an open PR holds only
+while it has own commits against the base and its newest commit is younger than `staleHours` (one REST compare per branch); then BLOCKED names its
+agent and the commit age; an empty or older branch is a note (#504). `next` lists no issue that the check blocks for a PR or branch. A new start
 is BLOCKED with `finish #N first` while the own session has an issue in In progress or Automated review (stacking on that work is allowed).
-Whatever the claims say, the check also reports BLOCKED while an open PR closes the issue (a Draft too) or a branch `<agent>/<issue number>-…`
-exists, unless the newest claim is of `--session` (the own session resumes its own PR and branch); without `--session` nothing proves it. Both come
-with the one issue query. A branch without an open PR holds only while it has own commits against the base and its newest commit is younger than `staleHours`
-(one REST compare per branch); then BLOCKED names its agent and the commit age. An empty or older branch is a note (`Takeover of orphaned branch …` in the claim) (#504).
-Two sessions that check within seconds, before either has a claim or a branch, are not caught. Unreadable
-comments are UNKNOWN. Assignment stays no lock; the check only reports, and `field` and `done` do not read claims.
+Two sessions that check within seconds, before either has a PR, are not caught. Assignment stays no lock; the check only reports, and `field` and `done` do not read claims.
 
-**Claim-Alter und Sub-Issues.** Nur Information, kein neues Verdict und keine Erlaubnis zur Übernahme (die braucht
-weiter eine ausdrückliche Übergabe). Bei einem bekannten Claim nennt die Prüfung danach Alter und PR-Lage, etwa
-`claim: 2d 4h ago (Session S1), open PR: none` oder `open PR: #123` (offene PRs mit Closing-Link auf das Issue).
+**Offene PRs und Sub-Issues.** Nur Information, kein neues Verdict und keine Erlaubnis zur Übernahme. Die Prüfung nennt die offenen PRs mit
+Closing-Link auf das Issue und die Session aus ihrem Claim, etwa `open PR: #123 (Session S1)`.
 Hat das Issue native Sub-Issues, folgt pro Sub-Issue eine Zeile `#N  Status  Assignee  Verdict` mit der Logik des
 Verdicts oben, ohne Claims; sie ändern das Verdict des Issues nicht.
 
@@ -231,7 +224,7 @@ beim Erstellen, bei jeder Body-Änderung und bei Claim-, Übergabe- und Statusko
 from your local `main`. It reuses your existing branch and PR for the same
 issue. If creation fails, check the remote branches and issue links before retrying.
 
-**PR body.** `start` opens the Draft PR with `Closes #N`; for each further issue the PR fully delivers, write `Closes #N` (cross-repo:
+**PR body.** `start` opens the Draft PR with `Closes #N` and the claim line `Agent: …, Session: …` (keep that line); for each further issue the PR fully delivers, write `Closes #N` (cross-repo:
 `Closes OWNER/REPO#N`) for each issue the PR fully delivers, and `Refs #N` for
 related work. Closing keywords work only in PRs into the default branch. Partial
 delivery never closes an issue; split the undeliverable part first

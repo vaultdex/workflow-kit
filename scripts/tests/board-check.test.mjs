@@ -170,7 +170,7 @@ test('a native stack selects its tip for new work and the immediate lower layer 
   const checkWithSession = () => run('check', '1', '--session', 'resume1');
   const issueWith = (...blockers) => ({ ...issue('Ready', blockers), closedByPullRequestsReferences: {
     totalCount: 3, nodes: [
-      { number: 1351, state: 'OPEN', repository: { nameWithOwner: 'test/example' }, headRefName: ownDraft.headRefName },
+      { number: 1351, state: 'OPEN', body: 'Agent: codex, Session: resume1', repository: { nameWithOwner: 'test/example' }, headRefName: ownDraft.headRefName },
       { number: 1300, state: 'CLOSED', repository: { nameWithOwner: 'test/example' } },
       { number: 1200, state: 'MERGED', repository: { nameWithOwner: 'test/example' } },
     ],
@@ -211,14 +211,12 @@ test('a native stack selects its tip for new work and the immediate lower layer 
   assert.match(newAtTip.stdout, /^stack base: PR #1352 in stack #88/m);
 
   writeIssue(issueWith(basePredecessor));
-  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker' },
-    body: 'Agent: codex, Session: resume1', created_at: new Date().toISOString(), html_url: 'claim' }]));
   const resumed = run('check', '1', '--session', 'resume1');
   assert.equal(resumed.status, 4, resumed.stdout + resumed.stderr);
   assert.match(resumed.stdout, /^stack base: PR #1345 in stack #88/m, 'Resume uses own PR immediate lower layer, not foreign layer above it');
   assert.doesNotMatch(resumed.stdout, /PR #1351 is still Draft/);
 
-  const ownLink = number => ({ number, state: 'OPEN', repository: { nameWithOwner: 'test/example' } });
+  const ownLink = number => ({ number, state: 'OPEN', body: 'Agent: codex, Session: resume1', repository: { nameWithOwner: 'test/example' } });
   writeIssue({ ...issue('Ready', [basePredecessor]), closedByPullRequestsReferences: {
     totalCount: 2, nodes: [ownLink(1351), ownLink(1352)],
   } });
@@ -296,58 +294,17 @@ test('"Wartet bis" holds an issue until its tag exists or its UTC time has passe
 });
 
 
-test('board check blocks a newer claim of another session of the same login unless handed over', t => {
-  const { checkout, run, writeIssue } = fixture(t);
-  writeIssue(issue());
-  const [older, newer] = [10, 1].map(minutes => new Date(Date.now() - minutes * 60_000).toISOString());
-  const comment = (body, changes) => ({ id: 1, user: { login: 'worker', type: 'User' }, body, html_url: 'https://example.test/c1',
-    created_at: older, ...changes });
-  const claim = (agent, session, changes) => comment(`Claim\n\nAgent: ${agent}, Session: ${session}`, changes);
-  const check = (comments, ...args) => {
-    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(comments));
-    return run('check', '1', ...args);
-  };
-
-  const foreign = check([claim('claude', 'S1'), claim('codex', 'S2', { created_at: newer })], '--session', 'S1');
-  assert.equal(foreign.status, 1, foreign.stdout + foreign.stderr);
-  assert.match(foreign.stdout, new RegExp(`Agent codex, Session S2, ${newer}, https://example\\.test/c1`));
-  assert.equal(check([claim('claude', 'S1')], '--session', 'S1').status, 0, 'own claim');
-  assert.equal(check([claim('claude', 'S1'), claim('codex', 'S2')], '--session', 'S2').status, 0, 'equal times: the later comment wins');
-  assert.equal(check([claim('claude', 'S1'), comment('Handover: S2')], '--session', 'S2').status, 0, 'handover');
-  assert.equal(check([claim('claude', 'S1'), comment('Handover: S2')], '--session', 'S1').status, 1, 'the earlier session lost the claim');
-  assert.equal(check([claim('claude', 'S1', { user: { login: 'someone-else' } })], '--session', 'S2').status, 0, 'other authors are ignored');
-
-  const old = check([comment('Claim: Driver, Branch x')], '--session', 'S2');
-  assert.equal(old.status, 0, old.stdout);
-  assert.match(old.stdout, /note: claim without Agent\/Session field/);
-  const stray = check([claim('claude', 'S1'), comment('Claim: released')], '--session', 'S2');
-  assert.equal(stray.status, 1, 'a newer claim without the field never lifts a known holder');
-  assert.match(stray.stdout, /note: claim without Agent\/Session field/);
-  assert.equal(check([comment('Agent: codex, Session: S1, Branch: x')], '--session', 'S2').status, 1, 'text after the session id is allowed');
-  assert.equal(check([comment('Agent: reviewer, Session: S1')], '--session', 'S2').status, 0, 'only claude and codex name a claim');
-  assert.equal(check([claim('claude', 'S1')], '--sesion', 'S2').status, 2, 'a misspelled flag is a usage error, not a silent skip');
-  const unnamed = check([claim('claude', 'S1')]);
-  assert.equal(unnamed.status, 0, 'without --session the verdict stays as before');
-  assert.match(unnamed.stdout, /note: newest claim: Agent claude, Session S1/);
-
-  writeFileSync(join(checkout, 'fail-rest'), '');
-  assert.equal(run('check', '1', '--session', 'S1').status, 2, 'unreadable comments are unknown');
-});
-
-
-// Vaultdex #1178: Codex claimed at the end of a sentence and had an open PR; check said STARTABLE and a second driver began.
-test('board check blocks an issue another agent works on: its open PR, its branch or a claim that names no session', t => {
+// The Draft PR is the claim (#529): its body names the session. Vaultdex #1178: Codex claimed at the end of a sentence and had an open PR; check said STARTABLE and a second driver began.
+test('board check blocks an issue another agent works on: an open PR that does not name the own session, or a branch', t => {
   const { checkout, run, writeIssue, queries, env } = fixture(t);
   const pr = (state, changes) => ({ number: 7, state, repository: { nameWithOwner: 'test/example' }, headRefName: 'codex/1-work', ...changes });
-  const comments = (...bodies) => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify(bodies.map((body, id) => ({ id, user: { login: 'worker', type: 'User' },
-    body, html_url: 'https://example.test/c1', created_at: new Date(Date.now() - 600_000).toISOString() }))));
   const withWork = (prs, branches = []) => {
     writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: prs.length, nodes: prs } });
     writeFileSync(join(checkout, 'branches.json'), JSON.stringify(branches));
   };
+  const claimedBy = body => withWork([pr('OPEN', { body })], ['codex/1-work']);
   const check = (...args) => run('check', '1', ...args);
 
-  comments();
   withWork([pr('OPEN')], ['codex/1-work']);
   const found = check('--session', 'S2');
   assert.equal(found.status, 1, found.stdout);
@@ -356,15 +313,28 @@ test('board check blocks an issue another agent works on: its open PR, its branc
   assert.match(check().stdout, /^- open PR #7 .*pass --session ID/m, 'without a session nobody proves the PR is theirs');
   assert.equal(queries().length, 2, 'both checks read the PR and the branches with the one issue query');
 
-  comments('Agent: claude, Session: S2');
-  assert.equal(check('--session', 'S2').status, 0, 'the own claim lifts it');
-  assert.equal(check('--session', 'S3').status, 1, 'a claim of another session does not');
+  claimedBy('Closes #1\n\nAgent: claude, Session: S2');
+  assert.equal(check('--session', 'S2').status, 0, 'the claim in the PR body lifts it');
+  const foreign = check('--session', 'S3');
+  assert.equal(foreign.status, 1, 'the claim of another session does not');
+  assert.match(foreign.stdout, /^- open PR #7 \(branch codex\/1-work, Agent: claude, Session: S2\) closes this issue; no claim of session S3$/m, 'and names its session');
+  assert.equal(check('--sesion', 'S2').status, 2, 'a misspelled flag is a usage error, not a silent skip');
   env.CLAUDE_CODE_SESSION_ID = 'S2';
   assert.equal(check().status, 0, 'without --session, check knows the own session like start does');
   env.CLAUDE_CODE_SESSION_ID = '';
   withWork([pr('MERGED'), pr('CLOSED')]);
-  comments();
   assert.equal(check('--session', 'S2').status, 0, 'a merged or closed PR holds nothing');
+
+  // The field is read as it was written: at the end of a sentence, with text after the session id; a quoted example, another agent or a missing session is no claim of S2.
+  const claim = body => { claimedBy(body); return check('--session', 'S2'); };
+  assert.equal(claim('Quota-Blocker aufgehoben: frischer board check ist STARTABLE. Agent: codex, Session: S1').status, 1, 'the field counts at the end of a sentence');
+  assert.equal(check('--session', 'S1').status, 0, 'and names the session of its writer');
+  assert.equal(claim('Agent: codex, Session: S2, Branch: x').status, 0, 'text after the session id is allowed');
+  const unnamed = claim('Claim\n\nAgent: codex');
+  assert.equal(unnamed.status, 1, 'a claim of an agent without a session is never the caller');
+  assert.match(unnamed.stdout, /branch codex\/1-work, Agent: codex\)/);
+  assert.equal(claim('Use `Agent: codex, Session: S2` as the claim line.').status, 1, 'a quoted example is no claim');
+  assert.equal(claim('Agent: reviewer, Session: S2').status, 1, 'only claude and codex name a claim');
 
   withWork([], ['claude/1-first', 'claude/12-other', 'codex/10-1-nope', 'release/1-0']);
   const branch = check('--session', 'S2');
@@ -386,28 +356,12 @@ test('board check blocks an issue another agent works on: its open PR, its branc
   branchWork({ 'codex/1-old': { ahead: 2, hours: 7 } });
   const orphan = check('--session', 'S2');
   assert.equal(orphan.status, 0, orphan.stdout);
-  assert.match(orphan.stdout, /^note: orphaned branch codex\/1-old \(agent codex\): no open PR, no commit for 7h 0m; write "Takeover of orphaned branch codex\/1-old" in your claim comment/m);
+  assert.match(orphan.stdout, /^note: orphaned branch codex\/1-old \(agent codex\): no open PR, no commit for 7h 0m; continue on it or branch anew$/m);
   branchWork({ 'codex/1-old': { ahead: 2, hours: 5 } });
   assert.match(check('--session', 'S2').stdout, /^- branch codex\/1-old \(agent codex, last commit 5h 0m ago\) belongs to this issue/m, 'a commit within staleHours still holds');
   rmSync(join(checkout, 'calls'), { force: true });
   check('--session', 'S2');
   assert.equal(readFileSync(join(checkout, 'calls'), 'utf8'), 'compare main...codex/1-old\n', 'one compare per branch, against the default branch without a base setting');
-  rmSync(join(checkout, 'branch-work.json'));
-
-  withWork([]);
-  const sentence = 'Quota-Blocker aufgehoben: frischer board check ist STARTABLE. Agent: codex, Session: S1';
-  assert.equal(check('--session', 'S2').status, 0);
-  comments(sentence);
-  assert.equal(check('--session', 'S2').status, 1, 'the field counts at the end of a sentence');
-  assert.equal(check('--session', 'S1').status, 0, 'and names the session of its writer');
-  comments('Claim\n\nAgent: codex');
-  const unnamed = check('--session', 'S2');
-  assert.equal(unnamed.status, 1, 'a claim of an agent without a session is never the caller');
-  assert.match(unnamed.stdout, /claimed by another session \(Agent codex, no session named,/);
-  comments('Agent: codex', 'Handover: S2');
-  assert.equal(check('--session', 'S2').status, 0, 'a handover passes it on');
-  comments('Use `Agent: codex, Session: S1` as the claim line.');
-  assert.equal(check('--session', 'S2').status, 0, 'a quoted example is no claim');
 });
 
 
@@ -431,38 +385,32 @@ test('board check lists the sub-issues of a spec with status, assignee and verdi
 });
 
 
-test('board check shows the age of a claim and whether a linked PR is open', t => {
-  const { checkout, run, writeIssue } = fixture(t);
-  const claimedAgo = ms => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' },
-    body: 'Claim\n\nAgent: claude, Session: S1', html_url: 'https://example.test/c1', created_at: new Date(Date.now() - ms).toISOString() }]));
-  const withPrs = prs => writeIssue({ ...issue(), closedByPullRequestsReferences: { nodes: prs } });
+test('board check shows the open PRs of the issue with the session their claim names', t => {
+  const { run, writeIssue } = fixture(t);
+  const withPrs = (prs, totalCount) => writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount, nodes: prs } });
+  const pr = (number, state, repository, body) => ({ number, state, body, repository: { nameWithOwner: repository } });
 
-  claimedAgo((2 * 24 + 4) * 3_600_000 + 30 * 60_000);
-  withPrs([]);
-  assert.match(run('check', '1', '--session', 'S1').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: none$/m);
-  withPrs([{ number: 123, state: 'OPEN', repository: { nameWithOwner: 'Test/Example' } }, { number: 99, state: 'MERGED', repository: { nameWithOwner: 'test/example' } }, { number: 7, state: 'OPEN', repository: { nameWithOwner: 'test/other' } }]);
-  assert.match(run('check', '1', '--session', 'S2').stdout, /^claim: 2d 4h ago \(Session S1\), open PR: #123, test\/other#7$/m, 'Shown to other sessions too; foreign PRs are qualified');
-  claimedAgo(5 * 60_000 + 10_000);
-  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #123, test\/other#7$/m);
-  writeIssue({ ...issue(), closedByPullRequestsReferences: { totalCount: 150, nodes: [{ number: 5, state: 'OPEN', repository: { nameWithOwner: 'test/example' } }] } });
-  assert.match(run('check', '1').stdout, /^claim: 5m ago \(Session S1\), open PR: #5 \(first 1 of 150\)$/m, 'A cut list says so');
-  writeFileSync(join(checkout, 'issues-comments.json'), '[]');
-  assert.doesNotMatch(run('check', '1').stdout, /^claim:/m, 'No claim, no line');
+  withPrs([], 0);
+  assert.doesNotMatch(run('check', '1', '--session', 'S1').stdout, /^open PR:/m, 'No PR, no line');
+  withPrs([pr(123, 'OPEN', 'Test/Example', 'Agent: claude, Session: S1'), pr(99, 'MERGED', 'test/example'), pr(7, 'OPEN', 'test/other')], 3);
+  assert.match(run('check', '1', '--session', 'S2').stdout, /^open PR: #123 \(Session S1\), test\/other#7 \(Session unknown\)$/m, 'Shown to other sessions too; foreign PRs are qualified');
+  withPrs([pr(5, 'OPEN', 'test/example', 'Agent: claude, Session: S1')], 150);
+  assert.match(run('check', '1').stdout, /^open PR: #5 \(Session S1\) \(first 1 of 150\)$/m, 'A cut list says so');
 });
 
 
 // GitHub charges a query by the lists it asks for: the shared quota is spent by what a command asks, not by what it finds.
-test('board check reads the issue, the viewer and the claim comments in one query, without the PRs of closed predecessors', t => {
-  const { checkout, run, writeIssue, queries } = fixture(t);
-  writeIssue(issue('Ready', [predecessor('CLOSED', 'COMPLETED')]));
-  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' },
-    body: 'Claim\n\nAgent: claude, Session: S1', html_url: 'https://example.test/c1', created_at: new Date().toISOString() }]));
+test('board check reads the issue, the viewer and the claims of its PRs in one query, without the PRs of closed predecessors', t => {
+  const { run, writeIssue, queries } = fixture(t);
+  // The own claim on its PR: no search for other work of the session either.
+  writeIssue({ ...issue('Ready', [predecessor('CLOSED', 'COMPLETED')]), closedByPullRequestsReferences: { totalCount: 1, nodes: [
+    { number: 7, state: 'OPEN', body: 'Agent: claude, Session: S1', repository: { nameWithOwner: 'test/example' }, headRefName: 'claude/1-x' }] } });
   const result = run('check', '1', '--session', 'S1');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /^claim: /m, 'The claim was judged against the viewer');
   const [only, ...more] = queries();
   assert.deepEqual(more, [], 'No second query for the viewer or the predecessors');
   assert.ok(only.includes('viewer{login}'));
+  assert.match(only, /closedByPullRequestsReferences\(first:100\)\{totalCount nodes\{number state body /, 'The body of a PR is where its claim stands');
   assert.ok(!only.includes('includeClosedPrs'), 'The PRs of predecessors are not part of the issue query');
 });
 
@@ -598,17 +546,18 @@ test('--cwd names the project of a command, not the working directory', t => {
 
 // Vaultdex #1458, #1484: drivers left issues in Automated review and started new ones.
 test('check of a new issue is BLOCKED with "finish #N first" while the own session has an unfinished issue, unless it stacks on that work', t => {
-  const { checkout, run, writeIssue } = fixture(t);
-  const own = (status, assignee = 'worker') => ({ ...issue(status), number: 5, assignees: { nodes: [{ login: assignee }] } });
+  const { checkout, run, writeIssue, queries } = fixture(t);
+  // The open PR of #5 is the claim of session S1.
+  const own = (status, assignee = 'worker') => ({ ...issue(status), number: 5, assignees: { nodes: [{ login: assignee }] },
+    closedByPullRequestsReferences: { nodes: [{ state: 'OPEN', body: 'Agent: claude, Session: S1' }] } });
   const search = row => writeFileSync(join(checkout, 'search.json'), JSON.stringify([row]));
-  writeFileSync(join(checkout, 'backlink-comments-5.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' }, body: 'Agent: claude, Session: S1',
-    html_url: 'https://example.test/c5', created_at: '2026-10-06T10:00:00Z' }]));
   writeIssue(issue());
 
   search(own('Automated review'));
   const blocked = run('check', '1', '--session', 'S1');
   assert.equal(blocked.status, 1, blocked.stdout);
   assert.match(blocked.stdout, /^- finish #5 first/m);
+  assert.ok(queries().some(query => query.includes('search(') && query.includes('closedByPullRequestsReferences(first:10){nodes{state body}}')), 'the search asks for the PR bodies, where the claims stand');
   const other = run('check', '1', '--session', 'S2');
   assert.equal(other.status, 0, `the claim of another session is not mine: ${other.stdout}`);
   search(own('Human review'));
@@ -626,23 +575,21 @@ test('check of a new issue is BLOCKED with "finish #N first" while the own sessi
 });
 
 
-test('check lets a new session take over a claim without activity for staleHours, also with its open PR', t => {
-  const { checkout, run, writeIssue } = fixture(t);
+test('check lets a new session take over a PR without activity for staleHours', t => {
+  const { run, writeIssue } = fixture(t);
   const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
   const work = (issueHours, prHours, status = 'In progress', mergeStateStatus = 'CLEAN') => {
     const base = issue(status);
     writeIssue({ ...base, updatedAt: hoursAgo(issueHours), projectItems: { nodes: [{ ...base.projectItems.nodes[0], updatedAt: hoursAgo(issueHours) }] },
-      closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', mergeStateStatus, updatedAt: hoursAgo(prHours), repository: { nameWithOwner: 'test/example' }, headRefName: 'claude/1-work' }] } });
+      closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', body: 'Agent: claude, Session: OLD', mergeStateStatus, updatedAt: hoursAgo(prHours), repository: { nameWithOwner: 'test/example' }, headRefName: 'claude/1-work' }] } });
   };
-  writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' }, body: 'Agent: claude, Session: OLD',
-    html_url: 'https://example.test/c1', created_at: '2026-10-06T10:00:00Z' }]));
 
   work(5, 5);
   assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'within staleHours the claim holds');
   work(7, 7);
   const taken = run('check', '1', '--session', 'NEW');
   assert.equal(taken.status, 0, taken.stdout);
-  assert.match(taken.stdout, /Takeover of stale claim OLD/);
+  assert.match(taken.stdout, /^note: stale open PR #7 \(branch claude\/1-work, Agent: claude, Session: OLD\): no activity for 7h 0m; start takes it over$/m);
   assert.equal(run('check', '1').status, 1, 'without a session nothing is taken over');
   work(7, 1);
   assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a push to the PR is activity');
@@ -652,32 +599,19 @@ test('check lets a new session take over a claim without activity for staleHours
   assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a clean one is not');
 });
 
-test('check and next let a new session take over a claim without PR and branch once the claim itself is older than staleHours', t => {
+test('next offers what check allows: a branch holds, an orphaned one and an empty one do not, an unreadable base is unknown', t => {
   const { checkout, run, writeIssue } = fixture(t);
-  const hoursAgo = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
-  const base = issue();
-  // A field change just now: it must not renew the claim (#497).
-  const fresh = { ...base, updatedAt: hoursAgo(0), projectItems: { nodes: [{ ...base.projectItems.nodes[0], updatedAt: hoursAgo(0) }] } };
-  const claim = hours => writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([{ id: 1, user: { login: 'worker', type: 'User' },
-    body: 'Agent: claude, Session: OLD', html_url: 'https://example.test/c1', created_at: hoursAgo(hours) }]));
   const startable = () => /^#1 /m.test(run('next', '--session', 'NEW').stdout.split('\n\n').find(part => !part.startsWith('Ready but not startable')) ?? '');
-  writeIssue(fresh);
-  writeFileSync(join(checkout, 'search.json'), JSON.stringify([{ ...fresh, issueFieldValues: { nodes: [] } }]));
+  writeIssue(issue());
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([{ ...issue(), issueFieldValues: { nodes: [] } }]));
 
-  claim(2);
-  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a fresh claim holds');
-  assert.equal(startable(), false, 'next does not offer what check blocks');
-  claim(7);
-  const taken = run('check', '1', '--session', 'NEW');
-  assert.equal(taken.status, 0, taken.stdout);
-  assert.match(taken.stdout, /Takeover of stale claim OLD/);
-  assert.equal(startable(), true, 'next offers what check allows');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 0, 'no branch, no PR: free');
+  assert.equal(startable(), true);
   writeFileSync(join(checkout, 'branches.json'), JSON.stringify(['claude/1-started']));
-  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a branch keeps holding it');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 1, 'a branch holds');
   assert.equal(startable(), false, 'next sees the branch too');
   writeFileSync(join(checkout, 'branch-work.json'), JSON.stringify({ 'claude/1-started': { ahead: 1, hours: 7 } }));
-  writeFileSync(join(checkout, 'issues-comments.json'), '[]');
-  assert.equal(run('check', '1', '--session', 'NEW').status, 0, 'an orphaned branch without a claim holds nothing');
+  assert.equal(run('check', '1', '--session', 'NEW').status, 0, 'an orphaned branch holds nothing');
   assert.equal(startable(), true, 'next agrees');
   writeFileSync(join(checkout, 'compare-404'), '');
   assert.equal(run('check', '1', '--session', 'NEW').status, 2, 'a base that does not exist is unknown');
