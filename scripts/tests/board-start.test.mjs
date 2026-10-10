@@ -92,6 +92,19 @@ test('start takes over a fresh PR of another session only with --takeover', t =>
   assert.equal(JSON.parse(text('pr.json')).body, body.replace('OLD', 'S2'));
 });
 
+test('start --takeover continues the PR branch of another agent, whatever its prefix (#560)', t => {
+  const { checkout, run, writeIssue, git, file, text } = startFixture(t);
+  const body = 'Closes #1\nAgent: codex, Session: OLD\nMehr';
+  git(checkout, 'push', '-q', 'origin', 'main:refs/heads/codex/1-fixture');
+  writeFileSync(file('pr.json'), JSON.stringify({ ...JSON.parse(text('pr.json')), body }));
+  writeIssue({ ...issue('In progress'), updatedAt: new Date().toISOString(), closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', body, updatedAt: new Date().toISOString(), headRefName: 'codex/1-fixture', repository: { nameWithOwner: 'test/example' } }] } });
+
+  const result = run('start', '1', '--session', 'S2', '--takeover');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(git(checkout, 'branch', '--show-current'), 'codex/1-fixture');
+  assert.equal(existsSync(file('develops')), false, 'no branch of its own');
+});
+
 test('start names the worktree that holds the branch when it cannot switch to it', t => {
   const { checkout, run, writeIssue, git } = startFixture(t);
   // The predecessor's worktree still has the branch checked out.
