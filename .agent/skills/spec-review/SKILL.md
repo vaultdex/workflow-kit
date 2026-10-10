@@ -22,7 +22,7 @@ that apply before step 1. `board.mjs` is the kit's `scripts/board.mjs`.
 ## Steps
 
 1. **Read the plan.** Spec body (to a file when large), comments, sub-issues with state
-   (`gh api repos/{owner}/{repo}/issues/SPEC/sub_issues --jq '.[]|[.number,.state,.title]'`) and their merged PRs.
+   (`gh api --paginate "repos/{owner}/{repo}/issues/SPEC/sub_issues?per_page=100" --jq '.[]|[.number,.state,.title]'`) and their merged PRs.
    The review ref is the remote branch those PRs merged into, after `git fetch`.
    Done when every acceptance point and planned decision is listed.
 
@@ -54,5 +54,5 @@ that apply before step 1. `board.mjs` is the kit's `scripts/board.mjs`.
 
 7. **Report on the spec.** One comment on the spec in plain language: verdict table with proofs, the decisions
    from step 5 with their outcome, new sub-issues, path of the HTML report. When all sub-issues are closed and
-   no gap is left, continue with the project's spec acceptance handoff, which proves the acceptance in a comment on the spec.
-   The spec itself stays open: only a human closes it or sets Done (`AGENT_RULES.md`, Hard rules).
+   no gap is left, continue with the project's spec acceptance handoff, which proves the acceptance in a comment on the spec,
+   and set the spec to Human review (`board.mjs field SPEC Status "Human review"`). It stays open: only a human closes it or sets Done (`AGENT_RULES.md`, Hard rules).
