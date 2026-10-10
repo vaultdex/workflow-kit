@@ -2208,9 +2208,8 @@ function runPush(branch, merged) {
 
 /**
  * Merge for agents with merge authority: the same gate as handoff (CI, every traced review finished, no blocker or open
- * thread). When the base moved under files the PR changes too (#190), the base is merged into the PR branch first and the
- * gate runs again on the new head after its CI; a base that moved without overlap does not hold the merge. Then exactly the
- * checked head: `--match-head-commit` needs the full object id, and it also refuses a push that lands after the check, so
+ * thread). A single PR is merged as it is, whatever the base gained since (#552); only a red check can ask for the base first (below).
+ * Then exactly the checked head: `--match-head-commit` needs the full object id, and it also refuses a push that lands after the check, so
  * no recheck window is left to close. Never repeated: a refusal by gh ends as ERROR, except the stack refusal of a PR with stacked children (#321),
  * which goes once to merge-async with the same head and is read back until merged. Afterwards the head branch goes (see deleteHeadBranch).
  * `--stack`: PR is the top of a native stack. Every layer holds its own gate first (stackReasons), CI and reviewers count for the top head
@@ -2248,19 +2247,14 @@ async function merge() {
   const stale = !stack && polled.failed && !polled.baseOnly && polled.reasons.every(reason => reason.startsWith('check ')) ? baseMovement(polled.pr) : null;
   const forCheck = !stack && (polled.baseOnly || stale);
   if (forCheck && !await update(polled.pr, stale ? `${polled.pr.baseRefName} gained ${stale.behind} commits since the merge-base; ${polled.reasons.join('; ')}` : polled.reasons.join('; '))) return;
-  let result = mergeGate(viewer);
+  const result = mergeGate(viewer);
   if (!result) return;
   assert.match(result.pr.headRefOid, /^[0-9a-f]{40}$/, 'The PR head is not a full object id');
-  const moved = forCheck ? null : baseMovement(stack ? { ...result.pr, baseRefName: stackTrunk } : result.pr);
-  if (moved?.shared.length && stack) {
+  const moved = stack ? baseMovement({ ...result.pr, baseRefName: stackTrunk }) : null;
+  if (moved?.shared.length) {
     console.log(['FAILED', `blocker: ${stackTrunk} gained ${moved.behind} commits that change ${filesText(moved.shared)} like this stack: run \`git merge origin/${stackTrunk}\` in the top layer's worktree, push once, then run \`board.mjs merge ${number} --stack\` again`].join('\n'));
     process.exitCode = 1;
     return;
-  }
-  if (moved?.shared.length) {
-    if (!await update(result.pr, `${result.pr.baseRefName} gained ${moved.behind} commits that change ${filesText(moved.shared)} like this PR`)) return;
-    result = mergeGate(viewer);
-    if (!result) return;
   }
   const { headRefOid } = result.pr;
   let asynchronous = false;

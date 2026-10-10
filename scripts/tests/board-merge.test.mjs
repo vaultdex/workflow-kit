@@ -145,55 +145,13 @@ test('merge looks again at a running check from the first look on, merges once i
   assert.deepEqual(calls(), [], 'nothing is merged');
 });
 
-test('merge merges a base that moved under the same files into the PR branch, waits for CI on the new head, then merges', t => {
-  const { checkout, run, show, calls, flag, json, first, second, headOf } = mergeFixture(t);
-  const running = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS', conclusion: null }] } } };
-  // GitHub shows the previous head for one more read after the update, then the new one.
-  const staleThenNew = (...overlays) => json('pr-reads.json', [{}, {}, ...overlays]);
-
+test('merge merges a single PR as it is when the base changed the same files', t => {
+  const { run, show, calls, json } = mergeFixture(t);
   show();
   json('compare.json', { behind: 2, own: ['a.txt', 'b.txt'], base: ['a.txt', 'c.txt'] });
-  staleThenNew(headOf(second));
-  const updated = run('merge', '7', '--interval', '0');
-  assert.equal(updated.status, 0, updated.stdout + updated.stderr);
-  assert.deepEqual(calls(), [`update-branch ${first}`, 'merge', 'delete claude/7-topic'], 'update first, then the merge of the new head, then the branch');
-  assert.match(updated.stdout, new RegExp(`^MERGED #7 head ${second} `, 'm'), 'the new head is the one merged');
-
-  // The new head's CI still runs: nothing is merged, the next call continues.
-  show();
-  json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
-  staleThenNew(headOf(second, running));
-  const waiting = run('merge', '7', '--interval', '0', '--max-minutes', '0.01');
-  assert.equal(waiting.status, 4, waiting.stdout + waiting.stderr);
-  assert.deepEqual(calls(), [`update-branch ${first}`]);
-
-  // The base moved without touching the PR's files: no update, straight to the merge.
-  show();
-  json('compare.json', { behind: 2, own: ['a.txt'], base: ['c.txt'] });
-  assert.equal(run('merge', '7').status, 0);
-  assert.deepEqual(calls(), ['merge', 'delete claude/7-topic']);
-
-  // GitHub refuses the update (conflict, or another head): an error, never a merge of the old head.
-  show();
-  json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
-  flag('update-fails');
-  const refused = run('merge', '7');
-  assert.equal(refused.status, 2, refused.stdout + refused.stderr);
-  assert.deepEqual(calls(), [`update-branch ${first}`]);
-
-  // A PR with stacked children: GitHub answers 403 to the update. Nothing is merged or pushed; the manual way is named.
-  // The exact text of GitHub (#332), with and without its status code.
-  for (const kind of ['403', 'no-code']) {
-    show();
-    json('compare.json', { behind: 2, own: ['a.txt'], base: ['a.txt'] });
-    writeFileSync(join(checkout, 'update-fails'), kind);
-    const stacked = run('merge', '7');
-    assert.equal(stacked.status, 1, kind + stacked.stdout + stacked.stderr);
-    assert.match(stacked.stdout, /^blocker: .*`git merge origin\/\S+`.*`board\.mjs merge 7`/m);
-    // The raw refusal of gh is not copied to stderr: a caller that reads the last line of the output sees the instruction.
-    assert.equal(stacked.stderr, '');
-    assert.deepEqual(calls(), [`update-branch ${first}`]);
-  }
+  const merged = run('merge', '7');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.deepEqual(calls(), ['merge', 'delete claude/7-topic'], 'no update-branch, no second wait (#552)');
 });
 
 test('merge merges the base for a red check from updateBranchChecks, but only when it is the sole reason', t => {
@@ -226,7 +184,7 @@ test('merge merges the base for a red check from updateBranchChecks, but only wh
 });
 
 test('merge merges the base once for any red check when the base moved, and a second red or an unmoved base is FAILED (#425)', t => {
-  const { run, show, calls, json, first, second, headOf } = mergeFixture(t);
+  const { checkout, run, show, calls, flag, json, first, second, headOf } = mergeFixture(t);
   const red = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } };
 
   // The base gained commits (no shared file): the red CI may be stale, so the base is merged and the new head decides.
@@ -248,6 +206,28 @@ test('merge merges the base once for any red check when the base moved, and a se
   show(headOf(first, red));
   assert.equal(run('merge', '7').status, 1);
   assert.deepEqual(calls(), []);
+
+  // GitHub refuses the update (conflict, or another head): an error, never a merge of the old head.
+  show(headOf(first, red));
+  json('compare.json', { behind: 2, own: ['a.txt'], base: ['c.txt'] });
+  flag('update-fails');
+  const refused = run('merge', '7');
+  assert.equal(refused.status, 2, refused.stdout + refused.stderr);
+  assert.deepEqual(calls(), [`update-branch ${first}`]);
+
+  // A PR with stacked children: GitHub answers 403 to the update. Nothing is merged or pushed; the manual way is named.
+  // The exact text of GitHub (#332), with and without its status code.
+  for (const kind of ['403', 'no-code']) {
+    show(headOf(first, red));
+    json('compare.json', { behind: 2, own: ['a.txt'], base: ['c.txt'] });
+    writeFileSync(join(checkout, 'update-fails'), kind);
+    const stacked = run('merge', '7');
+    assert.equal(stacked.status, 1, kind + stacked.stdout + stacked.stderr);
+    assert.match(stacked.stdout, /^blocker: .*`git merge origin\/\S+`.*`board\.mjs merge 7`/m);
+    // The raw refusal of gh is not copied to stderr: a caller that reads the last line of the output sees the instruction.
+    assert.equal(stacked.stderr, '');
+    assert.deepEqual(calls(), [`update-branch ${first}`]);
+  }
 });
 
 test('merge gives both CI waits around a base update one shared --max-minutes deadline', t => {
