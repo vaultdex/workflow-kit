@@ -426,15 +426,16 @@ const ownPr = (issue, session) => session ? openPrs(issue).find(pr => claimOf(pr
  * Work of someone on the issue: an open PR that closes it (a Draft too) or a branch `<agent>/<number>-…`. Only the claim of the
  * caller's own session on a PR lifts it, so a driver cannot start in parallel to an agent whose PR names another session or none.
  */
-function workReasons(issue, session) {
+function workReasons(issue, session, takeover) {
   const own = session ? `no claim of session ${session}` : 'pass --session ID to prove it is yours';
   const prs = openPrs(issue);
-  // An abandoned PR (see isStale) may be taken over with --session: start writes the session into its body.
-  const mayTake = session && prs.length && isStale(issue);
+  // An abandoned PR (see isStale) may be taken over with --session, a fresh one only on purpose with start --takeover (#548): start writes the session into its body.
+  const mayTake = session && prs.length && (takeover || isStale(issue));
   const heads = new Set(prs.map(pr => pr.headRefName));
   const describe = pr => `open PR ${refOf(pr.repository, pr.number)}${pr.headRefName ? ` (branch ${pr.headRefName}${claimOf(pr) ? `, ${claimOf(pr)[0]}` : ''})` : ''}`;
   const blocked = mayTake ? [] : prs.map(pr => `${describe(pr)} closes this issue; ${own}`);
-  const notes = mayTake ? prs.map(pr => `stale ${describe(pr)}: no activity for ${ago(idleMs(issue))}; start takes it over`) : [];
+  const why = isStale(issue) ? `stale %: no activity for ${ago(idleMs(issue))}` : '%: --takeover';
+  const notes = mayTake ? prs.map(pr => `${why.replace('%', describe(pr))}; start takes it over`) : [];
   // A branch without an open PR (#504): without own commits it holds nothing, without a commit for staleHours it is orphaned (a note), else it holds.
   for (const branch of workBranches(issue).filter(branch => !heads.has(branch))) {
     const { ahead, idle } = branchWork(issue, branch), agent = branch.split('/')[0];
@@ -462,7 +463,7 @@ function branchWork(issue, branch) {
 }
 
 /** What the open PRs and branches of an issue hold against a start by SESSION: one rule for `check` and `next`. */
-const startReasons = (issue, session) => ownPr(issue, session) ? { blocked: [], notes: [] } : workReasons(issue, session);
+const startReasons = (issue, session, takeover) => ownPr(issue, session) ? { blocked: [], notes: [] } : workReasons(issue, session, takeover);
 
 /** Unfinished work of the caller: rows (number, assignees, projectItems, closedByPullRequestsReferences) in In progress or Automated review that are assigned to the login and whose open PR names SESSION. */
 function ownWork(rows, login, session) {
@@ -571,7 +572,7 @@ function check(issue = readIssue(), claims, currentPrNumber) {
   const { status, blocked, unknown, predecessors } = issueReasons(issue);
   const notes = [];
   if (claims) try {
-    const found = startReasons(issue, claims.session);
+    const found = startReasons(issue, claims.session, claims.takeover);
     blocked.push(...found.blocked);
     notes.push(...found.notes);
   } catch (error) { unknown.push(`branches are unreadable: ${String(error.stderr || error.message).trim()}`); }
@@ -2602,7 +2603,7 @@ function start() {
     assert.equal(read(), want, `${key} must be ${want} but is overridden outside this clone's config; fix that override`);
   }
   const issue = readIssue();
-  if (!mayStart(check(issue, { session }))) return;
+  if (!mayStart(check(issue, { session, takeover: process.argv.includes('--takeover') }))) return;
   const stacked = stackedOn, login = issue.viewer.login;
   if (!issue.assignees.nodes.some(user => sameLogin(user.login, login))) restPost(`repos/${project.repository}/issues/${number}/assignees`, ['-f', `assignees[]=${login}`]);
   set('Status', 'In progress');
@@ -2703,7 +2704,7 @@ async function done() {
 // check, reviews, handoff, ready and link are the steps `start` and `done` take; they stay callable for those two and for the tests, but nobody runs them by hand, so the usage leaves them out.
 const commands = { start, done, next, sweep, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, field: setField, new: create,
   reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, 'stack-sync': stackSync, ready, link, body, 'body-replace': bodyReplace };
-const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] start ISSUE [--session ID] | done ISSUE [PR] [HANDOFF_FILE] [--refs] [--max-minutes N]'
+const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] start ISSUE [--session ID] [--takeover: take over a fresh PR of another session] | done ISSUE [PR] [HANDOFF_FILE] [--refs] [--max-minutes N]'
   + ' | next [--session ID] | sweep | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--status S] [--field NAME=VALUE ...] | new --from FILE'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
@@ -2716,7 +2717,7 @@ if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
 }
 // A writing command takes only its own flags (value 1: followed by a value) and as many plain words as it names (the issue or PR
 // included); any other argument is a mistake that must not reach a write. `field` checks its own trailing words.
-const writeArgs = { start: { words: 1, flags: { '--session': 1 } }, done: { words: 3, flags: { '--refs': 0, '--max-minutes': 1 } },
+const writeArgs = { start: { words: 1, flags: { '--session': 1, '--takeover': 0 } }, done: { words: 3, flags: { '--refs': 0, '--max-minutes': 1 } },
   sweep: { words: 0 }, field: { words: Infinity }, block: { words: 2 }, sub: { words: 2 }, link: { words: 2, flags: { '--refs': 0 } },
   body: { words: 3 }, 'body-replace': { words: 1, flags: { '--from': 1, '--to': 1 } },
   new: { words: 0, flags: { '--title': 1, '--body-file': 1, '--milestone': 1, '--label': 1, '--priority': 1, '--field': 1, '--from': 1, '--status': 1 } },
