@@ -271,10 +271,9 @@ and then work in that directory, their relative paths (changed files given to `a
   stalled, no `blocker:` line, no open thread, determined merge state, the PR body's `Selbstprüfung` section when the project lists `"selfReview"`) and prints the same
   lines. Like `wait` it looks again until CI and every reviewer have finished (`--max-minutes`, default 9: then
   `still waiting: call merge again`, exit 4; `--interval SECONDS`, 0 to 60, sets a fixed pause between looks); a red check or
-  blocker ends `FAILED` (exit 1), an undetermined merge state `WAITING` (exit 3), and nothing is merged. If the base moved and `changed on both sides` lists files, it first
-  merges the base into the PR branch (`PUT pulls/N/update-branch` with the checked head as `expected_head_sha`),
-  waits for the new head and its CI the same way, checks the gates again and merges that head; a base that moved without
-  an overlap does not hold the merge. The same update runs when the only red check is one listed in `"updateBranchChecks"`
+  blocker ends `FAILED` (exit 1), an undetermined merge state `WAITING` (exit 3), and nothing is merged. A single PR is merged as it is, also when the base changed the same files (#552).
+  Only a red check makes it merge the base into the PR branch first (`PUT pulls/N/update-branch` with the checked head as `expected_head_sha`),
+  wait for the new head and its CI the same way, check the gates again and merge that head: when the only red check is one listed in `"updateBranchChecks"`
   (check names, for example `["Restart CI after retarget"]`; `wait` and `done` still end `FAILED`, naming `board.mjs merge N`),
   and once for any other red check when the base gained commits since the merge-base (the CI ran on the old merge state, #425); a red check after that update, or on an unmoved base, ends `FAILED`. If GitHub refuses that update with 403 (a PR with stacked children), `merge` ends
   `FAILED` (exit 1) and tells you to run `git merge origin/<base>` in the PR's worktree, push once and call `merge` again;
