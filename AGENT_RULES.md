@@ -109,7 +109,10 @@ work between them:
    change for `staleHours`, default 6, or a Human-review PR with conflicts) is taken over by
    the same call, which writes your session into the line. `board.mjs next --session ID` lists your
    unfinished issues first, and `start` of another issue says `finish #N first` until they are handed
-   off. A repeated call resumes.
+   off. A repeated call resumes. Work on a ticket does not end at Human review: call `next` in your
+   loop and handle its **Rückmeldungen** first (a comment, review or thread after your handoff, a
+   push-back to In progress or Automated review, an @mention). Answer in the ticket with a comment
+   whose first line is `Agent: claude|codex, Session: ID`, or hand off again with `done`.
 2. Implement and push. `node .vendor/workflow-kit/scripts/board.mjs done ISSUE FILE` then runs the
    targeted tests, marks the PR ready for the pushed head, ticks the acceptance boxes, sets Automated
    review, waits for CI and every non-optional reviewer ([review loop](docs/CONTRIBUTING.md#review-loop)),
