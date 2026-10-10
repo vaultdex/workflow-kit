@@ -3,10 +3,11 @@
 // `--cwd PATH` as the first argument runs it for the project in PATH from any directory: without it the
 // working directory decides the project, and a driver in another project would read and write the wrong board.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { externalTool, takeCwd } from './checkout-root.mjs';
 import { isRateLimited, quotaOf, retryAt, splitResponse, untilText, waitInterval } from './quota.mjs';
 
@@ -2251,6 +2252,22 @@ function deleteHeadBranch(pr) {
   return `branch deleted: ${branch}`;
 }
 
+const localCi = fileURLToPath(new URL('local-ci.mjs', import.meta.url));
+
+/**
+ * There is no resident runner: after a merge into main or a release branch the project's `push` commands run here (sweep, release sync, pin),
+ * after a merge in the kit the `kitPush` of the project that holds it as its submodule (`--cwd <project>/.vendor/workflow-kit`; a standalone kit clone knows no project). A merge is never undone by a failure here.
+ */
+function runPush(branch, merged) {
+  if (!merged || (branch !== 'main' && !branch.startsWith('release/'))) return;
+  try {
+    const here = resolve(projectDirectory), superproject = basename(dirname(here)) === '.vendor' ? dirname(dirname(here)) : ''; // the kit sits in <project>/.vendor/workflow-kit
+    if (superproject ? branch !== 'main' : !gate.localChecks) return;
+    const before = rest(`repos/${project.repository}/commits/${merged}`).parents[0].sha;
+    execFileSync(process.execPath, [localCi, '--cwd', superproject || projectDirectory, '--push', branch, before, merged, ...superproject ? ['kit'] : []], { stdio: 'inherit' });
+  } catch (error) { console.log(`note: the push commands of ${branch} failed (${String(error.message).split('\n')[0]})`); }
+}
+
 /**
  * Merge for agents with merge authority: the same gate as handoff (CI, every traced review finished, no blocker or open
  * thread). When the base moved under files the PR changes too (#190), the base is merged into the PR branch first and the
@@ -2275,8 +2292,22 @@ async function merge() {
       return;
     }
   }
+  // No resident runner: a head without a `local-ci` status (Renovate, pin and human PRs, or the head after a base update) gets its run from here,
+  // once per head and in the background (a run outlasts a tool call); the looks below wait for its pending status. A run killed halfway leaves `pending`: start it again by hand.
+  const started = new Set();
+  const look = () => {
+    const result = reviews(stallOption()), sha = result.pr.headRefOid;
+    if (!result.done && gate.localChecks && !result.pr.isCrossRepository && !started.has(sha)) { // a fork's code never runs on this machine by itself
+      started.add(sha);
+      if (!rest(`repos/${project.repository}/commits/${sha}/statuses?per_page=100`).some(status => status.context === 'local-ci')) {
+        spawn(process.execPath, [localCi, '--cwd', projectDirectory, String(number)], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+        console.log(`local-ci: no status on ${sha.slice(0, 7)}, started it in the background`);
+      }
+    }
+    return result;
+  };
   // Like `wait`: look again until CI and the reviewers have finished (or --max-minutes runs out: exit 4); the gate then decides once.
-  const polled = await poll(() => reviews(stallOption()));
+  const polled = await poll(look);
   if (!polled) return;
   // The new head's CI (and any reviewer that answers the push) decides, so the gate runs again; one update per run.
   const update = async ({ baseRefName, headRefOid: before }, why) => {
@@ -2285,7 +2316,7 @@ async function merge() {
     const updated = updateBranch(before, baseRefName);
     if (!updated) return false;
     console.log(`updated: head ${before.slice(0, 7)} -> ${updated.slice(0, 7)}; waiting for CI`);
-    return Boolean(await poll(() => reviews(stallOption())));
+    return Boolean(await poll(look));
   };
   // A red check from "updateBranchChecks" as the only reason asks for the base (#383): that is the update, not a FAILED.
   // Any other red check on a head the base has left behind may come from the old merge state (#425): the base is merged once and the new CI decides; a second red is FAILED.
@@ -2371,6 +2402,7 @@ async function merge() {
     }
   }
   dropBranch(result.pr);
+  runPush(stack ? stackTrunk : result.pr.baseRefName, mergeCommit?.oid);
 }
 
 const numberOption = (flag, fallback) => process.argv.includes(flag) ? Number(process.argv[process.argv.indexOf(flag) + 1]) : fallback;

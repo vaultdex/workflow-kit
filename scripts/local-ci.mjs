@@ -1,16 +1,15 @@
 // Lokale CI (README, "Lokale CI"): führt die PR-Prüfungen eines Projekts auf diesem Rechner aus und meldet sie als
 // Commit-Status. Der Status stammt von diesem Skript, kein Agent behauptet ihn. Nur REST, keine GraphQL-Punkte.
-// Aufruf: local-ci.mjs [--cwd DIR] PR | --watch
+// Aufruf: local-ci.mjs [--cwd DIR] PR | --push BRANCH BEFORE AFTER [kit]  (nur auf Abruf: Driver vor der Übergabe, `board.mjs merge` ohne Status am Head und nach einem Merge)
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { enterCwd, externalTool, projectRoot } from './checkout-root.mjs';
 
-export const AGGREGATE = 'local-ci'; // Status über alle Prüfungen eines Heads; auch "keine Prüfung betroffen" meldet sich hier
-const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const AGGREGATE = 'local-ci'; // Status über alle Prüfungen eines Heads; auch "keine Prüfung betroffen" meldet sich hier
 
 const globRegExp = glob => new RegExp('^' + glob.replace(/[.+^${}()|[\]\\?]|\*\*\/|\*\*|\*/g,
   token => ({ '**/': '(?:.*/)?', '**': '.*', '*': '[^/]*' })[token] ?? `\\${token}`) + '$');
@@ -23,59 +22,19 @@ export const matches = (paths, file) => paths.reduce((hit, path) => path.startsW
 /** Die Prüfungen, deren Filter mindestens eine geänderte Datei treffen. */
 export const select = (checks, files) => checks.filter(check => files.some(file => matches(check.paths, file)));
 
-const SLOTS_MESSAGE = 'localChecks: "slots" muss eine ganze Zahl ab 1 sein';
-
 /** `localChecks` aus .github/workflow-project.json: Pfad zu einer JSON-Datei mit checks, optional setup, push und kitPush. `read(pfad)` liefert den Inhalt. */
 export function loadConfig(read) {
   const project = JSON.parse(read('.github/workflow-project.json'));
   assert.ok(project.localChecks, '.github/workflow-project.json hat kein "localChecks"');
-  const { checks, setup = [], push = [], kitPush = [], slots = 1, riskPaths, baseRecheck } = JSON.parse(read(project.localChecks));
-  assert.ok(Number.isInteger(slots) && slots >= 1, SLOTS_MESSAGE);
+  const { checks, setup = [], push = [], kitPush = [], riskPaths, baseRecheck } = JSON.parse(read(project.localChecks));
   assert.ok(riskPaths === undefined || riskPaths.every?.(path => typeof path === 'string'), 'localChecks: "riskPaths" muss eine Liste von Pfaden sein');
   assert.ok(baseRecheck === undefined || typeof baseRecheck === 'string', 'localChecks: "baseRecheck" muss ein Befehl (Text) sein');
   for (const check of checks) {
     assert.ok(check.context && check.paths?.every?.(path => typeof path === 'string') && check.run?.length && check.timeoutMinutes > 0,
       `localChecks: "${check.context}" braucht context, paths, run und timeoutMinutes`);
   }
-  return { repository: project.repository, checks, setup, push, kitPush, slots, riskPaths, baseRecheck };
+  return { repository: project.repository, checks, setup, push, kitPush, riskPaths, baseRecheck };
 }
-
-/** Die Einstellung `localCiAfterApps` vom Ziel-Branch: ohne sie (oder ohne die belegt fehlende Datei dort, das meldet dann der Lauf selbst) null, der PR startet wie bisher. Ein Fetch- oder anderer Lesefehler wirft: Er gilt nicht als ausgeschaltete Einstellung. */
-const waitSettings = (ctx, branch) => branchConfig(ctx, branch, undefined, read => {
-  let text;
-  try { text = read('.github/workflow-project.json'); } catch (error) { if (error.missing) return null; throw error; }
-  const { localCiAfterApps, awaitApps = [] } = JSON.parse(text);
-  return localCiAfterApps ? { apps: awaitApps } : null;
-});
-
-/** Warum der Head noch nicht dran ist (Text für den Status), oder null: die `apps` sind für ihn fertig und SonarCloud meldet 0 offene Befunde. */
-export async function waitReason(ctx, pr, { apps }) {
-  const runs = ctx.api('GET', `commits/${pr.head.sha}/check-runs?per_page=100`).check_runs;
-  const waiting = apps.filter(app => !runs.some(run => run.app?.slug === app && run.status === 'completed'));
-  if (waiting.length) return `wartet auf ${waiting.join(', ')}`;
-  const sonar = runs.find(run => run.app?.slug === 'sonarqubecloud' && run.status === 'completed' && run.conclusion !== 'skipped');
-  if (!sonar) return 'wartet auf die Sonar-Analyse'; // fehlt oder übersprungen: kein Nachweis
-  const { origin, searchParams } = new URL(sonar.details_url ?? 'invalid:');
-  if (!['https://sonarcloud.io', 'https://sonarqube.us'].includes(origin) || !searchParams.get('id') || searchParams.get('pullRequest') !== String(pr.number)) throw new Error('der Sonar-Check verlinkt nicht die Analyse dieses PRs');
-  let open;
-  if (ctx.sonarToken) { // Ein grünes Gate heißt nicht 0 Befunde; die anonyme API meldet bei privaten Projekten 0, darum nur mit Token
-    const search = new URLSearchParams({ componentKeys: searchParams.get('id'), pullRequest: pr.number, resolved: 'false', ps: 1 });
-    const response = await fetch(`${origin}/api/issues/search?${search}`, { headers: { Authorization: `Bearer ${ctx.sonarToken}` } });
-    if (!response.ok) throw new Error(`Sonar-API antwortet ${response.status}`);
-    open = (await response.json()).total;
-  } else open = Number(/\[(\d+) New issues?\]/.exec(sonar.output?.summary)?.[1] ?? NaN); // die Zusammenfassung des Checks nennt die Zahl
-  if (!Number.isSafeInteger(open)) throw new Error('SONAR_TOKEN fehlt und die Sonar-Zusammenfassung nennt keine Zahl');
-  return open ? `${open} Sonar-Befunde offen` : null;
-}
-
-/** Die Platzzahl von main: nur sie wird gelesen, eine Prüfliste braucht main nicht (die der PRs kommt vom jeweiligen Ziel-Branch). Ohne Angabe gilt 1, ein ungültiger Wert bleibt ein Fehler. */
-export function loadSlots(read) {
-  const { localChecks } = JSON.parse(read('.github/workflow-project.json'));
-  const { slots = 1 } = localChecks ? JSON.parse(read(localChecks)) : {};
-  assert.ok(Number.isInteger(slots) && slots >= 1, SLOTS_MESSAGE);
-  return slots;
-}
-export const mainSlots = ctx => branchConfig(ctx, 'main', undefined, loadSlots);
 
 const fetchBranch = ({ git, root }, branch) => {
   try { git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`); } catch { throw new Error(`origin/${branch} ist nicht abrufbar`); }
@@ -97,22 +56,27 @@ export function branchConfig(ctx, branch, sha, load = loadConfig) {
   });
 }
 
-/** Sperrdatei: ein Läufer pro Rechner und Projekt. Eine Datei eines toten Prozesses wird übernommen. */
-export function lock(file) {
-  mkdirSync(dirname(file), { recursive: true });
-  for (;;) {
-    try { writeFileSync(file, String(process.pid), { flag: 'wx' }); break; } catch (error) {
+/**
+ * Der erste freie Platz `work-N` unter `dir`: gleichzeitige Läufe (mehrere Driver) teilen sich nie einen Ordner, und die Ordner bleiben für den
+ * nächsten Lauf (warme Caches). Besetzt ist ein Platz durch die Sperrdatei `lock-N` eines lebenden Prozesses; die eines toten wird übernommen.
+ */
+export function claimSlot(dir) {
+  mkdirSync(dir, { recursive: true });
+  for (let slot = 1; ; slot++) {
+    const file = join(dir, `lock-${slot}`);
+    try { writeFileSync(file, String(process.pid), { flag: 'wx' }); } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       const pid = Number(readFileSync(file, 'utf8'));
       let alive = !Number.isInteger(pid); // eine Datei, die gerade geschrieben wird
       try { process.kill(pid, 0); alive = true; } catch (kill) { alive ||= kill.code === 'EPERM'; }
-      assert.ok(!alive, `Die lokale CI läuft schon (PID ${pid}, ${file})`);
+      if (alive) continue;
       rmSync(file, { force: true });
+      slot--; // der Platz des toten Prozesses wird gleich noch einmal versucht
+      continue;
     }
+    process.once('exit', () => rmSync(file, { force: true }));
+    return join(dir, `work-${slot}`);
   }
-  const release = () => rmSync(file, { force: true });
-  process.once('exit', release);
-  return release;
 }
 
 const killTree = child => {
@@ -123,7 +87,7 @@ const killTree = child => {
 
 /** Vor jedem Git-Aufruf des Läufers. Ohne `submodule.recurse=false` (im Clone oft `true`) checkt `checkout` in den Arbeitsordnern
  * auch das Kit-Submodul aus und scheitert nach einem Pin-Bump mit "failed to unpack tree object"; das Kit holt `submodule update --init`. */
-export const gitOptions = ['-c', 'core.longpaths=true', '-c', 'submodule.recurse=false'];
+export const gitOptions = ['-c', 'core.longpaths=true', '-c', 'submodule.recurse=false', '-c', 'core.filesRefLockTimeout=10000']; // zuletzt: gleichzeitige Fetches derselben Refs warten aufeinander
 
 /** Windows: das bash.exe von Git for Windows (`<git-root>/bin/bash.exe`, aus `git --exec-path` abgeleitet), nie das erste `bash` im PATH:
  * aus PowerShell ist das WSL ohne node. Fehlt es, bricht der Start ab, bevor ein Status gemeldet wird. */
@@ -134,9 +98,9 @@ export function gitBash(execPath, platform = process.platform) {
   return bash;
 }
 
-/** Ein Befehl über `bash -c`; Ausgabe an das Protokoll. `state.child` ist der laufende Prozess, den ein Abbruch beendet.
+/** Ein Befehl über `bash -c`; Ausgabe an das Protokoll.
  * Nennt `.node-version` des Arbeitsordners eine Version und gibt es `fnm`, läuft der Befehl mit ihr (fnm 1.39 hat kein `--install-if-missing` für exec: `fnm install` ist erneut aufgerufen folgenlos); ohne fnm bleibt es bei der Version des Läufers, mit Hinweis im Protokoll. */
-function shell(command, { cwd, env, log, timeoutMs, state, bash = 'bash', fnm }) {
+function shell(command, { cwd, env, log, timeoutMs, bash = 'bash', fnm }) {
   return new Promise(done => {
     const file = join(cwd, '.node-version'), version = existsSync(file) ? readFileSync(file, 'utf8').trim() : '';
     if (version && !fnm) appendFileSync(log, `Hinweis: .node-version nennt ${version}, aber fnm fehlt; es gilt die Node-Version des Läufers\n`);
@@ -145,10 +109,9 @@ function shell(command, { cwd, env, log, timeoutMs, state, bash = 'bash', fnm })
       : ['-c', command];
     const child = spawn(bash, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true });
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => appendFileSync(log, chunk)); // ein gemeinsamer Dateihandle für beide Ströme bricht unter Windows ab
-    state.child = child;
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; killTree(child); }, Math.max(timeoutMs, 0));
-    const finish = code => { clearTimeout(timer); state.child = null; done({ code, timedOut }); };
+    const finish = code => { clearTimeout(timer); done({ code, timedOut }); };
     child.once('error', error => { appendFileSync(log, `${error.message}\n`); finish(127); });
     child.once('close', code => finish(code ?? 1));
   });
@@ -180,10 +143,10 @@ async function checkout(ctx, pr) {
   try {
     git(root, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
     base = git(root, 'rev-parse', `refs/remotes/origin/${branch}`);
-    git(root, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
-    head = git(root, 'rev-parse', 'FETCH_HEAD');
+    git(root, 'fetch', '--quiet', 'origin', `+refs/pull/${pr.number}/head:refs/local-ci/pr-${pr.number}`); // eigener Ref statt FETCH_HEAD: gleichzeitige Läufe teilen den Checkout
+    head = git(root, 'rev-parse', `refs/local-ci/pr-${pr.number}`);
   } catch { throw fail(`origin/${branch} oder refs/pull/${pr.number}/head ist nicht abrufbar`); }
-  if (head !== pr.head.sha) throw Object.assign(fail('Der Head des PRs hat sich bewegt'), { moved: true }); // kein Fehler des PRs: der nächste Poll sieht den neuen Head
+  if (head !== pr.head.sha) throw fail('Der Head des PRs hat sich bewegt');
   worktreeAt(ctx, work, base);
   try {
     // ohne Hooks und Signatur, feste Identität unabhängig von der Git-Konfiguration des Rechners
@@ -198,8 +161,8 @@ async function checkout(ctx, pr) {
 }
 
 /**
- * Prüft den Head eines PRs einmal. Ändert sich der Head oder schließt der PR, bricht die Prüfung ab (wie cancel-in-progress);
- * `next` ist dann der PR mit dem neuen Head. `ok` heißt: alles Gewählte grün.
+ * Prüft den Head eines PRs einmal und gibt zurück, ob alles Gewählte grün war. Ein Push währenddessen ändert nichts am Lauf:
+ * Der Status gehört zum geprüften Head, für den neuen prüft der Aufrufer erneut.
  */
 export async function checkPullRequest(ctx, pr) {
   const { api, work } = ctx, sha = pr.head.sha, host = hostname(), started = Date.now();
@@ -210,15 +173,7 @@ export async function checkPullRequest(ctx, pr) {
     api('POST', `statuses/${sha}`, { state, context, description: description.slice(0, 140) });
     if (state === 'pending') open.add(context); else open.delete(context);
   };
-  const state = { aborted: null, child: null };
-  const watcher = setInterval(() => {
-    try {
-      const now = api('GET', `pulls/${pr.number}`);
-      if (now.head.sha !== sha || now.state !== 'open') { state.aborted = now; killTree(state.child); }
-    } catch { /* GitHub nicht erreichbar: die Prüfung läuft weiter */ }
-  }, ctx.pollMs);
-  const newHead = () => state.aborted?.state === 'open' ? state.aborted : null;
-  let ok = false, moved = false;
+  let ok = false;
   try {
     report(AGGREGATE, 'pending', `Prüfung läuft auf ${host}`);
     let config, env, files, base;
@@ -231,9 +186,8 @@ export async function checkPullRequest(ctx, pr) {
       if (config.baseRecheck) env.LOCAL_CI_RED_TESTS = redFile; // die Prüfungen tragen hier ihre roten Tests ein (je Zeile einer)
     } catch (error) {
       base ??= error.base;
-      if (error.moved) moved = true; // finally schließt den Status ohne rotes Ergebnis
-      else if (!state.aborted) aggregate('failure', error.message); // sonst schließt finally den Status; der neue Head folgt
-      return { ok, next: newHead() };
+      aggregate('failure', error.message);
+      return false;
     }
     const matched = select(config.checks, files);
     // `slow`-Prüfungen laufen nur, wenn der Diff `riskPaths` trifft; ohne `riskPaths` laufen sie immer.
@@ -242,7 +196,7 @@ export async function checkPullRequest(ctx, pr) {
     for (const check of matched) if (!selected.includes(check)) report(check.context, 'success', 'übersprungen: risikoarm');
     if (!selected.length) {
       aggregate('success', matched.length ? `${matched.length} langsame Prüfungen übersprungen: risikoarm` : `Keine Prüfung betrifft die ${files.length} geänderten Dateien`);
-      return { ok: true, next: null };
+      return true;
     }
     for (const check of selected) report(check.context, 'pending', `Läuft auf ${host}`);
     mkdirSync(ctx.logs, { recursive: true });
@@ -251,10 +205,8 @@ export async function checkPullRequest(ctx, pr) {
       const log = join(ctx.logs, `pr${pr.number}-${sha.slice(0, 7)}-${name.replace(/[^\w.-]+/g, '-')}.log`), begun = Date.now(), end = begun + minutes * 60_000;
       writeFileSync(log, '');
       for (const [index, command] of commands.entries()) {
-        if (state.aborted) return null; // der Abbruch kam zwischen zwei Befehlen, als kein Prozess lief
         appendFileSync(log, `$ ${command}\n`);
-        const { code, timedOut } = await shell(command, { cwd: work, env, log, timeoutMs: end - Date.now(), state, bash: ctx.bash, fnm: ctx.fnm });
-        if (state.aborted) return null;
+        const { code, timedOut } = await shell(command, { cwd: work, env, log, timeoutMs: end - Date.now(), bash: ctx.bash, fnm: ctx.fnm });
         const step = `Befehl ${index + 1}/${commands.length}`;
         if (timedOut) return ['failure', `Zeitlimit ${minutes} min bei ${step}`];
         if (code) return ['failure', `${step} fehlgeschlagen nach ${Math.round((Date.now() - begun) / 1000)} s: ${firstError(log)}`];
@@ -264,14 +216,12 @@ export async function checkPullRequest(ctx, pr) {
     const setup = config.setup.length ? await run('setup', config.setup, 60) : ['success'];
     const failed = [];
     for (const check of selected) {
-      if (!setup) break; // abgebrochen
       const result = setup[0] === 'success' ? await run(check.context, check.run, check.timeoutMinutes) : ['failure', `Setup fehlgeschlagen: ${setup[1]}`];
-      if (!result || state.aborted) break;
       if (result[0] !== 'success') failed.push(check.context);
       report(check.context, ...result);
     }
     let baseRed = []; // rote Tests des PRs, die auch am Kopf der Basis rot sind
-    if (!state.aborted && failed.length && config.baseRecheck) {
+    if (failed.length && config.baseRecheck) {
       const red = [...new Set(readFileSync(redFile, 'utf8').split(/\r?\n/).filter(Boolean))];
       if (red.length) { // nur die roten Tests, einmal; der Befehl schreibt die dort weiter roten nach LOCAL_CI_BASE_RED_TESTS. Ein Fehler hier ändert das Ergebnis nicht.
         worktreeAt(ctx, work, base);
@@ -284,160 +234,45 @@ export async function checkPullRequest(ctx, pr) {
         baseRed = red.filter(test => still.includes(test));
       }
     }
-    if (!state.aborted) {
-      ok = !failed.length;
-      const summary = ok ? `${selected.length} Prüfungen grün in ${took()} auf ${host}` : `${failed.length} von ${selected.length} rot: ${failed.join(', ')}`;
-      aggregate(ok ? 'success' : 'failure', baseRed.length ? `Basis rot: ${baseRed.join(', ')}; ${summary}` : summary);
-      if (baseRed.length) try { api('POST', `issues/${pr.number}/comments`, { body: `Basis rot: ${baseRed.join(', ')}\n\nDiese Tests sind schon am Kopf von ${pr.base.ref} (${base.slice(0, 12)}) rot, sie stammen nicht von diesem PR. Weitere rote Prüfungen stehen im Status.` }); } catch { /* nur ein Hinweis */ }
-    }
+    ok = !failed.length;
+    const summary = ok ? `${selected.length} Prüfungen grün in ${took()} auf ${host}` : `${failed.length} von ${selected.length} rot: ${failed.join(', ')}`;
+    aggregate(ok ? 'success' : 'failure', baseRed.length ? `Basis rot: ${baseRed.join(', ')}; ${summary}` : summary);
+    if (baseRed.length) try { api('POST', `issues/${pr.number}/comments`, { body: `Basis rot: ${baseRed.join(', ')}\n\nDiese Tests sind schon am Kopf von ${pr.base.ref} (${base.slice(0, 12)}) rot, sie stammen nicht von diesem PR. Weitere rote Prüfungen stehen im Status.` }); } catch { /* nur ein Hinweis */ }
   } finally {
-    clearInterval(watcher);
-    for (const context of [...open]) report(context, 'error', state.aborted || moved ? 'Abgebrochen: neuer Head oder PR geschlossen' : 'Abgebrochen: Fehler im Läufer');
+    for (const context of [...open]) report(context, 'error', 'Abgebrochen: Fehler im Läufer');
   }
-  return { ok, next: newHead() };
-}
-
-/** Prüft den PR und, wenn währenddessen ein neuer Head kommt, auch diesen, sofern `hold(head)` keinen Grund zum Warten meldet (dann holt `watch` ihn in einer späteren Runde). */
-export async function follow(ctx, pr, hold) {
-  for (let result; ; pr = result.next) {
-    result = await checkPullRequest(ctx, pr);
-    if (!result.next || await hold?.(result.next)) return result;
-  }
-}
-
-/** Grün bleibt grün, auch wenn sich die Basis bewegt (wie bei GitHub Actions; sonst liefe der Läufer bei jedem Merge für alle PRs voll). Rot gilt nur für die Basis, gegen die es lief. */
-const finished = (ctx, sha, base) => {
-  const status = ctx.api('GET', `commits/${sha}/statuses?per_page=100`).find(status => status.context === AGGREGATE);
-  return status?.state === 'success' || (status?.state === 'failure' && !!status.description?.startsWith(baseMark(base)));
-};
-
-/** Das Kit-Repository aus .gitmodules von origin/main (lokale Referenz ohne Fetch, wie in kit-pin.mjs); ohne Kit-Submodul undefined. Nur für die Entdeckung von `kitPush`: ob ein Push-Worktree das Kit braucht, entscheidet sein eigener Stand. */
-const kitRepository = ({ git, root }) => {
-  try { return /github\.com[/:](.+?)(?:\.git)?$/.exec(git(root, 'config', '--blob', 'refs/remotes/origin/main:.gitmodules', '--get', 'submodule..vendor/workflow-kit.url'))?.[1]; } catch { return undefined; }
-};
-
-/**
- * `push` der Konfiguration, wenn sich main oder ein Release-Branch bewegt hat, und `kitPush`, wenn sich main des Kits bewegt hat
- * (dann auf main des Projekts); die erste Beobachtung löst nichts aus. Die Befehle laufen ohne `setup` (kein `npm ci`; nur das Kit-Submodul wird geholt) in einem eigenen Worktree auf
- * dem neuen Stand, nie im alten Stand des Läufer-Checkouts: bei `push` ist das `AFTER_SHA`, bei `kitPush` origin/main des Projekts
- * (dort ist `AFTER_SHA` der SHA im Kit, kein Commit des Projekts).
- * `saved` sind die Heads, deren Aufgabe erledigt ist (Datei `ctx.headsFile`): nach einem Neustart zählt der Vergleich damit,
- * nicht die erste Beobachtung. Ein Head wird erst nach der Aufgabe gespeichert, eine abgebrochene läuft beim nächsten Start nochmal.
- */
-async function pushed(ctx, heads, saved) {
-  const moved = [];
-  const save = () => { // erst eine Nebendatei, dann umbenennen: ein Abbruch mitten im Schreiben hinterlässt keine halbe Datei
-    if (!ctx.headsFile) return;
-    writeFileSync(`${ctx.headsFile}.tmp`, JSON.stringify(Object.fromEntries(saved)));
-    renameSync(`${ctx.headsFile}.tmp`, ctx.headsFile);
-  };
-  const seen = (key, sha, event) => {
-    if (heads.has(key) && heads.get(key) !== sha) moved.push({ ...event, key, before: heads.get(key), after: sha });
-    if (!heads.has(key)) saved.set(key, sha);
-    heads.set(key, sha);
-  };
-  for (const prefix of ['main', 'release/']) {
-    for (const { ref, object } of ctx.api('GET', `git/matching-refs/heads/${prefix}`)) {
-      const branch = ref.slice('refs/heads/'.length);
-      if (branch === 'main' || branch.startsWith('release/')) seen(branch, object.sha, { branch });
-    }
-  }
-  const kit = kitRepository(ctx);
-  if (kit) try { seen('kit:main', ctx.api('GET', 'git/ref/heads/main', {}, kit).object.sha, { branch: 'main', kit: true }); } catch (error) { console.error(`push kit: ${error.message.split('\n')[0]}`); } // ein Fehler beim Kit hält die Projekt-Branches nicht auf
-  save();
-  for (const { key, branch, before, after, kit } of moved) {
-    const work = `${ctx.work}-push`;
-    let config, commands;
-    try {
-      fetchBranch(ctx, branch);
-      const sha = kit ? ctx.git(ctx.root, 'rev-parse', `refs/remotes/origin/${branch}`) : after; // Konfiguration und Worktree stammen aus diesem einen Commit
-      config = branchConfig(ctx, branch, sha);
-      commands = kit ? config.kitPush : config.push;
-      if (commands.length) {
-        worktreeAt(ctx, work, sha);
-        if (ctx.git(work, 'ls-files', '--stage', '--', '.vendor/workflow-kit').startsWith('160000')) ctx.git(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // nur, wenn dieser Stand das Kit enthält (Modus 160000 = Gitlink); die Skripte brauchen es, kein `setup` (npm ci blockierte alle Plätze)
-      }
-    } catch (error) { console.error(`push ${key}: übersprungen, ${error.message}`); continue; }
-    if (commands.length) {
-      const env = { ...process.env, BRANCH: branch, BEFORE_SHA: before, AFTER_SHA: after, EVENT: kit ? 'kit' : 'push' };
-      mkdirSync(ctx.logs, { recursive: true });
-      const log = join(ctx.logs, `push-${key.replace(/[^\w.-]+/g, '-')}.log`);
-      writeFileSync(log, '');
-      for (const command of commands) {
-        const { code } = await shell(command, { cwd: work, env, log, timeoutMs: 30 * 60_000, state: {}, bash: ctx.bash, fnm: ctx.fnm });
-        if (code) { console.error(`push ${key}: "${command}" endete mit ${code} (${log})`); break; }
-      }
-    }
-    saved.set(key, after);
-    save();
-  }
+  return ok;
 }
 
 /**
- * Jede Minute: bewegte Branches, dann jeden offenen Nicht-Draft-PR mit neuem Head, oder neuer Basis nach rotem Endstand, genau einmal.
- * Bis zu `ctx.slots` PRs laufen gleichzeitig (Standard 1: einer nach dem anderen im Ordner `work`), jeder auf einem Platz mit eigenem
- * Arbeitsordner `work-1`, `work-2`, …; ein PR belegt nie zwei Plätze. `checkout()` hat kein `await`: die Git-Aufrufe im gemeinsamen
- * Projekt-Checkout (Fetch, FETCH_HEAD, Worktree anlegen) laufen so nie ineinander; das gilt auch für den Fetch der `push`-Befehle.
- * Sie laufen sofort, auch neben laufenden PRs (eigener Ordner `work-push`), und gehen neuen PRs voraus. Sind alle Plätze belegt,
- * fragt `slotFree` jede Runde die Branches ab, damit ein langer PR-Lauf `push` und `kitPush` nicht aufhält.
+ * `push` der Konfiguration von `branch` (mit `kit`: `kitPush`, wenn sich main des Kits bewegt hat; dann ist `after` der SHA im Kit),
+ * von `board.mjs merge` nach einem eigenen Merge gerufen. Die Befehle laufen ohne `setup` (kein `npm ci`; nur das Kit-Submodul wird geholt)
+ * in einem Worktree auf dem neuen Stand, nie im alten Stand des Checkouts: bei `push` ist das `after`, bei `kitPush` origin/main des Projekts.
+ * Konfiguration und Worktree stammen aus diesem einen Commit. Gibt zurück, ob alle Befehle grün waren.
  */
-export async function watch(ctx, { rounds = Infinity } = {}) {
-  let known = {};
-  if (ctx.headsFile) try { known = JSON.parse(readFileSync(ctx.headsFile, 'utf8')); } catch (error) {
-    if (error.code !== 'ENOENT') throw error; // erster Start: die erste Beobachtung ist die Ausgangslage; eine kaputte oder fremde Datei (auch `null`) bricht den Start sichtbar ab
+export async function runPush(ctx, { branch, before, after, kit }) {
+  fetchBranch(ctx, branch);
+  const sha = kit ? ctx.git(ctx.root, 'rev-parse', `refs/remotes/origin/${branch}`) : after;
+  const config = branchConfig(ctx, branch, sha), commands = kit ? config.kitPush : config.push;
+  if (!commands.length) return true;
+  worktreeAt(ctx, ctx.work, sha);
+  if (ctx.git(ctx.work, 'ls-files', '--stage', '--', '.vendor/workflow-kit').startsWith('160000')) ctx.git(ctx.work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // nur, wenn dieser Stand das Kit enthält (Modus 160000 = Gitlink); die Skripte brauchen es, kein `setup`
+  const env = { ...process.env, BRANCH: branch, BEFORE_SHA: before, AFTER_SHA: after, EVENT: kit ? 'kit' : 'push' };
+  mkdirSync(ctx.logs, { recursive: true });
+  const log = join(ctx.logs, `push-${kit ? 'kit-' : ''}${branch.replace(/[^\w.-]+/g, '-')}.log`);
+  writeFileSync(log, '');
+  for (const command of commands) {
+    const { code } = await shell(command, { cwd: ctx.work, env, log, timeoutMs: 30 * 60_000, bash: ctx.bash, fnm: ctx.fnm });
+    if (code) { console.error(`push ${branch}: "${command}" endete mit ${code} (${log})`); return false; }
   }
-  const heads = new Map(Object.entries(known)), saved = new Map(heads), done = new Map(), waiting = new Map(), slots = ctx.slots ?? 1, busy = new Map(); // busy: Platz -> { number, task }
-  const push = () => pushed(ctx, heads, saved).catch(error => console.error(`push: ${error.message}`)); // ein Fehler hier hält die PR-Prüfungen nicht auf
-  const slotFree = async () => { while (busy.size >= slots) { await Promise.race([pause(ctx.pollMs), ...[...busy.values()].map(({ task }) => task)]); if (busy.size >= slots) await push(); } }; // kein Platz frei: weiter nach Bewegungen fragen
-  // Einstellung `localCiAfterApps`: bis Sonar für den Head fertig ist und 0 Befunde offen sind, nimmt der Läufer den PR nicht, auch nicht als Folgehead in `follow`
-  const hold = async (pr, settings = new Map()) => {
-    let reason = null;
-    try {
-      if (!settings.has(pr.base.ref)) settings.set(pr.base.ref, waitSettings(ctx, pr.base.ref));
-      reason = settings.get(pr.base.ref) && await waitReason(ctx, pr, settings.get(pr.base.ref));
-    } catch (error) { reason = `Wartebedingung nicht lesbar: ${error.message.split('\n')[0]}`; }
-    if (reason) { // ein Status je Head und Grund, kein Aufruf je Runde
-      if (waiting.get(pr.number) !== `${pr.head.sha} ${reason}`) ctx.api('POST', `statuses/${pr.head.sha}`, { state: 'pending', context: AGGREGATE, description: reason.slice(0, 140) });
-      waiting.set(pr.number, `${pr.head.sha} ${reason}`);
-    }
-    return reason;
-  };
-  const start = pr => {
-    const slot = [...Array(slots).keys()].find(index => !busy.has(index));
-    const task = follow({ ...ctx, work: slots > 1 ? `${ctx.work}-${slot + 1}` : ctx.work }, pr, hold)
-      .catch(error => console.error(`#${pr.number}: ${error.message}`)) // ein Läuferfehler hält die anderen Plätze nicht auf
-      .finally(() => busy.delete(slot));
-    busy.set(slot, { number: pr.number, task });
-  };
-  for (let round = 0; round < rounds; round++) {
-    try {
-      await push();
-      const bases = new Map(), settings = new Map(); // aktueller SHA und Einstellung `localCiAfterApps` je Ziel-Branch, einmal pro Runde
-      for (const pr of ctx.api('GET', 'pulls?state=open&per_page=100').filter(pr => !pr.draft && pr.head.repo?.full_name === ctx.repository)) {
-        try { if (!bases.has(pr.base.ref)) bases.set(pr.base.ref, ctx.api('GET', `git/ref/heads/${pr.base.ref}`).object.sha); } catch (error) {
-          console.error(`#${pr.number}: Basis ${pr.base.ref} nicht lesbar, übersprungen (${error.message.split('\n')[0]})`); // 404 oder Rate-Limit hält die übrigen PRs nicht auf
-          continue;
-        }
-        const base = bases.get(pr.base.ref), key = `${pr.head.sha} ${base}`;
-        // läuft der PR noch (`follow` holt einen neuen Head selbst), startet er nicht ein zweites Mal auf einem anderen Platz
-        if ([...busy.values()].some(({ number }) => number === pr.number) || done.get(pr.number) === key || finished(ctx, pr.head.sha, base)) continue;
-        if (await hold(pr, settings)) continue;
-        done.set(pr.number, key); // ponytail: ein Läuferfehler wiederholt Head und Basis nicht; ein neuer Push, eine neue Basis oder `local-ci.mjs PR` prüft erneut
-        await slotFree();
-        start(pr);
-      }
-    } catch (error) { console.error(error.message); }
-    await slotFree(); // alle Plätze belegt: nicht neu abfragen, bis einer frei ist (bei einem Platz wie bisher: erst nach dem Lauf)
-    if (round + 1 < rounds) await pause(ctx.pollMs);
-  }
-  await Promise.all([...busy.values()].map(({ task }) => task)); // nur bei endlichen `rounds`
+  return true;
 }
 
 async function main() {
   enterCwd();
-  const [mode] = process.argv.slice(2);
-  if (mode !== '--watch' && !/^\d+$/.test(mode ?? '')) {
-    console.error('Aufruf: local-ci.mjs [--cwd DIR] PR | --watch');
+  const [mode, ...args] = process.argv.slice(2);
+  if (mode !== '--push' && !/^\d+$/.test(mode ?? '')) {
+    console.error('Aufruf: local-ci.mjs [--cwd DIR] PR | --push BRANCH BEFORE AFTER [kit]');
     process.exit(2);
   }
   const root = projectRoot(), gh = externalTool('gh', root), git = externalTool('git', root);
@@ -445,28 +280,18 @@ async function main() {
   const { repository } = JSON.parse(readFileSync(join(root, '.github/workflow-project.json'), 'utf8')); // nur die Identität des Projekts; die Prüfliste kommt pro PR vom Ziel-Branch
   // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
-  if (mode === '--watch') { // runner.log schreibt der Läufer selbst als UTF-8 (eine Umleitung der Shell kodiert PowerShell doppelt); nach dem Ende startet nichts neu
-    mkdirSync(dir, { recursive: true });
-    for (const stream of [process.stdout, process.stderr]) { const write = stream.write.bind(stream); stream.write = (chunk, ...rest) => (appendFileSync(join(dir, 'runner.log'), chunk), write(chunk, ...rest)); }
-    process.on('uncaughtExceptionMonitor', (error, origin) => console.error(`${new Date().toISOString()} ${origin}: ${error.stack}`));
-    process.on('exit', code => console.error(`${new Date().toISOString()} local-ci: Läufer beendet (Exit ${code})`));
-  }
-  const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
-  const fnm = spawnSync('fnm', ['--version'], { stdio: 'ignore' }).status === 0 ? 'fnm' : undefined; // ohne fnm bleibt es bei der Node-Version des Läufers
   const ctx = {
-    bash, fnm, repository, root, work: join(dir, 'work'), logs: join(dir, 'logs'), headsFile: join(dir, 'heads.json'), pollMs: 60_000, sonarToken: process.env.SONAR_TOKEN,
+    bash: gitBash(exec(git, ['--exec-path']).trim()), // vor Sperre und Status
+    fnm: spawnSync('fnm', ['--version'], { stdio: 'ignore' }).status === 0 ? 'fnm' : undefined, // ohne fnm bleibt es bei der Node-Version des Läufers
+    repository, root, logs: join(dir, 'logs'),
     git: (cwd, ...args) => exec(git, [...gitOptions, ...args], { cwd }).trim(),
-    api: (method, path, fields = {}, repo = repository) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repo}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
+    api: (method, path, fields = {}) => JSON.parse(exec(gh, ['api', '-X', method, `repos/${repository}/${path}`, ...Object.entries(fields).flatMap(([key, value]) => ['-f', `${key}=${value}`])]) || 'null'),
   };
-  try { lock(join(dir, 'lock')); } catch (error) {
-    if (error.code !== 'ERR_ASSERTION') throw error;
-    console.error(error.message);
-    process.exit(3); // Sperre belegt
-  }
-  if (mode === '--watch') {
-    ctx.slots = mainSlots(ctx); // einmal beim Start von origin/main wie die Prüfliste, nicht aus dem eigenen Checkout; ein neuer Wert gilt nach Neustart
-    await watch(ctx);
-  } else process.exitCode = (await follow(ctx, ctx.api('GET', `pulls/${mode}`))).ok ? 0 : 1;
+  ctx.work = claimSlot(dir);
+  if (mode === '--push') {
+    const [branch, before, after, kit] = args;
+    process.exitCode = (await runPush(ctx, { branch, before, after, kit: kit === 'kit' })) ? 0 : 1;
+  } else process.exitCode = (await checkPullRequest(ctx, ctx.api('GET', `pulls/${mode}`))) ? 0 : 1;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

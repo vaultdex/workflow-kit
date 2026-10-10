@@ -424,3 +424,33 @@ test('merge --stack gates every layer, merges only the top through merge-async a
     assert.equal(JSON.parse(readFileSync(join(checkout, 'backlink-comments-1.json'), 'utf8')).length, expected.length, `${label}: one comment per close`);
   }
 });
+
+test('merge without a resident runner: starts local-ci for a head without its status, once, and runs the push commands after the merge', t => {
+  const { checkout, run } = fixture(t);
+  const oid = 'abcdef1' + '0'.repeat(33), commit = handoffPr().commits.nodes[0].commit;
+  const calls = () => existsSync(join(checkout, 'local-ci-calls')) ? readFileSync(join(checkout, 'local-ci-calls'), 'utf8').trim().split('\n') : [];
+  const local = { __typename: 'StatusContext', context: 'local-ci', state: 'SUCCESS' };
+  const write = (nodes, changes) => writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'main', headRefOid: oid, ...changes, commits: { nodes: [{ commit: { ...commit, oid,
+    statusCheckRollup: { contexts: { totalCount: nodes.length + 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }, ...nodes] } } } }] } })));
+  // A project without localChecks: no run, no push commands.
+  write([]);
+  assert.equal(run('merge', '7').status, 0);
+  assert.deepEqual(calls(), []);
+  rmSync(join(checkout, 'merges'));
+  // With localChecks and no status on the head: one start although the merge looks several times, and the merge waits for the status.
+  writeFileSync(join(checkout, 'base-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', localChecks: '.github/local-checks.json' }));
+  write([]);
+  const waiting = run('merge', '7', '--interval', '0', '--max-minutes', '0.02');
+  assert.equal(waiting.status, 4, waiting.stdout + waiting.stderr);
+  assert.deepEqual(calls(), ['--cwd . 7']);
+  assert.equal(existsSync(join(checkout, 'merges')), false);
+  // A fork's head is never started by the merge.
+  rmSync(join(checkout, 'local-ci-calls'));
+  write([], { isCrossRepository: true });
+  run('merge', '7', '--interval', '0', '--max-minutes', '0.01');
+  assert.deepEqual(calls(), []);
+  // With the status the head is not started again; the merge into main runs the push commands with the merge commit and its first parent.
+  write([local]);
+  assert.equal(run('merge', '7').status, 0);
+  assert.deepEqual(calls(), [`--cwd . --push main ${'b'.repeat(40)} ${'f'.repeat(40)}`]);
+});
