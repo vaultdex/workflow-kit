@@ -216,7 +216,7 @@ and then work in that directory, their relative paths (changed files given to `a
   In progress, Automated review or Human review whose open PR had no activity for `"staleHours"` (project file, default 6; 0 or more) or whose
   Human-review PR has merge conflicts (DIRTY). Activity is the newest update of the issue (comments), its Project item (status) and its open PR
   (push, comments, reviews), including bots. Work without activity for `staleHours` (or on a Human-review issue whose PR has conflicts) has expired: `start ISSUE --session NEW` then
-  notes the stale PR instead of BLOCKED (its branch holds nothing either) and writes NEW into its claim line; the assignees stay.
+  notes the stale PR instead of BLOCKED (its branch holds nothing either) and writes NEW into its claim line; the assignees stay. `start ISSUE --session NEW --takeover` does the same for a fresh PR (a deliberate phase handover).
   `next` lists STACKABLE issues apart, with the base PR; information only.
 - `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).

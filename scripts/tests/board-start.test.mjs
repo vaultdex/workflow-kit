@@ -78,6 +78,20 @@ test('start takes a Ready issue to a Draft PR that closes it, and the same call 
   assert.equal(JSON.parse(text('pr.json')).body, 'Closes #1\nAgent: claude, Session: S2\nMehr');
 });
 
+test('start takes over a fresh PR of another session only with --takeover', t => {
+  const { run, writeIssue, file, text } = startFixture(t);
+  const body = 'Closes #1\nAgent: claude, Session: OLD\nMehr';
+  writeFileSync(file('pr.json'), JSON.stringify({ ...JSON.parse(text('pr.json')), body }));
+  writeIssue({ ...issue('In progress'), updatedAt: new Date().toISOString(), closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', body, updatedAt: new Date().toISOString(), headRefName: 'claude/1-fixture', repository: { nameWithOwner: 'test/example' } }] } });
+
+  let result = run('start', '1', '--session', 'S2');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(JSON.parse(text('pr.json')).body, body, 'without --takeover the claim stays');
+  result = run('start', '1', '--session', 'S2', '--takeover');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(text('pr.json')).body, body.replace('OLD', 'S2'));
+});
+
 test('start names the worktree that holds the branch when it cannot switch to it', t => {
   const { checkout, run, writeIssue, git } = startFixture(t);
   // The predecessor's worktree still has the branch checked out.
