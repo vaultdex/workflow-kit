@@ -407,21 +407,21 @@ test('ohne slots läuft ein PR nach dem anderen im Ordner work, wie bisher', asy
   assert.deepEqual(['work', 'work-1'].map(name => existsSync(join(f.dir, `${name}.gestartet`))), [true, false]);
 });
 
-test('ein PR-Lauf, der alle Plätze belegt, hält push und kitPush nicht auf: beide laufen währenddessen, die Prüfung wartet auf sie (#520)', async t => {
-  const wait = 'for i in $(seq 100); do test -e ../pushed.txt && test -e ../kit.txt && exit 0; sleep 0.1; done; exit 1';
-  const f = fixture(t, { push: ['touch ../pushed.txt'], kitPush: ['touch ../kit.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: [wait], timeoutMinutes: 1 }] });
+test('ein PR-Lauf, der alle Plätze belegt, hält push (main, Release-Branch) und kitPush nicht auf: sie laufen währenddessen, die Prüfung wartet auf sie (#520)', async t => {
+  const wait = 'for i in $(seq 100); do grep -qx main ../pushed.txt && grep -qx release/1 ../pushed.txt && test -e ../kit.txt && exit 0; sleep 0.1; done; exit 1';
+  const f = fixture(t, { push: ['echo "$BRANCH" >> ../pushed.txt'], kitPush: ['touch ../kit.txt'], checks: [{ context: 'Backend', paths: ['backend/**'], run: [wait], timeoutMinutes: 1 }] });
   addKit(f);
-  f.ctx.git(f.root, 'push', '-q', 'origin', 'main');
-  f.server.refs = [{ ref: 'refs/heads/main', object: { sha: f.ctx.git(f.root, 'rev-parse', 'HEAD') } }];
+  f.ctx.git(f.root, 'push', '-q', 'origin', 'main', 'main:refs/heads/release/1');
+  const before = f.ctx.git(f.root, 'rev-parse', 'HEAD');
+  f.server.refs = ['main', 'release/1'].map(branch => ({ ref: `refs/heads/${branch}`, object: { sha: before } }));
   f.server.kit = 'a'.repeat(40);
   const after = f.advance('b.txt');
   const ctx = { ...f.ctx, pollMs: 1 }, api = ctx.api;
-  ctx.api = (method, path, fields, repo) => { // main und Kit-main bewegen sich, sobald der PR läuft und den einzigen Platz belegt
-    if (path.startsWith('git/matching-refs/') && f.posts.length) { f.server.refs = [{ ref: 'refs/heads/main', object: { sha: after } }]; f.server.kit = 'b'.repeat(40); }
+  ctx.api = (method, path, fields, repo) => { // main, Release-Branch und Kit-main bewegen sich, sobald der PR läuft und den einzigen Platz belegt
+    if (path.startsWith('git/matching-refs/') && f.posts.length) { f.server.refs = f.server.refs.map(ref => ({ ...ref, object: { sha: after } })); f.server.kit = 'b'.repeat(40); }
     return api(method, path, fields, repo);
   };
   await watch(ctx, { rounds: 1 });
-  assert.ok(existsSync(join(f.dir, 'pushed.txt')) && existsSync(join(f.dir, 'kit.txt')));
   assert.equal(f.posts.at(-1).state, 'success', JSON.stringify(f.posts));
 });
 
