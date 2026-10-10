@@ -2603,7 +2603,8 @@ function start() {
     assert.equal(read(), want, `${key} must be ${want} but is overridden outside this clone's config; fix that override`);
   }
   const issue = readIssue();
-  if (!mayStart(check(issue, { session, takeover: process.argv.includes('--takeover') }))) return;
+  const takeover = process.argv.includes('--takeover');
+  if (!mayStart(check(issue, { session, takeover }))) return;
   const stacked = stackedOn, login = issue.viewer.login;
   if (!issue.assignees.nodes.some(user => sameLogin(user.login, login))) restPost(`repos/${project.repository}/issues/${number}/assignees`, ['-f', `assignees[]=${login}`]);
   set('Status', 'In progress');
@@ -2617,7 +2618,10 @@ function start() {
   if (git('branch', '--show-current') !== branch) {
     let local = true;
     try { git('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`); } catch { local = false; }
-    git('switch', ...local ? [branch] : ['--track', `origin/${branch}`]);
+    // --takeover (#550): the predecessor's worktree may still hold the branch; it belongs to nobody after the takeover.
+    git('switch', ...takeover ? ['--ignore-other-worktrees'] : [], ...local ? [branch] : ['--track', `origin/${branch}`]);
+    // The predecessor may have pushed from another clone: catch up when that is a fast-forward, else leave the branch as it is.
+    if (takeover && local) try { git('merge', '--ff-only', `origin/${branch}`); } catch { /* diverged: the driver decides */ }
   }
   if (existsSync(modules) && readFileSync(modules, 'utf8').includes('.vendor/workflow-kit')) git('submodule', 'update', '--init', '.vendor/workflow-kit');
   let pr = currentIssuePr(issue).number;
