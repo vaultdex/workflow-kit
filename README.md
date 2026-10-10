@@ -503,6 +503,8 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   runner's own checkout, which may be old: a file that only exists on the new state is there. The commands themselves are
   read from `AFTER_SHA`, not from the branch's newest head, so config and worktree are always one commit. `setup` does not run (no `npm ci`
   while all slots wait); if that state has the kit gitlink, only `git submodule update --init .vendor/workflow-kit` runs first.
+  `push` and `kitPush` start at once, before new PRs and also while PR runs occupy every slot (the runner checks for moved
+  branches every round even then); running PR runs are not aborted.
   The runner stores each branch head in `heads.json` next to its work folders once that branch's `push` is done, so a branch that
   moved while the runner was off is caught up at the next `--watch` start; without the file the first look is the baseline.
 - `kitPush` (list, next to `push`, read from `origin/main`) runs the same way when `main` of the kit moved (head stored in
