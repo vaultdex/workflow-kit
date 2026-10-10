@@ -2215,6 +2215,12 @@ function deleteHeadBranch(pr) {
 }
 
 
+/** One shell command of the project file in `cwd`, output passed through; throws on a non-zero exit. `execPath` is `git --exec-path`. */
+function runShell(execPath, cwd, command, env) {
+  const bash = process.platform === 'win32' ? resolve(execPath, '..', '..', '..', 'bin', 'bash.exe') : '/bin/bash';
+  execFileSync(bash, ['-c', command], { cwd, env: { ...process.env, ...env }, stdio: 'inherit', windowsHide: true, timeout: 30 * 60_000 });
+}
+
 /**
  * After a merge into main or a release branch the `push` commands of `.github/workflow-project.json` as on the merge commit run here, in the
  * foreground (sweep, release sync, pin); after a merge in the kit (`--cwd <project>/.vendor/workflow-kit`) the `kitPush` commands of the project that
@@ -2243,8 +2249,7 @@ function runPush(branch, merged) {
     work = mkdtempSync(join(tmpdir(), 'board-push-'));
     run(root, 'worktree', 'add', '--quiet', '--detach', work, sha);
     if (run(work, 'ls-files', '--stage', '--', '.vendor/workflow-kit').startsWith('160000')) run(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // the scripts need the kit
-    const bash = process.platform === 'win32' ? resolve(run(root, '--exec-path'), '..', '..', '..', 'bin', 'bash.exe') : '/bin/bash';
-    for (const command of commands) execFileSync(bash, ['-c', command], { cwd: work, env: { ...process.env, BRANCH: branch }, stdio: 'inherit', windowsHide: true, timeout: 30 * 60_000 });
+    for (const command of commands) runShell(run(root, '--exec-path'), work, command, { BRANCH: branch });
   } catch (error) {
     console.log(`note: the push commands of ${branch} failed (${String(error.message).split('\n')[0]})`);
   } finally {
@@ -2687,6 +2692,8 @@ function start() {
   const final = readIssue();
   assert.equal(projectItem(final)?.status?.name, 'In progress', 'In progress status read-back differs');
   assert.ok(final.assignees.nodes.some(user => sameLogin(user.login, login)), 'Assignment read-back differs');
+  // The project's setup (e.g. its dependencies) runs last, on the branch with the kit at its pin; a failure leaves claim, status and PR, so start again resumes.
+  if (project.setup) try { runShell(git('--exec-path'), projectDirectory, project.setup, { BRANCH: branch }); } catch (error) { assert.fail(`setup failed (${String(error.message).split('\n')[0]}); assignment, status and PR stay: fix it and run start again`); }
   console.log(`START #${number} session ${session} branch ${branch} base ${base} PR #${pr}${stacked && stacked.state !== 'MERGED' ? ` (stack: link it above PR #${stacked.number}, docs/CONTRIBUTING.md#stacked-pull-requests)` : ''}`);
 }
 

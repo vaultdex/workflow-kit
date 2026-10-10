@@ -78,6 +78,31 @@ test('start takes a Ready issue to a Draft PR that closes it, and the same call 
   assert.equal(JSON.parse(text('pr.json')).body, 'Closes #1\nAgent: claude, Session: S2\nMehr');
 });
 
+for (const [setup, expected] of [[undefined, ''], ['echo "setup on $BRANCH" > setup-ran', 'setup on claude/1-fixture']]) {
+  test(`start ${setup ? 'runs the setup command of the project' : 'without setup adds no step'} (#567)`, t => {
+    const { run, writeIssue, file, text } = startFixture(t);
+    writeFileSync(file('.github/workflow-project.json'), JSON.stringify({ ...JSON.parse(text('.github/workflow-project.json')), setup }));
+    writeIssue(issue('Ready'));
+    const result = run('start', '1', '--session', 'S1');
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(text('setup-ran').trim(), expected);
+  });
+}
+
+test('start with a failing setup ends with an error and shows its output, claim and PR stay (#567)', t => {
+  const { run, writeIssue, file, text } = startFixture(t);
+  const project = JSON.parse(text('.github/workflow-project.json'));
+  writeFileSync(file('.github/workflow-project.json'), JSON.stringify({ ...project, setup: 'echo "vitest fehlt"; exit 3' }));
+  writeIssue(issue('Ready'));
+
+  const result = run('start', '1', '--session', 'S1');
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stdout + result.stderr, /vitest fehlt/);
+  assert.match(result.stdout, /setup failed/);
+  assert.equal(text('stored'), 'In progress');
+  assert.ok(text('created-pr').includes('draft=true'), 'the Draft PR exists');
+});
+
 test('start takes over a fresh PR of another session only with --takeover', t => {
   const { run, writeIssue, file, text } = startFixture(t);
   const body = 'Closes #1\nAgent: claude, Session: OLD\nMehr';

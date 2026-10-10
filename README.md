@@ -175,7 +175,8 @@ and then work in that directory, their relative paths (changed files given to `a
   issue-linked branch (`gh issue develop`) on the base (the base PR's branch of a stack, else the Project base field, else the default
   branch) or continues your own branch of the issue, runs `git fetch origin` and `git switch`, brings the kit to its pin, and, for an
   issue without an open PR, pushes an empty first commit and opens the Draft PR (`Closes #N` and the claim line `Agent: claude|codex, Session: ID`)
-  with its native link. The Draft PR is the claim: an open PR of the issue holds it for every session whose ID its body does not name. Keep the claim
+  with its native link. Last it runs the optional `"setup"` shell command of `.github/workflow-project.json` (for example `"node scripts/bootstrap.mjs"`, run like a `push` command, in the checkout, with `BRANCH`);
+  if it fails, `start` ends with an error and the output, claim, status and PR stay, and `start` again resumes. The Draft PR is the claim: an open PR of the issue holds it for every session whose ID its body does not name. Keep the claim
   line when you rewrite the PR body. It ends with
   `START #N session … branch … base … PR #…`; for a stack it names the PR to link above. Abandoned work (below, `next`) is taken over
   with the same call: `start` writes the new session into the claim line of its PR. A handover is the same edit of the claim line by hand. A new start is BLOCKED with `finish #N first` while you have an own unfinished issue (a resume or a stack on its work is not).
