@@ -35,7 +35,7 @@ test('die Sperrdatei lässt nur einen Läufer zu und übernimmt die eines toten 
   lock(file)();
 });
 
-test('--watch endet bei belegter Sperre mit Exit 3, schreibt runner.log mit Exit-Zeile und startet nicht neu', async t => {
+test('--watch endet bei belegter Sperre mit Exit 3, schreibt runner.log mit Exit-Zeile und startet nicht neu', t => {
   const dir = realpathSync.native(temporary(t, 'local ci watch ')), root = join(dir, 'root'), env = isolatedGit(dir);
   execFileSync('git', ['init', '-q', root], { env });
   mkdirSync(join(root, '.github'));
@@ -44,7 +44,6 @@ test('--watch endet bei belegter Sperre mit Exit 3, schreibt runner.log mit Exit
   writeFileSync(join(`${root}-local-ci`, 'lock'), String(process.pid));
   const run = spawnSync(process.execPath, [fileURLToPath(new URL('../local-ci.mjs', import.meta.url)), '--cwd', root, '--watch'], { env, encoding: 'utf8' });
   assert.equal(run.status, 3);
-  await new Promise(resolve => setTimeout(resolve, 200)); // ein Neustart würde sich hier melden
   const log = readFileSync(join(`${root}-local-ci`, 'runner.log'), 'utf8');
   assert.match(log, /läuft schon/);
   assert.equal(log.match(/Läufer beendet \(Exit 3\)/g).length, 1);

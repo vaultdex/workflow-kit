@@ -446,9 +446,8 @@ async function main() {
   // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
   if (mode === '--watch') { // runner.log schreibt der Läufer selbst als UTF-8 (eine Umleitung der Shell kodiert PowerShell doppelt); nach dem Ende startet nichts neu
-    const logFile = join(dir, 'runner.log');
     mkdirSync(dir, { recursive: true });
-    for (const stream of [process.stdout, process.stderr]) { const write = stream.write.bind(stream); stream.write = (chunk, ...rest) => (appendFileSync(logFile, chunk), write(chunk, ...rest)); }
+    for (const stream of [process.stdout, process.stderr]) { const write = stream.write.bind(stream); stream.write = (chunk, ...rest) => (appendFileSync(join(dir, 'runner.log'), chunk), write(chunk, ...rest)); }
     process.on('uncaughtExceptionMonitor', (error, origin) => console.error(`${new Date().toISOString()} ${origin}: ${error.stack}`));
     process.on('exit', code => console.error(`${new Date().toISOString()} local-ci: Läufer beendet (Exit ${code})`));
   }
@@ -465,7 +464,7 @@ async function main() {
     process.exit(3); // Sperre belegt
   }
   if (mode === '--watch') {
-    ctx.slots = mainSlots(ctx); // einmal beim Start von origin/main wie die Prüfliste, nicht aus dem eigenen Checkout; ein neuer Wert gilt nach dem nächsten Start
+    ctx.slots = mainSlots(ctx); // einmal beim Start von origin/main wie die Prüfliste, nicht aus dem eigenen Checkout; ein neuer Wert gilt nach Neustart
     await watch(ctx);
   } else process.exitCode = (await follow(ctx, ctx.api('GET', `pulls/${mode}`))).ok ? 0 : 1;
 }
