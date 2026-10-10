@@ -1,10 +1,11 @@
 // Lokale CI mit echtem Git (Merge-Stand wird aus origin/<base> und refs/pull/N/head gebaut) und nachgebautem gh: Filter, Auswahl, Ablauf der Status, Abbruch, Basis-Wechsel.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { checkPullRequest, gitBash, gitOptions, loadConfig, loadSlots, lock, mainSlots, matches, select, watch } from '../local-ci.mjs';
+import { checkPullRequest, gitBash, gitOptions, loadConfig, loadSlots, lock, mainSlots, matches, select, supervise, watch } from '../local-ci.mjs';
 import { isolatedGit, temporary } from './fixtures.mjs';
 
 test('Pfad-Filter wie bei GitHub: der Reihe nach, "!" nimmt zurück, "*" bleibt im Ordner, "**" geht darunter', () => {
@@ -32,6 +33,36 @@ test('die Sperrdatei lässt nur einen Läufer zu und übernimmt die eines toten 
   release();
   writeFileSync(file, '99999999');
   lock(file)();
+});
+
+/** Ein Kind, das mit der nächsten Antwort aus `exits` endet; `kill` beendet es sofort mit Signal. */
+function fakeStarts(exits, starts = []) {
+  return { starts, start() {
+    const child = new EventEmitter();
+    child.kill = signal => { starts.push(`kill ${signal}`); child.emit('exit', null, signal); };
+    starts.push('start');
+    if (exits.length) setImmediate(() => child.emit('exit', exits.shift(), null));
+    return child;
+  } };
+}
+
+test('--watch startet den Runner nach jedem Ende neu, außer bei Aufruffehler (2) und belegter Sperre (3)', async () => {
+  const crashes = fakeStarts([1, 1, 0]);
+  await supervise(crashes.start, { delayMs: 1, restarts: 2 });
+  assert.deepEqual(crashes.starts, ['start', 'start', 'start']); // endliche Zahl von Neustarts
+  for (const code of [2, 3]) {
+    const once = fakeStarts([code, 1]);
+    assert.equal(await supervise(once.start, { delayMs: 1 }), code);
+    assert.deepEqual(once.starts, ['start']);
+  }
+});
+
+test('SIGTERM im Elternprozess geht ans Kind und beendet die Schleife ohne Neustart', async () => {
+  const running = fakeStarts([]);
+  const done = supervise(running.start, { delayMs: 1 });
+  process.emit('SIGTERM', 'SIGTERM');
+  await done;
+  assert.deepEqual(running.starts, ['start', 'kill SIGTERM']);
 });
 
 /** Im Arbeitsordner: BASE_SHA und HEAD^1 sind beide genau der aktuelle Stand von origin/main (der Fetch des Läufers hat ihn nachgezogen). */
