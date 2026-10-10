@@ -48,6 +48,7 @@ const sleepers = { wait: 300, reviews: 50, handoff: 50, done: 50, 'quota-wait': 
 let quota, spent = 0; // the latest { remaining, resetAt } a response reported, and the points this run has used
 // `wait` gives up at this time (--max-minutes), before the 10-minute limit of an agent's shell tool would push it into the background.
 let deadline = Infinity;
+const startedAt = Date.now();
 /** A quota pause that would end after the deadline: `wait` ends "still waiting" instead of sleeping through it. */
 class StillWaiting extends Error {
   constructor(resetAt) { super('still waiting'); this.resetAt = resetAt; }
@@ -1869,8 +1870,7 @@ function handoffIssue(issue, viewer, reviewedHead, currentPrNumber) {
 /**
  * The driver's handoff comment: a "## Übergabe" heading and a "Head: <SHA>" line in a PR comment by the authenticated
  * user. The comment names the head it is about, so a new head asks for a new comment however (and whenever) the push
- * happened, which no timestamp reliably tells. Of its content only the retro section is noted, see `retroNotes`;
- * with several matching comments the newest counts.
+ * happened, which no timestamp reliably tells. With several matching comments the newest counts.
  */
 const findHandoffComment = (comments, viewer, headRefOid) => comments.findLast(comment => comment.user?.login?.toLowerCase() === viewer.login.toLowerCase()
   && /^## Übergabe\s*$/m.test(comment.body ?? '') && new RegExp(`^Head:\\s*${headRefOid.slice(0, 7)}`, 'im').test(comment.body ?? ''));
@@ -1908,27 +1908,6 @@ function selfReviewReasons(bodyHtml, checks) {
   const section = text(parts.slice(start, end).join(''));
   const missing = checks.filter(check => !new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_-])${RegExp.escape(check.trim())}(?![\\p{L}\\p{M}\\p{N}_-])`, 'iu').test(section));
   return missing.length ? [`the "Selbstprüfung" section of the PR body does not name: ${missing.join(', ')}`] : [];
-}
-
-/**
- * Why the retro section of the handoff comment, as GitHub renders it, is not as asked (a note, never a refusal): a heading "Retro" with one list
- * line per finding, each ending with its resolution (an issue link, "behoben in <SHA>", "persönlich gemeldet" or
- * "kein Handlungsbedarf: <Grund>"), or the single line "Keine Funde". Whether a finding is justified is not judged.
- * GitHub's rendering decides what a heading, a list line and an issue reference are, so no Markdown is parsed here.
- */
-function retroNotes(bodyHtml) {
-  assert.equal(typeof bodyHtml, 'string', 'The rendered handoff comment is unreadable');
-  const unquoted = withoutQuotes(bodyHtml);
-  const section = unquoted.split(/(?=<h[1-6][\s>])/).find(part => /^<h[1-6][\s>]/.test(part) && headingText(part) === 'Retro');
-  const lines = [...(section ?? '').matchAll(/<li[^>]*>([\s\S]*?)(?=<\/li>|<[uo]l[\s>]|<li[\s>])/g)].map(([, line]) => [line, text(line)]);
-  if (!lines.length) return ['the handoff comment has no "Retro" section with list lines (README: Handoff comment)'];
-  if (lines.length === 1 && /^keine funde\.?$/i.test(lines[0][1])) return [];
-  // The last element must be an issue link (GitHub renders a pull request reference the same way, but with /pull/N); a loose list wraps the line in <p>.
-  // Closing punctuation and spaces after the resolution (`… #230.`) do not hide it.
-  const endsWithIssue = html => { const anchor = html.match(/(<a [^>]*>)[^<]*<\/a>[\s.,;]*(?:<\/p>\s*)?$/)?.[1] ?? ''; return anchor.includes('class="issue-link') && /href="[^"]*\/issues\/\d+"/.test(anchor); };
-  return lines.filter(([html, line]) => !(endsWithIssue(html) || /\bbehoben in [0-9a-f]{7,40}[\s.,;]*$/i.test(line)
-    || /persönlich gemeldet[\s.,;]*$/i.test(line) || /\bkein Handlungsbedarf: \S/i.test(line)))
-    .map(([, line]) => `retro line without a resolution (end it with an issue link, "behoben in <SHA>", "persönlich gemeldet" or "kein Handlungsbedarf: <Grund>"): ${line}`);
 }
 
 /**
@@ -2017,12 +1996,6 @@ function handoffPr(issueId, viewer, expectedHead, prior, partial) {
     const reasons = [];
     const comment = findHandoffComment(comments, viewer, pr.headRefOid);
     if (!comment) reasons.push(`no handoff comment for head ${pr.headRefOid.slice(0, 7)} on PR #${value}: write FILE (<Ergebnis in einem Satz>, then "### Retro" with one list line per finding, or "- Keine Funde"; README: Handoff comment) and run board.mjs done ${number} FILE`);
-    else if (!expectedHead) { // noted once, on the first pass
-      // The list endpoint renders no HTML unless asked, and then it omits the raw body: one more read for the rendered comment.
-      const rendered = JSON.parse(execFileSync(gh.file, ['api', `repos/${project.repository}/issues/comments/${comment.id}`, '-H', 'Accept: application/vnd.github.html+json'],
-        { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 }));
-      for (const note of retroNotes(rendered.body_html)) console.log(`note: ${note}`);
-    }
     if (!partial && !connectedIssues(pr).has(issueId)) reasons.push(`PR #${value} is not natively linked to issue #${number}`);
     return reasons;
   }, prior);
@@ -2544,8 +2517,8 @@ function reviewsForHead(prNumber = number) {
 /** Looks again and again until `look` is done and returns that result; returns nothing after printing "still waiting" (exit 4). */
 async function poll(look) {
   const maxMinutes = numberOption('--max-minutes', 9);
-  // One deadline per run: `merge` polls twice (before and after a base update), and both phases must fit the one tool call.
-  if (maxMinutes > 0 && deadline === Infinity) deadline = Date.now() + maxMinutes * 60_000;
+  // One deadline per run, counted from its start (`done` runs the targeted tests first; `merge` polls twice): everything must fit the one tool call.
+  if (maxMinutes > 0 && deadline === Infinity) deadline = startedAt + maxMinutes * 60_000;
   let shown, quiet = 0;
   // Exit 4: not finished, call the command again (a driver's tool call must end before its 10-minute limit).
   const stillWaiting = resetAt => {

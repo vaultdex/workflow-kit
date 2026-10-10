@@ -41,61 +41,6 @@ test('handoff needs the driver handoff comment that names the current head', t =
 });
 
 
-// GitHub's rendering of the handoff comment's retro section (shape of its Markdown API output).
-const link = '<a class="issue-link js-issue-link" href="https://github.com/test/example/issues/12">#12</a>';
-const pullLink = '<a class="issue-link js-issue-link" data-hovercard-type="pull_request" href="https://github.com/test/example/pull/12">#12</a>';
-const commit = '<a class="commit-link" href="https://github.com/test/example/commit/38e48bd"><tt>38e48bd</tt></a>';
-const quote = html => `<blockquote>\n${html}\n</blockquote>`;
-const retro = (...lines) => '<h2 dir="auto">Übergabe</h2>\n<p dir="auto">Head: abcdef1</p>\n<h3 dir="auto">Retro</h3>\n<ul dir="auto">\n'
-  + lines.map(line => `<li>${line}</li>`).join('\n') + '\n</ul>';
-
-test('handoff notes a retro section whose lines do not end with a resolution, and still hands off', t => {
-  const { checkout, run, writeIssue } = handoffFixture(t);
-  writeIssue({ ...issue('Automated review'), assignees: { nodes: [{ login: 'worker' }] } });
-  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr()));
-  writeFileSync(join(checkout, 'handoff-fixture'), '');
-  const handoff = body_html => {
-    writeFileSync(join(checkout, 'issues-comments.json'), JSON.stringify([handoffComment({ body_html })]));
-    return run('handoff', '1', '7');
-  };
-  const noted = (html, named, label) => {
-    const result = handoff(html);
-    assert.equal(result.status, 0, label + result.stdout + result.stderr);
-    assert.match(result.stdout, /^note: /m, label + result.stdout);
-    for (const line of named) assert.ok(result.stdout.includes(': ' + line), label + result.stdout);
-  };
-
-  noted(retro('Kit-Init dauert: ' + link, 'Rate-Limit: ohne Erledigung', 'Memory veraltet: persönlich gemeldet'), ['Rate-Limit: ohne Erledigung'], 'one line without resolution: ');
-  noted(retro('Zeile mit ' + link + ' mittendrin'), ['Zeile mit #12 mittendrin'], 'reference not at the end: ');
-  noted(retro('Zeile mit <code>#12</code>'), ['Zeile mit #12'], 'reference in code: ');
-  noted(retro('Keine Funde', 'Zusätzlicher Fund: ' + link), ['Keine Funde'], 'Keine Funde is allowed only alone: ');
-  noted(retro('Fund: ' + pullLink), ['Fund: #12'], 'a pull request is no follow-up issue: ');
-  noted(retro('Fund.', 'Fund ' + link + ' danach noch Text.'), ['Fund.', 'Fund #12 danach noch Text.'], 'punctuation alone is no resolution, text after the link still is none: ');
-  noted('<h2 dir="auto">Übergabe</h2>\n<ul dir="auto">\n<li>Retro: keine Befunde</li>\n</ul>', [], 'no retro section: ');
-  noted('<h2 dir="auto">Übergabe</h2>\n<h3 dir="auto">Retro</h3>\n<p dir="auto">Nichts gefunden.</p>', [], 'section without lines: ');
-  noted(quote(retro('Keine Funde')), [], 'a quoted retro section is no section: ');
-  noted(quote(quote(retro('Keine Funde'))), [], 'a nested quote is no section either: ');
-
-  for (const [html, label] of [
-    [retro('Keine Funde'), 'Keine Funde alone'],
-    [retro('Kit-Init: ' + link, 'Reibung: behoben in ' + commit, 'Memory: persönlich gemeldet', 'Einzelfall: kein Handlungsbedarf: nur einmal aufgetreten'), 'every resolution'],
-    [retro(`\n<p dir="auto">Fund: ${link}</p>\n`, `\n<p dir="auto">Reibung: behoben in ${commit}</p>\n`), 'loose list: GitHub wraps each line in a paragraph'],
-    [retro('Fund: ' + link + '.', 'Reibung: behoben in ' + commit + ' ;', 'Memory: persönlich gemeldet.', `\n<p dir="auto">Fund: ${link}.</p>\n`), 'closing punctuation and spaces after the resolution'],
-    [retro('Fund: ' + link) + '\n<h3 dir="auto">Reviews</h3>\n<ul>\n<li>Befunde: keine</li>\n</ul>', 'lines after the next heading are not retro lines'],
-    [quote(retro('Zitat ohne Erledigung')) + '\n' + retro('Keine Funde'), 'a real section beside a quoted one counts'],
-  ]) {
-    const result = handoff(html);
-    assert.equal(result.status, 0, label + ': ' + result.stdout + result.stderr);
-    assert.doesNotMatch(result.stdout, /^note:/m, label);
-  }
-  assert.equal(handoff(undefined).status, 2, 'An unreadable rendered comment is unknown, never a handoff');
-  // The Retro note still appears and the handoff goes through.
-  const missing = handoff('<h2 dir="auto">Übergabe</h2>');
-  assert.equal(missing.status, 0, missing.stdout + missing.stderr);
-  assert.match(missing.stdout, /^note: the handoff comment has no "Retro"/m);
-});
-
-
 // The PR body as GitHub renders it: headings and paragraphs, with the checks the "selfReview" field of the project file lists.
 const selfReview = (level, ...lines) => `<h${level} dir="auto">Selbstprüfung</h${level}>\n` + lines.map(line => `<p dir="auto">${line}</p>`).join('\n');
 

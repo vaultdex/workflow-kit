@@ -403,11 +403,8 @@ related references do not expand the declared scope. Creating a backlink never c
    repository that owns the fix, with evidence from the session. Report findings
    about personal configuration (memory, shell profile, scheduled tasks) to the
    human instead of editing it. List every finding in the `Retro` section of the
-   [handoff comment](../README.md#handoff-comment), one line each, ending with its
-   resolution: an issue link, `behoben in <SHA>`, `persönlich gemeldet` or
-   `kein Handlungsbedarf: <Grund>`; `Keine Funde` as the only line when there are none.
-   A fixable finding that no issue covers yet becomes an issue first; a comment alone
-   is no record. `board.mjs done` notes a missing section or a line without a resolution.
+   [handoff comment](../README.md#handoff-comment), one line each, with the issue
+   link or commit that handles it; `Keine Funde` as the only line when there are none.
 6. Hand off with `board.mjs done ISSUE FILE` once each finding is fixed or linked to a follow-up, the
    final proof has passed, the retro is recorded and no prerequisite is open; it waits for CI and every
    non-optional review with a trace on the current head to finish or stall. Name an

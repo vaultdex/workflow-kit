@@ -50,12 +50,6 @@ function api(argv, input, stdout, stderr, exit) {
       } else stdout(fs.readFileSync('create-response.json'));
       exit(0);
     }
-    if (parts[3] === 'issues' && parts[4] === 'comments' && parts.length === 6) {
-      // One comment by id, as rendered by GitHub.
-      const found = JSON.parse(fs.readFileSync('issues-comments.json')).find(comment => String(comment.id) === parts[5]);
-      stdout(JSON.stringify({ body_html: found?.body_html }));
-      exit(0);
-    }
     if (parts[3] === 'issues' && parts[5] === 'events') {
       // The events of an issue (events-N.json, default none): the sweep looks for a reopen after the merge.
       const file = `events-${parts[4]}.json`;
@@ -88,11 +82,11 @@ function api(argv, input, stdout, stderr, exit) {
     if (parts[3] === 'issues' && parts[5] === 'comments' && argv.includes('POST')) {
       // A comment write; comment-noop is GitHub accepting it without showing it.
       fs.appendFileSync('comment-writes', 'x\n');
-      // `done` posts the handoff comment: it shows in the PR's comments as the driver's, rendered like posted-html.
+      // `done` posts the handoff comment: it shows in the PR's comments as the driver's.
       if (input.startsWith('## Übergabe')) {
         const posted = JSON.parse(fs.readFileSync('issues-comments.json'));
         const now = '2999-01-01T00:00:00Z';
-        posted.push({ id: 901, user: { login: 'worker', type: 'User' }, body: input, body_html: fs.readFileSync('posted-html', 'utf8'), html_url: 'h', created_at: now, updated_at: now });
+        posted.push({ id: 901, user: { login: 'worker', type: 'User' }, body: input, html_url: 'h', created_at: now, updated_at: now });
         fs.writeFileSync('issues-comments.json', JSON.stringify(posted));
         stdout('{}');
         exit(0);
