@@ -183,7 +183,7 @@ test('merge merges the base for a red check from updateBranchChecks, but only wh
   assert.deepEqual(calls(), []);
 });
 
-test('merge merges the base once for any red check when the base moved, and a second red or an unmoved base is FAILED (#425)', t => {
+test('merge merges the base once for any red check when the base moved, and a second red or an unmoved base is FAILED, a refused update is ERROR or the manual way (#425)', t => {
   const { checkout, run, show, calls, flag, json, first, second, headOf } = mergeFixture(t);
   const red = { statusCheckRollup: { contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] } } };
 
