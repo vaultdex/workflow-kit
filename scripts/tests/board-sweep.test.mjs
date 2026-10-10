@@ -57,6 +57,10 @@ test('sweep sends a Human-review issue with a conflicting PR back to Automated r
   assert.equal(existsSync(join(checkout, 'mutations')), false, 'a reopened issue is not written');
   reopen('2026-10-09T09:00:00Z');
   assert.match(run('sweep').stdout, /^#5 closed: delivered with PR #70/m);
+  // A later release PR after the reopen delivers again (#1967).
+  reopen('2026-10-09T10:05:00Z');
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([row(5, 'Done', [merged({ mergedAt: '2026-10-09T10:00:00Z' }), merged({ number: 71, mergedAt: '2026-10-09T11:00:00Z' })])]));
+  assert.match(run('sweep').stdout, /^#5 closed: delivered with PR #71/m);
   rmSync(join(checkout, 'events-5.json'));
   rmSync(join(checkout, 'mutation-targets'), { force: true });
   rmSync(join(checkout, 'mutations'), { force: true });

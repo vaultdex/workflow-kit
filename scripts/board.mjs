@@ -661,8 +661,9 @@ function sweep() {
       // GitHub closes an issue only for a merge into the default branch; a merge into release/** closes it here (comment first, then close).
       // ponytail: reads the first 10 linked PRs; a release PR behind them is missed, never an error.
       // A spec stays open until a human accepts it, however many of its tickets are delivered.
-      const delivered = !isSpec(issue) && own.find(node => node.merged && node.baseRefName.startsWith('release/'));
-      // A human reopened it after the merge: closing it again would undo that (#510). REST, only for the issues that would be closed.
+      const delivered = !isSpec(issue) && own.filter(node => node.merged && node.baseRefName.startsWith('release/'))
+        .sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt)).at(-1);
+      // A human reopened it after the latest merge: closing it again would undo that (#510). REST, only for the issues that would be closed.
       const reopened = delivered && restAll(`repos/${project.repository}/issues/${issue.number}/events`)
         .findLast(event => event.event === 'reopened' && Date.parse(event.created_at) > Date.parse(delivered.mergedAt));
       if (reopened) {
