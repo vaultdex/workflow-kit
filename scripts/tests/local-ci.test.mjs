@@ -1,11 +1,11 @@
 // Lokale CI mit echtem Git (Merge-Stand wird aus origin/<base> und refs/pull/N/head gebaut) und nachgebautem gh: Filter, Auswahl, Ablauf der Status, Abbruch, Basis-Wechsel.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { checkPullRequest, gitBash, gitOptions, loadConfig, loadSlots, lock, mainSlots, matches, select, supervise, watch } from '../local-ci.mjs';
+import { fileURLToPath } from 'node:url';
+import { checkPullRequest, gitBash, gitOptions, loadConfig, loadSlots, lock, mainSlots, matches, select, watch } from '../local-ci.mjs';
 import { isolatedGit, temporary } from './fixtures.mjs';
 
 test('Pfad-Filter wie bei GitHub: der Reihe nach, "!" nimmt zurück, "*" bleibt im Ordner, "**" geht darunter', () => {
@@ -35,42 +35,18 @@ test('die Sperrdatei lässt nur einen Läufer zu und übernimmt die eines toten 
   lock(file)();
 });
 
-/** Ein Kind, das mit der nächsten Antwort aus `exits` endet; `kill` beendet es sofort mit Signal. */
-function fakeStarts(exits) {
-  const starts = [];
-  return { starts, start() {
-    const child = new EventEmitter();
-    child.kill = signal => { starts.push(`kill ${signal}`); child.emit('exit', null, signal); };
-    starts.push('start');
-    if (exits.length) setImmediate(() => child.emit('exit', exits.shift(), null));
-    return child;
-  } };
-}
-
-test('--watch startet den Runner nach jedem Ende neu, außer bei Aufruffehler (2) und belegter Sperre (3)', async () => {
-  const crashes = fakeStarts([1, 1, 0]), lines = [];
-  await supervise(crashes.start, { delayMs: 1, restarts: 2, flushMs: 0, log: line => lines.push(line) });
-  assert.deepEqual(crashes.starts, ['start', 'start', 'start']); // endliche Zahl von Neustarts
-  assert.equal(lines.length, 3); // jedes Ende steht im Log
-  for (const code of [2, 3]) {
-    const once = fakeStarts([code, 1]);
-    assert.equal(await supervise(once.start, { delayMs: 1, flushMs: 0 }), code);
-    assert.deepEqual(once.starts, ['start']);
-  }
-});
-
-test('SIGTERM im Elternprozess geht ans Kind und beendet die Schleife ohne Neustart', async () => {
-  const running = fakeStarts([]);
-  const done = supervise(running.start, { delayMs: 1, flushMs: 0 });
-  process.emit('SIGTERM', 'SIGTERM');
-  await done;
-  assert.deepEqual(running.starts, ['start', 'kill SIGTERM']);
-  const waiting = fakeStarts([1]); // das Signal in der Wartezeit vor dem Neustart weckt die Schleife
-  const stopped = supervise(waiting.start, { delayMs: 60_000, flushMs: 0 });
-  await new Promise(resolve => setTimeout(resolve, 50));
-  process.emit('SIGTERM', 'SIGTERM');
-  assert.equal(await stopped, 0);
-  assert.equal(waiting.starts.filter(entry => entry === 'start').length, 1);
+test('--watch endet bei belegter Sperre mit Exit 3, schreibt runner.log mit Exit-Zeile und startet nicht neu', t => {
+  const dir = realpathSync.native(temporary(t, 'local ci watch ')), root = join(dir, 'root'), env = isolatedGit(dir);
+  execFileSync('git', ['init', '-q', root], { env });
+  mkdirSync(join(root, '.github'));
+  writeFileSync(join(root, '.github/workflow-project.json'), JSON.stringify({ repository: 'o/r' }));
+  mkdirSync(`${root}-local-ci`);
+  writeFileSync(join(`${root}-local-ci`, 'lock'), String(process.pid));
+  const run = spawnSync(process.execPath, [fileURLToPath(new URL('../local-ci.mjs', import.meta.url)), '--cwd', root, '--watch'], { env, encoding: 'utf8' });
+  assert.equal(run.status, 3);
+  const log = readFileSync(join(`${root}-local-ci`, 'runner.log'), 'utf8');
+  assert.match(log, /läuft schon/);
+  assert.equal(log.match(/Läufer beendet \(Exit 3\)/g).length, 1);
 });
 
 /** Im Arbeitsordner: BASE_SHA und HEAD^1 sind beide genau der aktuelle Stand von origin/main (der Fetch des Läufers hat ihn nachgezogen). */

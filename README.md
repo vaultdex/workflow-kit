@@ -493,7 +493,7 @@ which is untrusted, and not from its own checkout either (only the `repository` 
   `failure` with duration and host or the first error line. A check no changed file selects gets **no** status;
   `local-ci` then says so, which is what `board.mjs` needs to stop waiting for the "first CI check".
 - `setup` runs once per PR before the selected checks (not at all when none is selected, 60 minutes at most); a failed setup fails them.
-- `--watch` runs the runner as a child process of a thin parent that restarts it 30 seconds after it ends and logs the exit code with the time (a crash shows `uncaughtException`/`unhandledRejection` with the stack); no restart after a usage error (exit 2) or a held lock (exit 3), and Ctrl+C or SIGTERM stops parent and child. The parent also appends the child's output and its own lines as UTF-8 to `<main checkout>-local-ci/runner.log`, so a redirect at start is not needed (PowerShell would re-encode it).
+- `--watch` does not restart itself: once the runner ends it stays off (exit 3 means a held lock). It appends its output, the stack of an unhandled error and a final exit line with the time as UTF-8 to `<main checkout>-local-ci/runner.log`, so a redirect at start is not needed (PowerShell would re-encode it).
 - Stopping the runner by hand (Ctrl+C) leaves the statuses of the running head `pending`; the next `local-ci.mjs PR`, or `--watch` after a restart, runs that head again.
 - Without `.github/workflow-project.json` (or its `localChecks` file) on the base branch, the PR gets a red `local-ci`
   status that says so, and the runner goes on with the next PR.
