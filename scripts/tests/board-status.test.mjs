@@ -1,33 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fixture, handoffPr, issue, list, predecessor, reference, task, test } from './board-fixture.mjs';
-
-test('Automated review names open acceptance boxes of the issue and still sets the status', t => {
-  const { checkout, run, writeIssue } = fixture(t);
-  const wrote = () => existsSync(join(checkout, 'mutations')) && /updateProjectV2ItemFieldValue/.test(readFileSync(join(checkout, 'mutations'), 'utf8'));
-  const prepare = bodyHTML => {
-    rmSync(join(checkout, 'mutations'), { force: true });
-    writeIssue({ ...issue('In progress'), bodyHTML });
-    writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: false, linkPages: [['I1']],
-      url: 'https://github.com/test/example/pull/7', body: 'Refs #1' })));
-    writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 1 }));
-    writeFileSync(join(checkout, 'backlink-comments-1.json'), JSON.stringify([{ id: 1, body: 'https://github.com/test/example/pull/7', html_url: 'u' }]));
-  };
-
-  prepare(list([task('open box', false), task('done box', true), task(`moved box ${reference}`, false)]));
-  let result = run('status', '1', 'Automated review', '7');
-  assert.equal(result.status, 0, 'A hint never blocks: ' + result.stdout + result.stderr);
-  assert.ok(wrote(), 'and the status is written');
-  assert.match(result.stdout, /open box/);
-  assert.doesNotMatch(result.stdout, /done box/, 'a checked box is not named');
-  assert.doesNotMatch(result.stdout, /moved box/, 'nor one that names a follow-up issue');
-
-  prepare(list([task('done box', true)]));
-  result = run('status', '1', 'Automated review', '7');
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.doesNotMatch(result.stdout, /box/, 'Nothing open, nothing named');
-});
+import { fixture, handoffPr, issue, predecessor, test } from './board-fixture.mjs';
 
 test('Automated review sets the missing native link and backlink itself and refuses only when that fails', t => {
   const { checkout, run, writeIssue } = fixture(t);
@@ -44,18 +18,18 @@ test('Automated review sets the missing native link and backlink itself and refu
 
   prepare();
   writeFileSync(join(checkout, 'link-noop'), '');
-  let result = run('status', '1', 'Automated review', '7');
+  let result = run('field', '1', 'Status', 'Automated review', '7');
   assert.equal(result.status, 2, 'A link whose read-back lacks the issue still refuses: ' + result.stdout);
   assert.equal(writes(/updateProjectV2ItemFieldValue/g), 0, 'and the status stays unwritten');
 
   prepare();
-  result = run('status', '1', 'Automated review', '7');
+  result = run('field', '1', 'Status', 'Automated review', '7');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(writes(/addCloseIssueReferences/g), 1, 'The missing native link is written once');
   assert.equal(count('comment-writes'), 1, 'and so is the missing backlink comment');
   assert.equal(writes(/updateProjectV2ItemFieldValue/g), 1, 'then the status');
 
-  assert.equal(run('status', '1', 'Automated review', '7').status, 0);
+  assert.equal(run('field', '1', 'Status', 'Automated review', '7').status, 0);
   assert.equal(writes(/addCloseIssueReferences/g), 1, 'A second run writes no second link');
   assert.equal(count('comment-writes'), 1, 'and no second comment');
 });
@@ -69,7 +43,7 @@ test('Automated review for a Refs PR beside the closing PR posts only the backli
     url: 'https://github.com/test/example/pull/7', body: 'Refs #1' })));
   writeFileSync(join(checkout, 'backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0 }));
   writeFileSync(join(checkout, 'backlink-comments-1.json'), '[]');
-  const result = run('status', '1', 'Automated review', '7');
+  const result = run('field', '1', 'Status', 'Automated review', '7');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const writes = readFileSync(join(checkout, 'mutations'), 'utf8');
   assert.equal(/addCloseIssueReferences/.test(writes), false, 'A partial PR is not linked as a second closing PR');
@@ -94,17 +68,17 @@ test('In progress requires a startable issue assigned to the authenticated user 
   ];
   for (const candidate of cases) {
     writeIssue(candidate);
-    const result = run('status', '1', 'in progress');
+    const result = run('field', '1', 'Status', 'in progress');
     assert.notEqual(result.status, 0, result.stdout + result.stderr);
     assert.equal(existsSync(mutations), false, 'Rejected starts must not mutate or add a Project item');
   }
   // Not assigned: one ERROR line, not the check's verdict block in front of it.
   writeIssue(issue());
-  assert.match(run('status', '1', 'In progress').stdout, /^ERROR - [^\n]*\n$/);
+  assert.match(run('field', '1', 'Status', 'In progress').stdout, /^ERROR - [^\n]*\n$/);
   writeIssue(assigned());
   for (const failure of ['fail', 'fail-viewer']) {
     writeFileSync(join(checkout, failure), '');
-    const result = run('status', '1', 'In progress');
+    const result = run('field', '1', 'Status', 'In progress');
     assert.notEqual(result.status, 0);
     if (failure === 'fail-viewer') assert.match(result.stdout, /^ERROR - /);
     assert.equal(existsSync(mutations), false, 'API failure must not mutate status');
@@ -112,25 +86,25 @@ test('In progress requires a startable issue assigned to the authenticated user 
   }
   for (const status of ['Ready', 'In progress', 'Automated review', 'Human review']) {
     writeIssue(assigned({ projectItems: issue(status).projectItems }));
-    const result = run('status', '1', 'In progress');
+    const result = run('field', '1', 'Status', 'In progress');
     assert.equal(result.status, 0, result.stdout + result.stderr);
   }
   assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 4);
   writeIssue(issue());
-  assert.equal(run('status', '1', 'Ready').status, 0, 'Returning blocked work to Ready does not require assignment');
+  assert.equal(run('field', '1', 'Status', 'Ready').status, 0, 'Returning blocked work to Ready does not require assignment');
 });
 
 test('Status Ready is refused while a decision wait stands, and names it (#514)', t => {
   const { checkout, run, writeIssue } = fixture(t);
   writeIssue({ ...issue(), body: 'Wartet bis: Entscheidung Milan' });
-  for (const args of [['status', '1', 'Ready'], ['field', '1', 'Status', 'Ready']]) {
+  for (const args of [['field', '1', 'Status', 'Ready'], ['field', '1', 'Status', 'Ready']]) {
     const result = run(...args);
     assert.notEqual(result.status, 0, result.stdout);
     assert.match(result.stdout, /decision of Milan/);
   }
   assert.equal(existsSync(join(checkout, 'mutations')), false, 'A refused transition does not mutate');
   writeIssue(issue());
-  assert.equal(run('status', '1', 'Ready').status, 0, 'Without the line Ready works');
+  assert.equal(run('field', '1', 'Status', 'Ready').status, 0, 'Without the line Ready works');
 });
 
 test('An open issue a human reopened leaves Done for In progress with a note; a closed one stays blocked (#510)', t => {
@@ -138,15 +112,15 @@ test('An open issue a human reopened leaves Done for In progress with a note; a 
   const mutations = join(checkout, 'mutations');
   const done = changes => ({ ...issue('Done'), assignees: { nodes: [{ login: 'worker' }] }, ...changes });
   writeIssue(done({ state: 'CLOSED' }));
-  assert.notEqual(run('status', '1', 'In progress').status, 0, 'a closed issue in Done stays blocked');
+  assert.notEqual(run('field', '1', 'Status', 'In progress').status, 0, 'a closed issue in Done stays blocked');
   assert.equal(existsSync(mutations), false);
   writeIssue(done());
-  const result = run('status', '1', 'In progress');
+  const result = run('field', '1', 'Status', 'In progress');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /^note: #1 is open again and was Done; it moves to In progress$/m);
   assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 1);
   writeIssue(done({ assignees: { nodes: [] } }));
-  const refused = run('status', '1', 'In progress');
+  const refused = run('field', '1', 'Status', 'In progress');
   assert.notEqual(refused.status, 0, 'the assignment is still required');
   assert.doesNotMatch(refused.stdout, /note:/, 'no note for a move that did not happen');
 });
@@ -171,12 +145,12 @@ test('Automated review requires the declared open PR and every issue backlink be
   };
   writePR();
   writeBacklink(1, []);
-  assert.match(reject('status', '1', 'Automated review').stdout, /needs the PR number: status ISSUE "Automated review" PR/);
+  assert.match(reject('field', '1', 'Status', 'Automated review').stdout, /needs the PR number: field ISSUE Status "Automated review" PR/);
   reject('field', '1', 'Status', 'Automated review');
-  reject('status', '1', 'Automated review', '--oops');
-  reject('status', '1', 'Automated review', '0');
-  reject('status', '1', 'Automated review', '7', '--oops');
-  reject('status', '1', 'Automated review', '7');
+  reject('field', '1', 'Status', 'Automated review', '--oops');
+  reject('field', '1', 'Status', 'Automated review', '0');
+  reject('field', '1', 'Status', 'Automated review', '7', '--oops');
+  reject('field', '1', 'Status', 'Automated review', '7');
   for (const body of [
     'PR #7',
     'https://github.com/other/example/pull/7',
@@ -186,7 +160,7 @@ test('Automated review requires the declared open PR and every issue backlink be
     'https://github.com.example.com/test/example/pull/7',
   ]) {
     writeBacklink(1, [comment(body)]);
-    reject('status', '1', 'Automated review', '7');
+    reject('field', '1', 'Status', 'Automated review', '7');
   }
   writeBacklink(1, [comment(`[PR #7](${pr.url}).`)]);
   for (const changes of [
@@ -194,37 +168,37 @@ test('Automated review requires the declared open PR and every issue backlink be
     { body: 'Refs #10' }, { body: 'Refs other/example#1' }, { body: '' }, { isDraft: true },
   ]) {
     writePR(changes);
-    reject('status', '1', 'Automated review', '7');
+    reject('field', '1', 'Status', 'Automated review', '7');
   }
   writePR();
   writeBacklink(1, [comment(pr.url)], { comments: 2 });
-  reject('status', '1', 'Automated review', '7');
+  reject('field', '1', 'Status', 'Automated review', '7');
   writeBacklink(1, [comment(pr.url)], { comments: 0 });
-  reject('status', '1', 'Automated review', '7');
+  reject('field', '1', 'Status', 'Automated review', '7');
   writeBacklink(1, [comment(pr.url)], { number: 2 });
-  reject('status', '1', 'Automated review', '7');
+  reject('field', '1', 'Status', 'Automated review', '7');
   writeBacklink(1, [comment(pr.url)], { pull_request: {} });
-  reject('status', '1', 'Automated review', '7');
+  reject('field', '1', 'Status', 'Automated review', '7');
   const duplicate = comment(pr.url);
   writeBacklink(1, [duplicate, duplicate]);
-  reject('status', '1', 'Automated review', '7');
+  reject('field', '1', 'Status', 'Automated review', '7');
   writeBacklink(1, [comment(pr.url)]);
   for (const failure of ['fail', 'fail-rest']) {
     writeFileSync(join(checkout, failure), '');
-    reject('status', '1', 'Automated review', '7');
+    reject('field', '1', 'Status', 'Automated review', '7');
     rmSync(join(checkout, failure));
   }
   writeBacklink(1, Array.from({ length: 100 }, () => comment('Earlier discussion: malformed https://%')).concat(comment(pr.url)));
   writePR({ body: 'Refs #1. Refs test/example#2. Refs test/other#3. Related: #99.' });
   writeBacklink(2, []);
-  reject('status', '1', 'Automated review', '7', '2');
+  reject('field', '1', 'Status', 'Automated review', '7', '2');
   writeBacklink(2, [comment(pr.url)]);
   writeBacklink(3, []);
-  reject('status', '1', 'Automated review', '7', '2', 'test/other#3');
+  reject('field', '1', 'Status', 'Automated review', '7', '2', 'test/other#3');
   writeBacklink(3, [comment(`${pr.url}/?view=review#discussion`)]);
   for (const args of [
-    ['status', '1', 'automated review', '7', '2', 'test/other#3'],
-    ['status', '1', 'Automated review', '7', '2'],
+    ['field', '1', 'Status', 'automated review', '7', '2', 'test/other#3'],
+    ['field', '1', 'Status', 'Automated review', '7', '2'],
     ['field', '1', 'Status', 'Automated review', '7', '2'],
   ]) {
     const result = run(...args);
@@ -235,18 +209,18 @@ test('Automated review requires the declared open PR and every issue backlink be
   assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 3);
   assert.equal(JSON.parse(readFileSync(join(checkout, 'backlink-comments-2.json'))).length, 1, 'Repeated verification leaves the existing comment intact');
   writePR({ baseRefName: 'main', body: 'Closes #1' });
-  assert.equal(run('status', '1', 'Automated review', '7').status, 0, 'Default-branch delivery works too');
+  assert.equal(run('field', '1', 'Status', 'Automated review', '7').status, 0, 'Default-branch delivery works too');
 });
 
 test('status and priority refuse an unknown flag or extra word, and --help or -h only prints the usage', t => {
   const { checkout, run, refusesUnknownFlag, writeIssue } = fixture(t);
   writeIssue(issue('Ready'));
-  refusesUnknownFlag('status', '1', 'In progress');
-  refusesUnknownFlag('priority', '1', 'High');
+  refusesUnknownFlag('field', '1', 'Status', 'In progress');
+  refusesUnknownFlag('field', '1', 'Priority', 'High');
   // "Automated review" keeps its trailing PR and issues, but a flag among them is still refused.
-  assert.equal(run('status', '1', 'Automated review', '7', '-x').status, 2);
+  assert.equal(run('field', '1', 'Status', 'Automated review', '7', '-x').status, 2);
   for (const flag of ['--help', '-h']) {
-    const help = run('status', '1', 'In progress', flag);
+    const help = run('field', '1', 'Status', 'In progress', flag);
     assert.equal(help.status, 0, help.stderr);
     assert.ok(help.stdout, `${flag} prints the usage`);
     assert.equal(existsSync(join(checkout, 'queries')), false, `${flag} reached gh`);
@@ -259,14 +233,14 @@ test('status refuses Done and Human review for a spec, by the label of the proje
 
   labelled('Spec');
   for (const status of ['Done', 'Human review']) {
-    const result = run('status', '1', status);
+    const result = run('field', '1', 'Status', status);
     assert.equal(result.status, 2, result.stdout + result.stderr);
     assert.match(result.stdout, /^ERROR - BLOCKED: #1 is a spec .*Only a human closes a spec/m, status);
   }
   assert.equal(existsSync(join(checkout, 'mutations')), false, 'a refused status writes nothing');
 
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', specLabel: 'Konzept' }));
-  assert.equal(run('status', '1', 'Done').status, 0, 'the default label means nothing once the project names its own');
+  assert.equal(run('field', '1', 'Status', 'Done').status, 0, 'the default label means nothing once the project names its own');
   labelled('Konzept');
-  assert.match(run('status', '1', 'Done').stdout, /BLOCKED: #1 is a spec \(label "Konzept"\)/);
+  assert.match(run('field', '1', 'Status', 'Done').stdout, /BLOCKED: #1 is a spec \(label "Konzept"\)/);
 });

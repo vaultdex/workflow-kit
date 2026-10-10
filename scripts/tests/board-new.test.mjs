@@ -35,10 +35,7 @@ test('new checks every required value before creating, reads all values back and
   refused('unknown milestone', ...base.map(arg => arg === '0.1.1' ? '9.9' : arg));
   assert.match(refused('unknown option', ...base.map(arg => arg === 'Size=xs' ? 'Size=XXL' : arg)), /XS.*S/);
   refused('Status is no --field', ...base, '--field', 'Status=Done');
-  refused('--start without a session', ...base, '--start', '--agent', 'claude');
-  refused('a session without --start', ...base, '--session', 'S1');
   refused('a Status the Project does not have', ...base, '--status', 'Nonsense');
-  refused('--status with --start', ...base, '--status', 'Ready', '--start', '--agent', 'claude', '--session', 'S1');
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', requiredFields: ['Zielrelease'] }));
   assert.match(refused('a field the project requires', ...base), /Zielrelease/);
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', requiredFields: ['Size'] }));
@@ -51,7 +48,7 @@ test('new checks every required value before creating, reads all values back and
   rmSync(created);
   write('create-response.json', { number: 1, node_id: 'N1', html_url: 'https://github.com/test/example/issues/1' });
 
-  // Without --start the issue lands in Backlog; a label given twice (other casing) is one label.
+  // The issue lands in Backlog; a label given twice (other casing) is one label.
   result = run(...base, '--label', 'ENHANCEMENT');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   // One line with the URL and the values read back; their order and separators are not pinned.
@@ -59,9 +56,9 @@ test('new checks every required value before creating, reads all values back and
   for (const value of ['0.1.1', 'enhancement', 'Backlog', 'Low', 'XS']) assert.ok(result.stdout.includes(value), value);
   assert.deepEqual(read('created.json'), { title: 'Titel', body: 'Text', milestone: 4, labels: ['enhancement'] });
   assert.deepEqual(read('stored-values.json'), { F1: 'Backlog', F2: 'Low', F3: 'XS' });
-  assert.equal(existsSync(join(checkout, 'comment-writes')), false, 'No claim without --start');
+  assert.equal(existsSync(join(checkout, 'comment-writes')), false, 'No claim comment');
 
-  // --status sets the Project status at creation, without --start (#418).
+  // --status sets the Project status at creation (#418).
   result = run(...base, '--status', 'Ready');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.deepEqual(read('stored-values.json'), { F1: 'Ready', F2: 'Low', F3: 'XS' });
@@ -73,20 +70,6 @@ test('new checks every required value before creating, reads all values back and
   assert.equal(result.status, 2);
   assert.match(result.stdout, /^ERROR - .*issues\/1 was created, but reading it back failed/);
   stored();
-
-  // --start: Ready, assignee, claim comment, In progress; the claim is read back.
-  rmSync(join(checkout, 'stored-values.json'));
-  rmSync(mutations);
-  stored({ assignees: [{ login: 'worker' }] });
-  writeIssue({ ...issue('Ready'), assignees: { nodes: [{ login: 'worker' }] } });
-  result = run(...base, '--start', '--agent', 'claude', '--session', 'S1');
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /^NEW https:\/\/github\.com\/test\/example\/issues\/1\b[^\n]*\n$/);
-  for (const value of ['In progress', 'worker', 'https://github.com/test/example/issues/1#issuecomment-1']) assert.ok(result.stdout.includes(value), value);
-  assert.ok(!result.stdout.includes('Ready'), 'The final status is shown, not the intermediate one');
-  assert.deepEqual(read('created.json').assignees, ['worker']);
-  assert.equal(read('backlink-comments-1.json')[0].body, 'Agent: claude, Session: S1\n');
-  assert.equal(readFileSync(mutations, 'utf8').match(/updateProjectV2ItemFieldValue/g).length, 4, 'Ready, Priority, Size, In progress');
 
   // A failing write after the issue exists says so instead of failing as if nothing happened.
   writeFileSync(join(checkout, 'mutation-fails'), '');

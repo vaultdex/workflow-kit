@@ -56,7 +56,7 @@ test('field sets several fields in one call: every pair is validated first, then
 test('field, status and priority report failures as one ERROR line, and issue failures name the repository', t => {
   const { checkout, run, writeIssue } = fixture(t);
   writeIssue(issue());
-  for (const args of [['field', '1', 'Colour', 'Red'], ['priority', '1', 'Urgent'], ['status', '1', 'Finished']]) {
+  for (const args of [['field', '1', 'Colour', 'Red'], ['field', '1', 'Priority', 'Urgent'], ['field', '1', 'Status', 'Finished']]) {
     const result = run(...args);
     assert.equal(result.status, 2, result.stdout + result.stderr);
     assert.match(result.stdout, /^ERROR - /);
@@ -70,14 +70,14 @@ test('field, status and priority report failures as one ERROR line, and issue fa
   assert.equal(existsSync(join(checkout, 'mutations')), false);
   // Assigned but blocked: the refusal is the one ERROR line too, and nothing is written.
   writeIssue({ ...issue(), assignees: { nodes: [{ login: 'worker' }] }, blockedBy: { totalCount: 1, nodes: [predecessor('OPEN', null)] } });
-  const held = run('status', '1', 'In progress');
+  const held = run('field', '1', 'Status', 'In progress');
   assert.equal(held.status, 2);
   assert.match(held.stdout, /^ERROR - [^\n]*\n$/);
   assert.equal(existsSync(join(checkout, 'mutations')), false);
   writeIssue({ ...issue(), assignees: { nodes: [{ login: 'worker' }] } });
   // A write that fails after the guards passed leaves the check's output unprinted too.
   writeFileSync(join(checkout, 'mutation-fails'), '');
-  const refused = run('status', '1', 'In progress');
+  const refused = run('field', '1', 'Status', 'In progress');
   assert.equal(refused.status, 2);
   assert.match(refused.stdout, /^ERROR - [^\n]*\n$/);
   assert.doesNotMatch(refused.stdout, /Assign yourself/, "The start guards passed; the write failed");
@@ -85,7 +85,7 @@ test('field, status and priority report failures as one ERROR line, and issue fa
   writeIssue(issue());
   // GitHub refuses an unknown issue number: the message says which repository was meant.
   writeFileSync(join(checkout, 'fail'), '');
-  for (const args of [['check', '1'], ['priority', '1', 'High']]) {
+  for (const args of [['check', '1'], ['field', '1', 'Priority', 'High']]) {
     assert.match(run(...args).stdout, /test\/example#1/, args[0]);
   }
 });
@@ -104,22 +104,22 @@ test('a field write succeeds when the Project already added the issue itself, an
   };
 
   prepare();
-  let result = run('priority', '1', 'High');
+  let result = run('field', '1', 'Priority', 'High');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.deepEqual([count('addProjectV2ItemById'), count('updateProjectV2ItemFieldValue')], [1, 1], 'A missing item is added once, then written');
 
   prepare('add-exists');
-  result = run('priority', '1', 'High');
+  result = run('field', '1', 'Priority', 'High');
   assert.equal(result.status, 0, 'Already on the Project is no failure: ' + result.stdout + result.stderr);
   assert.equal(readFileSync(join(checkout, 'stored'), 'utf8'), 'High', 'The value is still written');
   assert.deepEqual([count('addProjectV2ItemById'), count('updateProjectV2ItemFieldValue')], [1, 1]);
 
   prepare('add-exists', 'add-exists-unreadable');
-  assert.notEqual(run('priority', '1', 'High').status, 0, 'Already there but no readable item stays a failure');
+  assert.notEqual(run('field', '1', 'Priority', 'High').status, 0, 'Already there but no readable item stays a failure');
   assert.equal(count('updateProjectV2ItemFieldValue'), 0, 'Nothing is written without an item');
 
   prepare('add-fails');
-  assert.notEqual(run('priority', '1', 'High').status, 0, 'Any other refusal stays a failure');
+  assert.notEqual(run('field', '1', 'Priority', 'High').status, 0, 'Any other refusal stays a failure');
   assert.equal(count('updateProjectV2ItemFieldValue'), 0);
 });
 

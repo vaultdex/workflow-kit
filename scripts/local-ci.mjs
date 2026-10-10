@@ -1,6 +1,6 @@
 // Lokale CI (README, "Lokale CI"): führt die PR-Prüfungen eines Projekts auf diesem Rechner aus und meldet sie als
 // Commit-Status. Der Status stammt von diesem Skript, kein Agent behauptet ihn. Nur REST, keine GraphQL-Punkte.
-// Aufruf: local-ci.mjs [--cwd DIR] PR | --push BRANCH BEFORE AFTER [kit]  (nur auf Abruf: Driver vor der Übergabe, `board.mjs merge` ohne Status am Head und nach einem Merge)
+// Aufruf: local-ci.mjs [--cwd DIR] PR | --push BRANCH BEFORE AFTER [kit]  (nur auf Abruf: `board.mjs done` und `merge` ohne Status am Head und nach einem Merge)
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

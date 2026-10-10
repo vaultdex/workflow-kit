@@ -34,7 +34,7 @@ Nummern kollidieren. Die Regel steht im Projekt, nicht im Kit: Vaultdex
 mechanisch geprüft von der
 Repository-CI ([vaultdex/Vaultdex#980](https://github.com/vaultdex/Vaultdex/issues/980)).
 
-**Sonar.** Null offene Sonar-Issues prüft `board.mjs handoff` bereits mechanisch
+**Sonar.** Null offene Sonar-Issues prüft `board.mjs done` bereits mechanisch
 ([#134](https://github.com/vaultdex/workflow-kit/issues/134)); nichts weiter zu tun.
 
 **Merge-Vollmacht.** Agents mit Merge-Vollmacht mergen nur über `board.mjs merge PR` und
@@ -46,20 +46,20 @@ Einen ganzen Stapel gestapelter PRs mergt `board.mjs merge OBERSTE --stack` in e
 
 **GitHub-Kontingent.** Das GraphQL-Kontingent (5.000 Punkte pro Stunde) gilt für das ganze
 Konto und wird von allen Drivern gemeinsam verbraucht; ist es leer, scheitert jeder
-`board.mjs`-Befehl bis zum Reset. Gemessene Kosten: eine Lesung von `reviews`/`wait` kostet
-2 Punkte, `check` 1 (2 bei einem Issue, das nur offene Vorgänger hält), `next` 3 (4 bei einem Stapel-Kandidaten, je weitere 30 offene Issues 1 mehr). `wait` fragt zuerst nach 60 s, dann mit wachsendem Abstand bis
+`board.mjs`-Befehl bis zum Reset. Gemessene Kosten: eine Lesung von `wait`/`done` kostet
+2 Punkte, `start` 1 (2 bei einem Issue, das nur offene Vorgänger hält), `next` 3 (4 bei einem Stapel-Kandidaten, je weitere 30 offene Issues 1 mehr). `wait` fragt zuerst nach 60 s, dann mit wachsendem Abstand bis
 5 Minuten (bei Neuigkeiten wieder von vorn), also etwa 20 bis 40 Punkte pro Stunde und Driver
 statt 120 bei festem Minutentakt. Als Budget gilt: Zahl der Driver mal 40 Punkte, dazu der eigene
 Verbrauch der Agents; höchstens 20 parallele `wait` (rund 800 Punkte pro Stunde, ein Sechstel
 des Kontingents). `wait` fragt GraphQL nur noch, wenn sich laut REST etwas geändert hat (Head, Checks,
 Status, Aktualisierungszeit), spätestens alle 5 Minuten und zur Bestätigung jedes Endes; `wait PR --merged` liest nur REST
-([#324](https://github.com/vaultdex/workflow-kit/issues/324)). `wait` und `reviews` melden den Rest in einer Zeile (`quota: …`).
+([#324](https://github.com/vaultdex/workflow-kit/issues/324)). `wait` und `done` melden den Rest in einer Zeile (`quota: …`).
 `node scripts/quota-sample.mjs OUT.jsonl` misst den Verbrauch des ganzen Kontos: eine Stunde lang jede Minute `used` und `usedDelta` (die Abfrage kostet selbst einen Punkt pro Minute).
-`reviews` und `handoff` schlafen bei einer Sperre oder bei weniger als 50 Punkten bis zum Reset
+`done` schläft bei einer Sperre oder bei weniger als 50 Punkten bis zum Reset
 (`rate limited until …`) und fragen danach weiter. `wait` schläft nicht: bei einer Sperre oder unter 300 Punkten liest es
 PR und Checks weiter über REST (Zähler in der Zeile `waiting:`, ohne Urteil) und holt Threads und Urteil nach dem Reset;
 bei `--max-minutes` endet es mit Exit 4 und der Reset-Zeit. Bei
-einer kurzen Drosselung („secondary rate limit“) warten `reviews` und `handoff` 1, 2, dann 4 Minuten statt bis zum
+einer kurzen Drosselung („secondary rate limit“) wartet `done` 1, 2, dann 4 Minuten statt bis zum
 Reset. Alle anderen Befehle brechen mit der Zeit des nächsten Versuchs ab (Uhrzeit und Minuten bis dahin). Eigene Schleifen um `gh api graphql` sind deshalb nicht nötig.
 Rest und Reset stammen aus den Headern `x-ratelimit-remaining` und `x-ratelimit-reset` der eigenen Antworten
 (auch der abgewiesenen); zeigt eine Abweisung selbst freies Kontingent, fragt der Befehl sofort erneut,
@@ -102,16 +102,16 @@ Modellwahl stehen hier nicht.
    `git submodule update --init .vendor/workflow-kit`, dann AGENT_RULES.md lesen.
 1. **Ein Issue bis „Human review“ treiben.** Früher enden nur bei einem menschlichen
    Gate (Merge, Secrets, Backlog→Ready, Produktentscheidung) oder bei einem Blocker
-   (`board.mjs check` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
+   (`board.mjs start` meldet BLOCKED oder UNKNOWN, eine Voraussetzung ändert sich;
    [Blockers and scope](CONTRIBUTING.md#blockers-and-scope)): erst im Issue
    kommentieren, dann berichten. „Human review“ heißt mergebar: Meldet `board.mjs sweep` danach
-   einen Konflikt (Issue zurück auf „Automated review“, Kommentar), löst der Owner ihn und ruft `handoff` erneut auf.
+   einen Konflikt (Issue zurück auf „Automated review“, Kommentar), löst der Owner ihn und ruft `done` erneut auf.
 2. **Regeln vom Ziel-Release-Branch lesen.** AGENTS.md und Kit-Regeln stammen vom
    Release-Branch, auf den die PR zielt, nicht nur von `main`; eine Regel kann nur
-   dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume) mit
-   `Agent: …, Session: …`. Den Issue-Branch zweigt der Driver vom Ziel-Release-Branch
-   ab (`--base` im `gh issue develop` der [Delivery](CONTRIBUTING.md#delivery)-Regel
-   ist dann dieser Branch, nicht `main`). Bei STACKABLE ist es der Branch des Basis-PR
+   dort stehen. Danach [Start or resume](../AGENT_RULES.md#start-or-resume):
+   `board.mjs start ISSUE --session ID` schreibt `Agent: …, Session: …` und zweigt den
+   Issue-Branch vom Ziel-Release-Branch ab (die Basis nennt das Projektfeld, nicht `main`). Bei
+   STACKABLE ist es der Branch des Basis-PR
    ([Stacked pull requests](CONTRIBUTING.md#stacked-pull-requests)). Er bleibt ein fremder
    Branch (Regel 3): der Driver zweigt davon ab und liest ihn, pusht ihn aber nie.
 3. **Fremde Branches in Ruhe lassen.** `codex/*`-Branches und Branches anderer
@@ -119,18 +119,18 @@ Modellwahl stehen hier nicht.
    Issue-Branch gehört dem Driver. Überschneidungen melden.
 4. **Warten ohne Handarbeit.** Abweichend von [AGENT_RULES.md](../AGENT_RULES.md#economy)
    und [Review loop](CONTRIBUTING.md#review-loop) Schritt 3 gilt für Driver-Subagenten:
-   `board.mjs wait PR` im Vordergrund ausführen, weil ein Subagent erst am Ende seines
-   Zuges von Hintergrundaufgaben erfährt. `wait` endet nach 9 Minuten von selbst (`--max-minutes N`,
-   0 = unbegrenzt) mit Exit-Code 4 und der Zeile `still waiting: call wait again`, damit das
+   `board.mjs done` (oder `wait PR`) im Vordergrund ausführen, weil ein Subagent erst am Ende seines
+   Zuges von Hintergrundaufgaben erfährt. `done` und `wait` enden nach 9 Minuten von selbst (`--max-minutes N`,
+   0 = unbegrenzt) mit Exit-Code 4 und der Zeile `still waiting: call … again`, damit das
    Bash-Werkzeug es nicht nach 10 Minuten in den Hintergrund schiebt: bei Exit 4 einfach erneut
-   aufrufen. Jeder Vordergrund-Aufruf von `wait`, `merge` und `quota-wait` setzt den Timeout des
+   aufrufen. Jeder Vordergrund-Aufruf von `done`, `wait`, `merge` und `quota-wait` setzt den Timeout des
    Shell-Werkzeugs auf 600000 ms (Standard: 2 Minuten, dann Hintergrund); `--max-minutes` bleibt bei höchstens 9. Nach DONE nicht auf einen Reviewer
    ohne Spur pollen (ein Review, das nie startet) und keinen Review von Hand anfordern
    (kein `@codex review`); fehlt die Spur, nennt der Übergabe-Kommentar das
    ([Review loop](CONTRIBUTING.md#review-loop) Schritt 3). Freitext-Ankündigungen anderer Bots
    erkennt `wait` nicht ([README](../README.md#board-commands)); eine angekündigte
    Review verfolgt der Driver von Hand bis zum Ergebnis oder Stall und führt
-   `handoff` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;
+   `done` erst danach aus. Review-Subagenten ebenfalls im Vordergrund starten;
    `tasks/*.output` nicht pollen, die Datei bleibt leer.
 5. **Shell und Werkzeuge.** Ein einfacher Befehl pro Bash-Aufruf, vom Worktree-Root aus,
    mit literalen Pfaden; Details im Absatz zur Worktree-Schutzprüfung oben.
@@ -160,7 +160,7 @@ Modellwahl stehen hier nicht.
    - GitHub lesen mit `gh api repos/…` (REST, kostet kein GraphQL-Kontingent) statt `gh pr view|checks|list`
      und `gh issue view|list` (GraphQL); Status und Felder schreibt weiter `board.mjs`.
    - Kommentare eines Issues: `gh api repos/OWNER/REPO/issues/N/comments`.
-   - Kit-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD check N` (die Option steht vor
+   - Kit-Befehle in einem fremden Klon: `board.mjs --cwd KLON-PFAD start N` (die Option steht vor
      dem Befehl) liest `.github/workflow-project.json` aus dem Klon statt aus dem Arbeitsverzeichnis.
      `init-project.mjs`, `setup-skills.mjs` und `affected-tests.mjs` nehmen dieselbe Option als erstes
      Argument (`affected-tests.mjs --cwd KLON-PFAD --run`) und arbeiten dann im Klon.
@@ -176,7 +176,7 @@ Modellwahl stehen hier nicht.
    (zum Beispiel `ponytail-review` und `code-review`), laufen diese Prüfungen einmal je PR im
    Vordergrund vor „Ready for Review“, und der PR-Text hat den Abschnitt `## Selbstprüfung` mit jedem Namen
    und dem Ergebnis; Ergebnisse nennen Belege und unterscheiden geprüftes Verhalten von Mocks und Konfiguration.
-   `board.mjs handoff` und `merge` prüfen Abschnitt und Namen, nicht Ergebnis oder Qualität
+   `board.mjs done` und `merge` prüfen Abschnitt und Namen, nicht Ergebnis oder Qualität
    ([Review loop](CONTRIBUTING.md#review-loop) Schritt 1).
 6. **Reibung statt Retro-Skill.** Driver rufen den Skill `retro` nicht auf; er kostet
    zu viele Tokens pro Issue. Sie schreiben höchstens 3 Reibungszeilen aus der eigenen

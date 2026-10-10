@@ -6,19 +6,12 @@ details only for the current step.
 
 ## Session start
 
-At the start of each agent session, before fetching, pulling or switching branches,
-run `git config --local --bool --get submodule.recurse` in the project repository.
-If unset or false, run `git config --local submodule.recurse true`. Read back
-`git config --bool --get submodule.recurse`; it must print `true`. Report read/write
-errors or a disabling worktree override and stop affected Git operations; preserve
-the override. This is an agent command, not a hook or a full bootstrap.
-The clone-local setting is shared by its worktrees and also affects checkout,
-switch and merge. New submodules still need `git submodule update --init`. Preserve
-local changes; never force a submodule update.
-
-Also run `git config --local push.recurseSubmodules no` and read back
-`git config --get push.recurseSubmodules`; it must print `no`. A project push then never
-pushes kit commits; push the kit from inside `.vendor/workflow-kit`.
+`board.mjs start` sets two clone-local Git settings and reads them back: `submodule.recurse true`
+(the kit follows its pin on checkout, switch and merge; shared by the clone's worktrees) and
+`push.recurseSubmodules no` (a project push never pushes kit commits; push the kit from inside
+`.vendor/workflow-kit`). Report a disabling worktree override and stop the affected Git operations;
+preserve it. New submodules still need `git submodule update --init`. Preserve local changes;
+never force a submodule update.
 
 Exceptions to the recursion, while the kit has a branch checked out (not detached; see
 [Kit issues from a project worktree](#kit-issues-from-a-project-worktree)): run project
@@ -96,46 +89,36 @@ First installation without the kit or Project binding uses the bounded
 [bootstrap procedure](SETUP.md#2-repository), then returns here. Existing-project
 API, authentication or dependency failures do not qualify.
 
-The driver completes these steps before implementation, including review fixes:
+Read the issue, comments and [start policy](docs/CONTRIBUTING.md#starting-work) and confirm
+authorization, external prerequisites and ownership. Another session's issue, branch or PR needs
+explicit handover, even under a shared GitHub login. Then the delivery is two commands with the
+work between them:
 
-1. Read the issue, comments and [start policy](docs/CONTRIBUTING.md#starting-work).
-   Confirm authorization, external prerequisites and ownership. Another session's
-   issue, branch or PR needs explicit handover, even under a shared GitHub login.
-2. Run `node .vendor/workflow-kit/scripts/board.mjs check ISSUE` now, with `--session ID` (your session id, as in
-   step 5). BLOCKED or
-   UNKNOWN stops dependent edits except for a specifically authorized, documented
-   [exception](docs/CONTRIBUTING.md#execution-check). STACKABLE (only an open predecessor
-   PR holds the issue) continues as a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests).
-   Finish first: `board.mjs next --session ID` lists your own unfinished issues (assigned to you, your
-   session in the claim, In progress or Automated review) before anything else, and `check` of a new
-   issue is BLOCKED with `finish #N first` until they are handed off (STACKABLE on that very work is
-   allowed). Abandoned work (no push, comment or status change for `staleHours`, default 6; or a Human-review
-   PR with conflicts) is listed by `next` too; its claim has expired, so `check ISSUE --session ID` notes it
-   instead of BLOCKED. Take it over with a claim comment that also says `Takeover of stale claim OLD_SESSION`.
-   Previous assignees stay. A subagent uses its own agent id as `--session`, never the parent's `CLAUDE_CODE_SESSION_ID`
-   (otherwise `check` says `finish #N first` for the parent's claim).
-3. Create the [issue-linked branch](docs/CONTRIBUTING.md#delivery) (on STACKABLE from the
-   head of the base PR's branch; else from the `base:` that `check` names, if it does), or
-   reuse your existing branch and PR for this issue. Switch to it in your worktree and verify
-   `git branch --show-current` before editing; preserve unrelated work.
-4. Assign yourself: `gh issue edit ISSUE --add-assignee "@me"`.
-5. Record the verdict, your session and branch in the issue, with the line
-   `Agent: claude|codex, Session: ID` (use the same ID for `--session`; in Claude Code it is
-   the environment variable `CLAUDE_CODE_SESSION_ID`). A newer claim of
-   another session blocks `check` unless a `Handover: ID` comment passes it to yours
-   ([Execution check](docs/CONTRIBUTING.md#execution-check)). Assignment is not a lock.
-6. On STARTABLE or STACKABLE, run `node .vendor/workflow-kit/scripts/board.mjs status ISSUE "In progress"`.
-   Read back the assignee, claim comment and Project status; start edits only when
-   all match. The command rechecks native readiness and your assignment, not session
-   ownership, external prerequisites or authorization.
+1. `node .vendor/workflow-kit/scripts/board.mjs start ISSUE --session ID`. Your session id: the
+   `agent-<id>` of a Claude Code worktree and Codex's thread id are found without `--session`; a
+   subagent uses its own agent id, never the parent's `CLAUDE_CODE_SESSION_ID`. `start` runs the
+   [execution check](docs/CONTRIBUTING.md#execution-check) first: BLOCKED or UNKNOWN stop and write
+   nothing, except a specifically authorized, documented exception; STACKABLE (only an open
+   predecessor PR holds the issue) continues as a [stacked PR](docs/CONTRIBUTING.md#stacked-pull-requests).
+   Then it assigns you, posts the claim `Agent: claude|codex, Session: ID`, sets In progress, creates
+   the issue-linked branch on the right base, switches to it, brings the kit to its pin, opens the
+   Draft PR that closes the issue and reads every step back. A newer claim of another session blocks
+   unless a `Handover: ID` comment passes it to yours. Abandoned work (no push, comment or status
+   change for `staleHours`, default 6, or a Human-review PR with conflicts) is taken over; the claim
+   then also says `Takeover of stale claim OLD_SESSION`. `board.mjs next --session ID` lists your
+   unfinished issues first, and `start` of another issue says `finish #N first` until they are handed
+   off. A repeated call resumes.
+2. Implement and push. `node .vendor/workflow-kit/scripts/board.mjs done ISSUE FILE` then runs the
+   targeted tests, marks the PR ready for the pushed head, ticks the acceptance boxes, sets Automated
+   review, waits for CI and every non-optional reviewer ([review loop](docs/CONTRIBUTING.md#review-loop)),
+   posts the handoff comment from FILE ([Handoff comment](README.md#handoff-comment)) and checks the
+   gate (threads, bot replies, Sonar issues) before it sets Human review. A red result names its
+   blocker: fix it, push, run `done` again; exit 4 (`still waiting`) means run `done` again.
 
-A documented blocker exception keeps the current status and failed verdict; skip
-the guarded transition, verify the other claim fields and edit only its permitted scope.
-
-On resume, verify the existing claim belongs to this session and update changed
-details. Subagents implement bounded assignments; only the driver claims and
-changes status. If prerequisites change, stop affected edits and repeat the check;
-check again before Human review.
+A documented blocker exception keeps the current status and failed verdict: claim by hand (assign,
+claim comment), skip the guarded transition and edit only its permitted scope. If prerequisites
+change, stop affected edits and run `start` again. Subagents implement bounded assignments; only the
+driver runs `start` and `done`.
 
 ## Kit issues from a project worktree
 
@@ -161,10 +144,10 @@ Its nested submodules stay empty: tests that need them skip with the reason
 | Status | What you do |
 | --- | --- |
 | Backlog | Nothing without a human request; propose, don't implement. |
-| Ready | Complete [Start or resume](#start-or-resume). |
-| In progress | Implement on the issue-linked branch; the PR stays Draft. Complete [PR backlinks](docs/CONTRIBUTING.md#pr-backlinks) immediately after creating it. |
-| Automated review | PR ready; wait for CI and every non-optional reviewer with a trace on the head ([review loop](docs/CONTRIBUTING.md#review-loop)); fix or link each finding; with `localChecks`, run `local-ci.mjs PR` once after the last push ([Lokale CI](README.md#lokale-ci)); run the retro before handoff (drivers: at most 3 friction lines instead). |
-| Human review | Hand off. A human accepts and merges. |
+| Ready | `board.mjs start` ([Start or resume](#start-or-resume)). |
+| In progress | Implement on the issue-linked branch; the PR stays Draft until `board.mjs done`. |
+| Automated review | `done` waits for CI and every non-optional reviewer with a trace on the head ([review loop](docs/CONTRIBUTING.md#review-loop)); fix or link each finding, push, run `done` again; with `localChecks` it runs `local-ci.mjs` once per head ([Lokale CI](README.md#lokale-ci)); run the retro before handoff (drivers: at most 3 friction lines instead). |
+| Human review | `done` handed off. A human accepts and merges. |
 | Done | Merged and accepted. |
 
 Run [board commands](README.md#board-commands) in the project with authenticated `gh`.
@@ -200,7 +183,7 @@ Run [board commands](README.md#board-commands) in the project with authenticated
 
 - Tokens and Actions minutes are budgets. Read only what the step needs, reuse
   evidence whose inputs are unchanged, and wait for CI and reviews with
-  `board.mjs wait PR` in the background (a driver subagent runs it in the foreground and calls it again on
+  `board.mjs done` or `wait PR` in the background (a driver subagent runs it in the foreground and calls it again on
   exit 4 "still waiting", see [parallel drivers](docs/parallel-drivers.md#driver-regeln) rule 4) instead of hand-written polling loops.
   A foreground `wait`, `merge` or `quota-wait` call sets the shell tool's timeout to 600000 ms, with `--max-minutes` at most 9;
   the tool's default of 2 minutes would push it into the background.

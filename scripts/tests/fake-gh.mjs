@@ -25,6 +25,18 @@ function api(argv, input, stdout, stderr, exit) {
       stdout(JSON.stringify({ encoding: 'base64', content: settings.toString('base64') }));
       exit(0);
     }
+    // `start`: the assignee shows in the issue at once; a new Draft PR is number 7 (its request is kept in created-pr).
+    if (parts[3] === 'issues' && parts[5] === 'assignees' && argv.includes('POST')) {
+      const issue = JSON.parse(fs.readFileSync('issue.json'));
+      fs.writeFileSync('issue.json', JSON.stringify({ ...issue, assignees: { nodes: [{ login: 'worker' }] } }));
+      stdout('{}');
+      exit(0);
+    }
+    if (parts[3] === 'pulls' && parts.length === 4 && argv.includes('POST')) {
+      fs.writeFileSync('created-pr', argv.slice(3).join('\n') + '\n' + input);
+      stdout('{"number":7}');
+      exit(0);
+    }
     if (parts[3] === 'issues' && parts.length === 4 && argv.includes('POST')) {
       // A new issue: the request is kept for the test (created.json the last one, creates.json all of them), the answer is prepared by it:
       // create-response.json for every call, or create-responses.json, one after the other.
@@ -76,6 +88,15 @@ function api(argv, input, stdout, stderr, exit) {
     if (parts[3] === 'issues' && parts[5] === 'comments' && argv.includes('POST')) {
       // A comment write; comment-noop is GitHub accepting it without showing it.
       fs.appendFileSync('comment-writes', 'x\n');
+      // `done` posts the handoff comment: it shows in the PR's comments as the driver's, rendered like posted-html.
+      if (input.startsWith('## Übergabe')) {
+        const posted = JSON.parse(fs.readFileSync('issues-comments.json'));
+        const now = '2999-01-01T00:00:00Z';
+        posted.push({ id: 901, user: { login: 'worker', type: 'User' }, body: input, body_html: fs.readFileSync('posted-html', 'utf8'), html_url: 'h', created_at: now, updated_at: now });
+        fs.writeFileSync('issues-comments.json', JSON.stringify(posted));
+        stdout('{}');
+        exit(0);
+      }
       if (!fs.existsSync('comment-noop')) {
         const items = JSON.parse(fs.readFileSync(comments));
         items.push({ id: items.length + 1, user: { login: 'worker' }, created_at: '2026-10-07T00:00:00Z', body: input, html_url: 'https://github.com/test/example/issues/1#issuecomment-' + (items.length + 1) });
@@ -200,7 +221,7 @@ function api(argv, input, stdout, stderr, exit) {
         fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), ...overlay }));
       }
       const pr = JSON.parse(fs.readFileSync('pr.json'));
-      stdout(JSON.stringify({ number: pr.number, state: pr.state === 'OPEN' ? 'open' : 'closed', merged: pr.state === 'MERGED', draft: pr.isDraft, updated_at: pr.updatedAt ?? 'u',
+      stdout(JSON.stringify({ number: pr.number, html_url: pr.url, state: pr.state === 'OPEN' ? 'open' : 'closed', merged: pr.state === 'MERGED', draft: pr.isDraft, updated_at: pr.updatedAt ?? 'u',
         mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid }, base: { ref: pr.baseRefName } }));
       exit(0);
     }
@@ -468,9 +489,16 @@ function pr(argv, input, stdout, stderr, exit) {
   if (!fs.existsSync('merge-noop')) fs.writeFileSync('pr.json', JSON.stringify({ ...JSON.parse(fs.readFileSync('pr.json')), state: 'MERGED', mergeCommit: { oid: 'f'.repeat(40) } }));
 }
 
+/** gh issue develop …: the branch exists afterwards (branches.json), the call is kept in develops. */
+function issue(argv) {
+  fs.appendFileSync('develops', argv.slice(2).join(' ') + '\n');
+  const known = fs.existsSync('branches.json') ? JSON.parse(fs.readFileSync('branches.json')) : [];
+  fs.writeFileSync('branches.json', JSON.stringify([...known, argv[argv.indexOf('--name') + 1]]));
+}
+
 /** Runs gh with ARGS (the arguments after "gh") and returns its stdout, or throws like execFileSync on a non-zero exit. */
 export function fakeGh(args, input = '') {
-  const script = { api, pr }[args[0]];
+  const script = { api, pr, issue }[args[0]];
   if (!script) throw new Error(`The fake gh knows no command "${args[0]}"`);
   const out = [], err = [];
   try {
