@@ -436,8 +436,9 @@ export async function watch(ctx, { rounds = Infinity } = {}) {
 /**
  * Elternprozess von `--watch`: startet den Runner (`start()` liefert den Kindprozess) nach seinem Ende nach `delayMs` neu und protokolliert Exit und Zeit.
  * Kein Neustart bei Exit 2 (Aufruffehler) und 3 (Sperre belegt). SIGINT/SIGTERM geht ans Kind und beendet die Schleife.
+ * `flushMs`: Zeit, in der die letzte Ausgabe des Kinds nach seinem Exit noch ankommt, bevor die Exit-Zeile `log` erreicht.
  */
-export async function supervise(start, { delayMs = 30_000, restarts = Infinity } = {}) {
+export async function supervise(start, { delayMs = 30_000, restarts = Infinity, flushMs = 500, log = console.error } = {}) {
   let child, wake, stopping = false;
   const stop = signal => { stopping = true; child?.kill(signal); wake?.(); };
   const signals = ['SIGINT', 'SIGTERM'];
@@ -446,7 +447,8 @@ export async function supervise(start, { delayMs = 30_000, restarts = Infinity }
     for (let run = 0; ; run++) {
       child = start();
       const [code, signal] = await new Promise(done => child.once('exit', (...result) => done(result)));
-      console.error(`${new Date().toISOString()} local-ci: Läufer beendet (${code === null ? `Signal ${signal}` : `Exit ${code}`})`);
+      await pause(flushMs);
+      log(`${new Date().toISOString()} local-ci: Läufer beendet (${code === null ? `Signal ${signal}` : `Exit ${code}`})`);
       if (stopping || code === 2 || code === 3 || run >= restarts) return code ?? 0;
       await new Promise(resolve => { const timer = setTimeout(resolve, delayMs); wake = () => { clearTimeout(timer); resolve(); }; });
       if (stopping) return 0;
@@ -461,16 +463,24 @@ async function main() {
     console.error('Aufruf: local-ci.mjs [--cwd DIR] PR | --watch');
     process.exit(2);
   }
-  if (mode === '--watch' && !process.env.LOCAL_CI_CHILD) { // das Kind erbt den Ordner von `--cwd`
-    process.exitCode = await supervise(() => spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, LOCAL_CI_CHILD: '1' } }));
-    return;
-  }
   if (process.env.LOCAL_CI_CHILD) process.on('uncaughtExceptionMonitor', (error, origin) => console.error(`${new Date().toISOString()} ${origin}: ${error.stack}`));
   const root = projectRoot(), gh = externalTool('gh', root), git = externalTool('git', root);
   const exec = (tool, args, options) => execFileSync(tool.file, args, { encoding: 'utf8', env: tool.env, maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'pipe'], ...options });
   const { repository } = JSON.parse(readFileSync(join(root, '.github/workflow-project.json'), 'utf8')); // nur die Identität des Projekts; die Prüfliste kommt pro PR vom Ziel-Branch
   // Beside the main checkout, never under .git: Jest finds no tests in a path containing .git (Vaultdex #1819).
   const dir = `${dirname(resolve(root, exec(git, ['rev-parse', '--git-common-dir'], { cwd: root }).trim()))}-local-ci`;
+  if (mode === '--watch' && !process.env.LOCAL_CI_CHILD) { // das Kind erbt den Ordner von `--cwd`
+    // Der Elternprozess schreibt die Ausgabe des Kinds selbst als UTF-8-Bytes in runner.log: eine Umleitung der Shell beim Start ist nicht nötig (PowerShell kodiert sie doppelt).
+    const logFile = join(dir, 'runner.log'), record = (stream, chunk) => { stream.write(chunk); appendFileSync(logFile, chunk); };
+    mkdirSync(dir, { recursive: true });
+    process.exitCode = await supervise(() => {
+      const child = spawn(process.execPath, process.argv.slice(1), { stdio: ['inherit', 'pipe', 'pipe'], env: { ...process.env, LOCAL_CI_CHILD: '1' } });
+      child.stdout.on('data', chunk => record(process.stdout, chunk));
+      child.stderr.on('data', chunk => record(process.stderr, chunk));
+      return child;
+    }, { log: line => record(process.stderr, `${line}\n`) });
+    return;
+  }
   const bash = gitBash(exec(git, ['--exec-path']).trim()); // vor Sperre und Status
   const fnm = spawnSync('fnm', ['--version'], { stdio: 'ignore' }).status === 0 ? 'fnm' : undefined; // ohne fnm bleibt es bei der Node-Version des Läufers
   const ctx = {

@@ -48,24 +48,25 @@ function fakeStarts(exits) {
 }
 
 test('--watch startet den Runner nach jedem Ende neu, außer bei Aufruffehler (2) und belegter Sperre (3)', async () => {
-  const crashes = fakeStarts([1, 1, 0]);
-  await supervise(crashes.start, { delayMs: 1, restarts: 2 });
+  const crashes = fakeStarts([1, 1, 0]), lines = [];
+  await supervise(crashes.start, { delayMs: 1, restarts: 2, flushMs: 0, log: line => lines.push(line) });
   assert.deepEqual(crashes.starts, ['start', 'start', 'start']); // endliche Zahl von Neustarts
+  assert.equal(lines.length, 3); // jedes Ende steht im Log
   for (const code of [2, 3]) {
     const once = fakeStarts([code, 1]);
-    assert.equal(await supervise(once.start, { delayMs: 1 }), code);
+    assert.equal(await supervise(once.start, { delayMs: 1, flushMs: 0 }), code);
     assert.deepEqual(once.starts, ['start']);
   }
 });
 
 test('SIGTERM im Elternprozess geht ans Kind und beendet die Schleife ohne Neustart', async () => {
   const running = fakeStarts([]);
-  const done = supervise(running.start, { delayMs: 1 });
+  const done = supervise(running.start, { delayMs: 1, flushMs: 0 });
   process.emit('SIGTERM', 'SIGTERM');
   await done;
   assert.deepEqual(running.starts, ['start', 'kill SIGTERM']);
   const waiting = fakeStarts([1]); // das Signal in der Wartezeit vor dem Neustart weckt die Schleife
-  const stopped = supervise(waiting.start, { delayMs: 60_000 });
+  const stopped = supervise(waiting.start, { delayMs: 60_000, flushMs: 0 });
   await new Promise(resolve => setTimeout(resolve, 50));
   process.emit('SIGTERM', 'SIGTERM');
   assert.equal(await stopped, 0);
