@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fixture, handoffComment, handoffFixture, handoffPr, issue, test } from './board-fixture.mjs';
+import { fixture, handoffFixture, handoffPr, issue, test } from './board-fixture.mjs';
 import { isolatedGit } from './fixtures.mjs';
 
 // A checkout with one commit, which the Draft PR 7 shows as its head, and the files the fake gh answers from.
@@ -21,7 +21,6 @@ function delivery(t, fixtureOf) {
   writeFileSync(file('handoff-fixture'), '');
   writeFileSync(file('stored'), 'In progress');
   writeFileSync(file('issues-comments.json'), '[]');
-  writeFileSync(file('posted-html'), handoffComment().body_html);
   writeFileSync(file('backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 1, body: '- [ ] first\n- [ ] moved on, see #12\n- [x] done' }));
   writeFileSync(file('backlink-comments-1.json'), JSON.stringify([{ id: 1, body: 'https://github.com/test/example/pull/7', html_url: 'u' }]));
   writeFileSync(file('result.md'), 'Alles geliefert.\n\n### Retro\n\n- Keine Funde\n');
@@ -47,6 +46,18 @@ test('done takes the pushed work to Human review: tests, ready, ticked boxes, Au
   assert.equal(json('issues-comments.json').length, comments);
 });
 
+
+test('done counts --max-minutes from its start, so slow tests leave less time to wait and the call ends before the shell limit', t => {
+  const { run, file, json } = delivery(t, handoffFixture);
+  const pending = json('pr.json');
+  pending.commits.nodes[0].commit.statusCheckRollup.contexts.nodes = [{ __typename: 'CheckRun', name: 'CI', status: 'IN_PROGRESS', conclusion: null }];
+  writeFileSync(file('pr.json'), JSON.stringify(pending));
+  writeFileSync(file('affected-tests-seconds'), '2');
+  const started = Date.now(), result = run('done', '1', 'result.md', '--max-minutes', '0.05'); // 3 s, of which the tests (2 s) use most
+  assert.equal(result.status, 4, result.stdout + result.stderr);
+  assert.match(result.stdout, /^still waiting: call done again$/m);
+  assert.ok(Date.now() - started < 4200, 'the wait did not start its own full period after the tests');
+});
 
 test('done closes a PR without a change, puts the result on the issue and moves it to Human review', t => {
   const { run, file, text, json } = delivery(t, handoffFixture);

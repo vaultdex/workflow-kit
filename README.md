@@ -195,8 +195,7 @@ and then work in that directory, their relative paths (changed files given to `a
      reviews are finished, threads and conflicts resolved, and the handoff comment for the current head exists. A partial PR (`--refs`, or beside exactly one
      other open PR that closes the issue) needs no native link and has no issue side (`merge PR` is its gate); two open
      closing PRs stay unknown. Conflicts in any layer of a stack block, a lower layer too (it locks the whole stack, #412): the blocker names the order
-     (merge the base into the lowest layer, then each layer into the next one up) and `stack-sync TOP`. A `note:` (never a refusal) names a missing or
-     malformed `Retro` section of the handoff comment, read as GitHub renders it. When the project file lists `"selfReview"` (for example
+     (merge the base into the lowest layer, then each layer into the next one up) and `stack-sync TOP`. When the project file lists `"selfReview"` (for example
      `["ponytail-review", "code-review"]`), the PR body must also carry a `## Selbstprüfung` section that names each of those checks (`merge` asks for
      it too); a heading of any level counts, quoted templates do not, and whether a check was good is not judged. One run lists every missing point
      together (assignment, handoff comment, self-review section, native link, blockers and threads; a refused issue state, an unreadable read or
@@ -363,16 +362,8 @@ comment, a comment for an earlier push does not count, and it works the same for
 a check suite or one that was pushed and checked on another branch first. Put the retro under
 the heading `Retro` (any level, usually `###`), one list line per finding, and, after another
 heading, the review findings with their disposition and, if a reviewer was unavailable or
-stalled, the reviewer, cause and evidence (an optional reviewer only when it found something). Every retro line ends with exactly one resolution (a closing `.`, `,` or `;` after it is ignored):
-
-- an issue link: `#N` or `OWNER/REPO#N` (the issue that owns the fix; a pull request link does not count),
-- `behoben in <SHA>`,
-- `persönlich gemeldet` (memory, shell profile: the human changes those),
-- `kein Handlungsbedarf: <Grund>`.
-
-Without findings the section has the single line `Keine Funde`. The command only notes a missing
-section or a line that ends otherwise, as GitHub renders the comment (an issue
-reference in a code span does not count). Of the rest, only heading, head and author are checked; the content is for the human reviewer.
+stalled, the reviewer, cause and evidence (an optional reviewer only when it found something). Without findings the retro has the single line `Keine Funde`.
+Only heading, head and author are checked; the content is for the human reviewer.
 With several comments for the head the newest counts. `done ISSUE FILE` posts it unless one for the head exists
 and adds the heading and the `Head:` line itself; FILE holds the rest:
 
@@ -381,7 +372,7 @@ and adds the heading and the `Head:` line itself; FILE holds the rest:
 
 ### Retro
 
-- <Fund>: <Issue-Link, `behoben in <SHA>`, `persönlich gemeldet` oder `kein Handlungsbedarf: <Grund>`>
+- <Fund, mit Issue-Link oder Commit, wenn schon behandelt>
 - Oder als einzige Zeile: Keine Funde
 
 ### Reviews
