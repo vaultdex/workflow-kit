@@ -2639,10 +2639,11 @@ function start() {
   set('Status', 'In progress');
   const base = stacked ? (stacked.state === 'MERGED' ? stacked.baseRefName : stacked.headRefName)
     : baseOf(issue).branch || (defaultBranch ??= rest(`repos/${project.repository}`).default_branch);
-  // An own branch of this issue is continued (a resume), a foreign one is left alone.
-  const branch = workBranches(issue).find(existing => existing.startsWith(`${agent}/`))
+  // An own branch of this issue is continued (a resume), a foreign one is left alone. --takeover (#560) continues the head branch of the open PR, whatever its prefix.
+  const taken = takeover ? openPr(issue)?.headRefName : undefined;
+  const branch = taken ?? workBranches(issue).find(existing => existing.startsWith(`${agent}/`))
     ?? `${agent}/${number}-${issue.title.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '')}`;
-  if (!workBranches(issue).includes(branch)) execFileSync(gh.file, ['issue', 'develop', String(number), '--repo', project.repository, '--name', branch, '--base', base], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
+  if (!taken && !workBranches(issue).includes(branch)) execFileSync(gh.file, ['issue', 'develop', String(number), '--repo', project.repository, '--name', branch, '--base', base], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
   git('fetch', 'origin');
   if (git('branch', '--show-current') !== branch) {
     let local = true;
