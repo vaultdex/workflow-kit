@@ -79,7 +79,8 @@ function graphql(query, variables = {}, tolerate) {
   for (let sleeps = 0; ; sleeps++) {
     if (command in sleepers && quota?.remaining < sleepers[command] && Date.parse(quota.resetAt) > Date.now()) sleepUntilReset(quota.resetAt);
     try {
-      const response = execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20 });
+      // stderr piped: a tolerated refusal ("already exists") is no failure, and a real one reaches the error message.
+      const response = execFileSync(gh.file, args, { encoding: 'utf8', env: gh.env, maxBuffer: 16 << 20, stdio: 'pipe' });
       const { headers, body } = splitResponse(response);
       const { data, errors } = JSON.parse(body);
       quota = quotaOf(headers) ?? quota;
