@@ -81,6 +81,21 @@ test('done closes a PR without a change, puts the result on the issue and moves 
   assert.equal(text('affected-tests-calls'), '', 'nothing to test');
 });
 
+test('done without any PR puts the result on the issue, ticks the boxes and moves it to Human review; without a file it stops', t => {
+  const { run, text, json } = delivery(t, fixture); // no PR closes the issue
+  let result = run('done', '1');
+  assert.equal(result.status === 0, false, 'no PR and no file');
+  assert.match(result.stdout + result.stderr, /no open PR closes #1/);
+  assert.equal(text('stored'), 'In progress');
+  result = run('done', '1', 'result.md');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^DONE #1 \(no PR\)/m);
+  assert.match(json('issues-comments.json').at(-1).body, /^## Übergabe\n\nAlles geliefert\./);
+  assert.equal(json('backlink-1.json').body, '- [x] first\n- [ ] moved on, see #12\n- [x] done');
+  assert.equal(text('stored'), 'Human review');
+  assert.equal(text('affected-tests-calls'), '', 'nothing to test');
+});
+
 test('done hands a partial PR off without a native link, status or ticked boxes, also when no other PR closes the issue', t => {
   const { run, writeIssue, text, json } = delivery(t, fixture);
   // No PR closes the issue: the PR only names it, and the issue is neither assigned nor in review.

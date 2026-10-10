@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path';
 import { fixture, handoffPr, issue, predecessor, test } from './board-fixture.mjs';
 import { isolatedGit } from './fixtures.mjs';
 
-test('start takes a Ready issue to a Draft PR that closes it, and the same call resumes', t => {
+// A checkout with an origin that already holds the branch of issue 1, and the files the fake gh answers from.
+function startFixture(t) {
   const { checkout, run, writeIssue, env } = fixture(t);
   env.CODEX_THREAD_ID = '';
   const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8', env: isolatedGit(dirname(checkout)) }).trim();
@@ -25,6 +26,11 @@ test('start takes a Ready issue to a Draft PR that closes it, and the same call 
   writeFileSync(file('pr.json'), JSON.stringify(handoffPr({ id: 'PR7', isDraft: true, linkPages: [[]], url: 'https://github.com/test/example/pull/7' })));
   writeFileSync(file('backlink-1.json'), JSON.stringify({ number: 1, state: 'open', comments: 0 }));
   writeFileSync(file('backlink-comments-1.json'), '[]');
+  return { checkout, run, writeIssue, git, file, text };
+}
+
+test('start takes a Ready issue to a Draft PR that closes it, and the same call resumes', t => {
+  const { checkout, run, writeIssue, git, file, text } = startFixture(t);
 
   // A blocked issue is refused by the check, before anything is written.
   writeIssue(issue('Ready', [predecessor('OPEN', null)]));
@@ -60,4 +66,15 @@ test('start takes a Ready issue to a Draft PR that closes it, and the same call 
   assert.equal(existsSync(file('created-pr')), false, 'no second PR');
   assert.equal(text('develops'), developed, 'no second branch');
   assert.equal(JSON.parse(text('backlink-comments-1.json')).length, comments, 'no second claim or backlink');
+});
+
+test('start names the worktree that holds the branch when it cannot switch to it', t => {
+  const { checkout, run, writeIssue, git } = startFixture(t);
+  // The predecessor's worktree still has the branch checked out.
+  const other = join(dirname(checkout), 'predecessor');
+  git(checkout, 'worktree', 'add', '-q', '--track', '-b', 'claude/1-fixture', other, 'origin/claude/1-fixture');
+  writeIssue(issue('Ready'));
+  const result = run('start', '1', '--session', 'S1');
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.ok(result.stderr.replaceAll('\\', '/').includes(other.replaceAll('\\', '/')), result.stderr);
 });
