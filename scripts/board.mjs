@@ -2706,6 +2706,9 @@ async function done() {
   // The tests must see what will be merged (#558): an untested branch behind its base gets the base merged and pushed first. A conflict is aborted, the branch stays as it was.
   if (!isTested()) {
     const base = `origin/${pull.base.ref}`, failure = error => String(error.stderr || error.message).trim();
+    // Only the PR's own branch of this repository is merged into and pushed.
+    const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
+    if (branch !== pull.head.ref || pull.head.repo?.full_name?.toLowerCase() !== project.repository.toLowerCase()) return fail(`the checkout is on ${branch}, not on the branch ${pull.head.ref} of ${project.repository} that PR #${prNumber} shows: check it out first`);
     try { git('fetch', 'origin'); } catch (error) { return fail(`cannot fetch the base ${base}: ${failure(error)}`); }
     // A branch that has the base stays as it is ("Already up to date", no commit).
     try { git('merge', '--no-edit', base); } catch (error) {

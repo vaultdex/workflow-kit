@@ -20,7 +20,7 @@ function delivery(t, fixtureOf) {
   const file = name => join(checkout, name);
   const text = name => existsSync(file(name)) ? readFileSync(file(name), 'utf8') : '';
   const json = name => JSON.parse(text(name));
-  const pr = handoffPr({ id: 'PR7', isDraft: true, headRefOid: head, isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' }, url: 'https://github.com/test/example/pull/7', body: 'Closes #1' });
+  const pr = handoffPr({ id: 'PR7', isDraft: true, headRefName: 'work', headRefOid: head, isCrossRepository: false, headRepository: { nameWithOwner: 'test/example' }, url: 'https://github.com/test/example/pull/7', body: 'Closes #1' });
   pr.commits.nodes[0].commit.oid = head;
   writeFileSync(file('pr.json'), JSON.stringify(pr));
   writeFileSync(file('handoff-fixture'), '');
@@ -111,6 +111,19 @@ test('done does not merge a base that moved after the tests of this head: repeat
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(git('rev-parse', 'HEAD'), own, 'no merge');
   assert.match(git('ls-remote', 'origin', 'refs/heads/work'), new RegExp(`^${head}`), 'no push');
+});
+
+test('done neither merges nor pushes a checkout that is not on the PR branch', t => {
+  const { run, git, checkout, text } = delivery(t, handoffFixture);
+  moveBase(git, checkout);
+  git('checkout', '-q', '-b', 'other');
+  const own = git('rev-parse', 'HEAD');
+  const result = run('done', '1', 'result.md');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /not on the branch work/);
+  assert.equal(git('rev-parse', 'HEAD'), own);
+  assert.equal(git('ls-remote', 'origin', 'refs/heads/other'), '');
+  assert.equal(text('affected-tests-calls'), '');
 });
 
 test('done fails on a conflict with the base, names the files and leaves no merge behind', t => {
