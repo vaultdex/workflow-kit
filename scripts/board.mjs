@@ -2673,18 +2673,21 @@ async function done() {
   assert.ok(!words.length, 'done takes ISSUE [PR] [FILE]');
   const issue = readIssue(), found = currentIssuePr(issue);
   const prNumber = given ?? found.number;
-  assert.ok(prNumber !== undefined, found.unknown ?? `no open PR closes #${number}: run board.mjs start ${number}, or name the PR (done ${number} PR)`);
-  const pull = rest(`repos/${project.repository}/pulls/${prNumber}`), sha = localHead();
-  const partial = process.argv.includes('--refs') || isPartialPr(issue, prNumber);
+  // No open PR but a FILE: a check task whose PR is already closed (or never opened) takes the way of the PR without a change.
+  if (prNumber === undefined) assert.ok(file && !found.unknown, found.unknown ?? `no open PR closes #${number}: run board.mjs start ${number}, name the PR (done ${number} PR), or name the FILE with the result for the issue`);
+  const pull = prNumber === undefined ? undefined : rest(`repos/${project.repository}/pulls/${prNumber}`);
+  const partial = prNumber !== undefined && (process.argv.includes('--refs') || isPartialPr(issue, prNumber));
   // A PR without a change (a check task: `start` opened it as the claim) delivers nothing to merge: the result goes to the issue, the PR closes.
-  if (pull.changed_files === 0 && !partial) {
+  if ((!pull || pull.changed_files === 0) && !partial) {
     assert.ok(file, `PR #${prNumber} has no change: name the FILE with the result for the issue`);
     restPost(`repos/${project.repository}/issues/${number}/comments`, ['-F', 'body=@-'], `## Übergabe\n\n${lines(file)}\n`);
-    execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${prNumber}`, '-X', 'PATCH', '-f', 'state=closed'], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
+    if (pull) execFileSync(gh.file, ['api', `repos/${project.repository}/pulls/${prNumber}`, '-X', 'PATCH', '-f', 'state=closed'], { encoding: 'utf8', env: gh.env, stdio: 'pipe' });
+    writeBody(before => tickAcceptance(before));
     set('Status', 'Human review');
-    return console.log(`CLOSED PR #${prNumber} (no change); the result is in the comment on #${number}`);
+    return console.log(pull ? `CLOSED PR #${prNumber} (no change); the result is in the comment on #${number}` : `DONE #${number} (no PR); the result is in the comment on #${number}`);
   }
   const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
+  const sha = localHead();
   // The handoff file is only needed while no comment for this head exists (a repeated call after exit 4 has one): refuse before the tests, not after.
   if (!file && !findHandoffComment(restAll(`repos/${project.repository}/issues/${prNumber}/comments`), issue.viewer, sha)) {
     return fail(`no handoff comment for head ${sha.slice(0, 7)} and no HANDOFF_FILE: write it (<Ergebnis in einem Satz>, then "### Retro"; README: Handoff comment) and run board.mjs done ${number} HANDOFF_FILE`);
