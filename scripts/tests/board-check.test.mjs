@@ -424,6 +424,7 @@ test('board check asks for the PRs of predecessors only when open predecessors a
 
   writeIssue(issue('Ready', [bare('P2')]));
   deliveries({ P2: { totalCount: 1, nodes: [pr] } });
+  writeFileSync(join(checkout, 'assignees.json'), JSON.stringify({ P2: ['worker'] }));
   const stackable = run('check', '1');
   assert.equal(stackable.status, 4, stackable.stdout + stackable.stderr);
   assert.match(stackable.stdout, /^stack base: PR #5 /m);
@@ -431,6 +432,15 @@ test('board check asks for the PRs of predecessors only when open predecessors a
   assert.deepEqual(more, []);
   assert.ok(lookup.includes('nodes(ids:["P2"])'), 'One lookup of the open predecessor by id');
   assert.ok(!issueQuery.includes('nodes(ids'));
+  assert.ok(lookup.includes('assignees(first:5)'), 'The assignees come with the same lookup');
+  assert.match(stackable.stdout, /^predecessor #2: assignees: worker; PRs: #5 open$/m);
+
+  // The blocker line names who works on it and every PR with its state, also when the issue stays BLOCKED.
+  writeFileSync(join(checkout, 'assignees.json'), '{}');
+  deliveries({ P2: { totalCount: 2, nodes: [{ ...pr, number: 6, isDraft: true }, { ...pr, number: 7, state: 'MERGED' }] } });
+  const blocked = run('check', '1');
+  assert.equal(blocked.status, 1, blocked.stdout + blocked.stderr);
+  assert.match(blocked.stdout, /^predecessor #2: assignees: none; PRs: #6 draft, #7 merged$/m);
 
   deliveries({});
   assert.equal(run('check', '1').status, 2, 'A predecessor whose PRs cannot be read is unknown, never "no PR"');

@@ -391,7 +391,10 @@ function api(argv, input, stdout, stderr, exit) {
   else if (query.includes('nodes(ids:')) {
     // The PRs that close predecessors, read by id: deliveries.json maps an id to its closedByPullRequestsReferences; an id it lacks is unreadable.
     const deliveries = JSON.parse(fs.readFileSync('deliveries.json'));
-    data = { nodes: JSON.parse(/nodes\(ids:(\[[^\]]*\])/.exec(query)[1]).map(id => deliveries[id] ? { closedByPullRequestsReferences: deliveries[id] } : {}) };
+    // assignees.json (optional) maps an id to the logins of its assignees.
+    const assignees = fs.existsSync('assignees.json') ? JSON.parse(fs.readFileSync('assignees.json')) : {};
+    data = { nodes: JSON.parse(/nodes\(ids:(\[[^\]]*\])/.exec(query)[1]).map(id => deliveries[id]
+      ? { closedByPullRequestsReferences: deliveries[id], assignees: { nodes: (assignees[id] ?? []).map(login => ({ login })) } } : {}) };
   }
   else if (query.includes('fieldValues(first:100)')) {
     const names = { F1: 'Status', F2: 'Priority', F3: 'Size' };
