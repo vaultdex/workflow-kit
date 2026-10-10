@@ -96,13 +96,16 @@ export function projectCommands(files, map) {
 
 /**
  * Runs a command and returns its exit status. Unless `verbose`, its output stays hidden: a green run prints `ok` (or the
- * output lines matching `summary`), a red one prints everything except the lines matching `noise`.
+ * output lines matching `summary`), a red one prints everything except the lines matching `noise`. Either way a line names the
+ * command (`label`) before it starts and the duration follows, so a long run shows what it waits for.
  */
-export function quiet(verbose, command, args, options, { summary, noise, ok } = {}) {
+export function quiet(verbose, command, args, options, { summary, noise, ok, label = command } = {}) {
   if (verbose) return spawnSync(command, args, { ...options, stdio: 'inherit' }).status ?? 1;
-  const result = spawnSync(command, args, { ...options, encoding: 'utf8', maxBuffer: 1 << 28 });
+  console.log(`run: ${label}`);
+  const start = Date.now(), result = spawnSync(command, args, { ...options, encoding: 'utf8', maxBuffer: 1 << 28 });
   const lines = `${result.stdout ?? ''}${result.stderr ?? ''}`.split('\n');
   console.log(result.status === 0 ? ok ?? lines.filter(line => summary.test(line)).join('\n') : lines.filter(line => !noise?.test(line)).join('\n').trim());
+  console.log(`took ${((Date.now() - start) / 1000).toFixed(1)} s`);
   return result.status ?? 1;
 }
 
@@ -118,7 +121,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   if (!values.run) { if (selected.length || commands.length) console.log([...selected, ...commands].join('\n')); }
   else if (!selected.length && !commands.length) console.log('no affected tests');
   else {
-    if (selected.length) process.exitCode = quiet(values.verbose, process.execPath, ['--test', ...selected], { cwd: kit }, { summary: /^ℹ (tests|pass|fail) /, noise: /^(start: |✔ )/ });
+    if (selected.length) process.exitCode = quiet(values.verbose, process.execPath, ['--test', ...selected], { cwd: kit }, { summary: /^ℹ (tests|pass|fail) /, noise: /^(start: |✔ )/, label: `node --test (${selected.length} files)` });
     for (const command of commands) if (!process.exitCode) process.exitCode = quiet(values.verbose, command, [], { cwd: root, shell: true, env: { ...process.env, AFFECTED_BASE: values.base } }, { ok: `ok: ${command}` });
   }
 }

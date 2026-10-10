@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -57,7 +58,7 @@ test('--run prints no line per test or command when green, and the output of the
   const { NODE_TEST_CONTEXT, ...outside } = process.env; // inside `node --test`, a nested one would report to its parent
   const green = await run(process.execPath, [script, '--run', 'README.md'], { cwd: fileURLToPath(new URL('../..', import.meta.url)), env: outside });
   assert.equal(green.status, 0);
-  assert.match(green.stdout, /^ℹ tests \d+\nℹ pass \d+\nℹ fail 0\n$/);
+  assert.match(green.stdout, /^run: node --test \(\d+ files\)\nℹ tests \d+\nℹ pass \d+\nℹ fail 0\ntook [\d.]+ s\n$/);
   const project = temporary(t, 'affected-tests-');
   mkdirSync(join(project, '.git'));
   mkdirSync(join(project, '.github'));
@@ -65,10 +66,29 @@ test('--run prints no line per test or command when green, and the output of the
   writeFileSync(join(project, '.github/affected-tests.json'), map);
   const ask = env => run(process.execPath, [script, '--run', 'a/B.java'], { cwd: project, env: { ...outside, ...env } });
   const ok = await ask({ OUT: 'chatter' });
-  assert.deepEqual([ok.status, ok.stdout.trim().startsWith('ok: ')], [0, true], ok.stdout);
+  assert.deepEqual([ok.status, ok.stdout.split('\n')[1].startsWith('ok: ')], [0, true], ok.stdout);
   assert.ok(!ok.stdout.includes('chatter'));
   const red = await ask({ OUT: 'broken output', FAIL: '1' });
-  assert.deepEqual([red.status, red.stdout.trim()], [1, 'broken output']);
+  assert.deepEqual([red.status, red.stdout.split('\n').slice(1, -2).join('\n')], [1, 'broken output']);
+});
+
+test('--run names a command before it starts, with the duration after it', async t => {
+  const script = fileURLToPath(new URL('../affected-tests.mjs', import.meta.url));
+  const { NODE_TEST_CONTEXT, ...outside } = process.env;
+  const project = temporary(t, 'affected-tests-');
+  mkdirSync(join(project, '.git'));
+  mkdirSync(join(project, '.github'));
+  // The command waits for a file that the test creates only after it has read the `run:` line, so a line printed after the run times out.
+  const wait = 'node -e "const fs=require(\'fs\');while(!fs.existsSync(process.env.GATE))Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20)"';
+  writeFileSync(join(project, '.github/affected-tests.json'), JSON.stringify({ 'a/**': wait }));
+  const gate = join(project, 'gate');
+  const child = spawn(process.execPath, [script, '--run', 'a/B.java'], { cwd: project, env: { ...outside, GATE: gate }, stdio: ['ignore', 'pipe', 'inherit'] });
+  const timer = setTimeout(() => child.kill(), 10000);
+  t.after(() => clearTimeout(timer));
+  let out = '';
+  child.stdout.on('data', chunk => { out += chunk; if (out.includes(`run: ${wait}\n`)) writeFileSync(gate, ''); });
+  await new Promise(resolve => child.on('close', resolve));
+  assert.match(out, /^run: node -e .*\nok: .*\ntook [\d.]+ s\n$/s);
 });
 
 test('a project entry without a command is refused', t => {

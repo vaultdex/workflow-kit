@@ -44,6 +44,16 @@ test('done takes the pushed work to Human review: tests, ready, ticked boxes, Au
   const comments = json('issues-comments.json').length;
   assert.equal(run('done', '1', 'result.md').status, 0);
   assert.equal(json('issues-comments.json').length, comments);
+  // ... and without the file, as after exit 4, the call still passes.
+  assert.equal(run('done', '1').status, 0);
+});
+
+test('done without a handoff file and without a comment for the head stops before the tests', t => {
+  const { run, text } = delivery(t, handoffFixture);
+  const result = run('done', '1');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^blocker: no handoff comment for head /m);
+  assert.equal(text('affected-tests-calls'), '', 'the tests did not run');
 });
 
 

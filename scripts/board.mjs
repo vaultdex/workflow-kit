@@ -2661,8 +2661,8 @@ function start() {
 }
 
 /**
- * `done ISSUE [PR] [FILE]`: everything from the last push to Human review. The targeted tests of the changed files (in the
- * foreground, once per head), the PR ready for exactly the pushed head, the acceptance boxes ticked, Automated review, the wait for CI and reviewers (`still waiting: call done again`, exit 4, after --max-minutes), the handoff comment from FILE
+ * `done ISSUE [PR] [HANDOFF_FILE]`: everything from the last push to Human review. The targeted tests of the changed files (in the
+ * foreground, once per head), the PR ready for exactly the pushed head, the acceptance boxes ticked, Automated review, the wait for CI and reviewers (`still waiting: call done again`, exit 4, after --max-minutes), the handoff comment from HANDOFF_FILE
  * (result sentence and the `### Retro` list; heading and head line are added here) and the handoff gate with its Sonar issue count. Every call
  * does what is still open, so a repeated call after a push or a wait is the same call. PR: the one open PR that closes the issue.
  * `--refs`: a PR that only names the issue (a part for another base): its gate runs, the issue status stays.
@@ -2685,6 +2685,10 @@ async function done() {
     return console.log(`CLOSED PR #${prNumber} (no change); the result is in the comment on #${number}`);
   }
   const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
+  // The handoff file is only needed while no comment for this head exists (a repeated call after exit 4 has one): refuse before the tests, not after.
+  if (!file && !findHandoffComment(restAll(`repos/${project.repository}/issues/${prNumber}/comments`), issue.viewer, sha)) {
+    return fail(`no handoff comment for head ${sha.slice(0, 7)} and no HANDOFF_FILE: write it (<Ergebnis in einem Satz>, then "### Retro"; README: Handoff comment) and run board.mjs done ${number} HANDOFF_FILE`);
+  }
   // The tests of this head ran once: a call that only waits does not repeat them.
   const tested = resolve(projectDirectory, git('rev-parse', '--git-path', 'board-done-tested'));
   if (!(existsSync(tested) && readFileSync(tested, 'utf8') === sha)) {
@@ -2717,7 +2721,7 @@ async function done() {
 // check, reviews, handoff, ready and link are the steps `start` and `done` take; they stay callable for those two and for the tests, but nobody runs them by hand, so the usage leaves them out.
 const commands = { start, done, next, sweep, check: () => check(readIssue(true), { session: sessionOption() }), block, sub, field: setField, new: create,
   reviews: reviewsOnce, wait, 'quota-wait': quotaWait, handoff, merge, 'stack-sync': stackSync, ready, link, body, 'body-replace': bodyReplace };
-const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] start ISSUE [--session ID] | done ISSUE [PR] [FILE] [--refs] [--max-minutes N]'
+const usage = 'Usage: board.mjs [--cwd PROJECT_DIR] start ISSUE [--session ID] | done ISSUE [PR] [HANDOFF_FILE] [--refs] [--max-minutes N]'
   + ' | next [--session ID] | sweep | field ISSUE NAME VALUE [NAME VALUE ...]'
   + ' | new --title T --body-file FILE --milestone M --label L [--label L ...] --priority P [--status S] [--field NAME=VALUE ...] | new --from FILE'
   + ' | block ISSUE BLOCKER | sub PARENT CHILD | wait PR [--stall MINUTES] [--grace MINUTES] [--head SHA] [--max-minutes N] [--interval SECONDS] | wait PR --merged [--max-minutes N]'
