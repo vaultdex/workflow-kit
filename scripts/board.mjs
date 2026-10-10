@@ -163,11 +163,15 @@ function loadDeliveries(predecessors) {
   const ids = [...new Set(missing.map(predecessor => predecessor.id))];
   for (let from = 0; from < ids.length; from += 100) {
     const batch = ids.slice(from, from + 100);
-    const { nodes } = graphql(`query{nodes(ids:${JSON.stringify(batch)}){...on Issue{${deliveryFields}}}}`);
+    // The assignees ride along for the blocker line of `check` (predecessorLine); they are not part of predecessorFields, which every `next` list repeats.
+    const { nodes } = graphql(`query{nodes(ids:${JSON.stringify(batch)}){...on Issue{${deliveryFields} assignees(first:5){nodes{login}}}}}`);
     // The same predecessor can hold several issues: every object of it gets the list. An unreadable one stays without it,
     // which stackBase reports as unreadable, never as "no PR".
     batch.forEach((id, index) => missing.filter(predecessor => predecessor.id === id)
-      .forEach(predecessor => { predecessor.closedByPullRequestsReferences = nodes[index]?.closedByPullRequestsReferences; }));
+      .forEach(predecessor => {
+        predecessor.closedByPullRequestsReferences = nodes[index]?.closedByPullRequestsReferences;
+        predecessor.assignees = nodes[index]?.assignees;
+      }));
   }
 }
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
@@ -519,6 +523,13 @@ const verdictOf = ({ blocked, unknown }) => blocked.length ? 'BLOCKED' : unknown
 // #N in the project's repository, OWNER/REPO#N elsewhere: a bare number must never name a same-number issue or PR of another repository.
 const refOf = (repository, number) => `${repository.nameWithOwner.toLowerCase() === project.repository.toLowerCase() ? '' : repository.nameWithOwner}#${number}`;
 const logins = issue => issue.assignees.nodes.map(assignee => assignee.login).join(', ');
+/** Who works on an open predecessor and where its PRs stand, from what loadDeliveries read; a list cut at 10 is never presented as complete. */
+function predecessorLine(predecessor) {
+  const { totalCount, nodes } = predecessor.closedByPullRequestsReferences;
+  const prs = nodes.filter(Boolean).map(pr => `${refOf(pr.repository, pr.number)} ${pr.state === 'OPEN' && pr.isDraft ? 'draft' : pr.state.toLowerCase()}`);
+  const cut = totalCount > nodes.length ? ` (first ${nodes.length} of ${totalCount})` : '';
+  return `predecessor ${refOf(predecessor.repository, predecessor.number)}: assignees: ${predecessor.assignees ? logins(predecessor) || 'none' : 'unreadable'}; PRs: ${prs.join(', ') || 'none'}${cut}`;
+}
 const ago = ms => {
   const minutes = Math.max(0, Math.floor(ms / 60_000)), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60);
   return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
@@ -594,6 +605,8 @@ function check(issue = readIssue(), claims, currentPrNumber) {
   const verdict = stackedOn && plain === 'STARTABLE' ? 'STACKABLE' : plain;
   console.log(`${project.repository}#${issue.number} ${issue.title}\nstatus: ${status ?? '-'}, assignees: ${logins(issue) || 'none'}\n${verdict}`);
   for (const reason of [...blocked, ...unknown]) console.log(`- ${reason}`);
+  // Only where loadDeliveries ran (open predecessors alone hold the issue) the PRs are known; elsewhere nothing is claimed.
+  for (const predecessor of predecessors.open) if (predecessor.closedByPullRequestsReferences?.nodes) console.log(predecessorLine(predecessor));
   if (stackedOn) console.log(stackedOn.state === 'MERGED'
     ? `stack base: PR #${stackedOn.number} is already merged into ${stackedOn.baseRefName}: no stack, work on ${stackedOn.baseRefName}; see docs/CONTRIBUTING.md#stacked-pull-requests`
     : `stack base: PR #${stackedOn.number}${stackedOn.stackNumber ? ` in stack #${stackedOn.stackNumber}` : ''} (branch ${stackedOn.headRefName}, base ${stackedOn.baseRefName}); see docs/CONTRIBUTING.md#stacked-pull-requests`);
