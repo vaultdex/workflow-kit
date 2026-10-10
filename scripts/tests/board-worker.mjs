@@ -2,6 +2,7 @@
 // `gh` calls to the fake gh (fake-gh.mjs) instead of starting a process per call. A case of the board tests makes about
 // eight such starts; at 70 to 150 ms each (Windows, virus scanner) they were most of the suite's run time.
 import childProcess from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { format } from 'node:util';
 import { workerData } from 'node:worker_threads';
@@ -30,7 +31,11 @@ function echoingFakeGh(args, options) {
     throw error;
   }
 }
-childProcess.execFileSync = (file, args, options) => /(^|[\\/])gh(\.exe)?$/.test(file) ? echoingFakeGh(args, options)
+// local-ci.mjs has its own tests: its starts (in the background or for `--push`) are only written down in local-ci-calls, without the script path.
+const noteLocalCi = args => appendFileSync('local-ci-calls', `${args.slice(1).join(' ')}\n`);
+childProcess.spawn = (file, args) => { noteLocalCi(args); return { unref() {} }; };
+childProcess.execFileSync = (file, args, options) => file === process.execPath && /local-ci\.mjs$/.test(args[0]) ? noteLocalCi(args)
+  : /(^|[\\/])gh(\.exe)?$/.test(file) ? echoingFakeGh(args, options)
   : /(^|[\\/])git(\.exe)?$/.test(file) ? realExecFileSync('git', args, { ...options, env: { ...options?.env, PATH: hostPath } })
     : realExecFileSync(file, args, options);
 syncBuiltinESMExports();

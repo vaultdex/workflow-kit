@@ -204,6 +204,17 @@ function api(argv, input, stdout, stderr, exit) {
         mergeable_state: String(pr.mergeStateStatus).toLowerCase(), head: { sha: pr.headRefOid }, base: { ref: pr.baseRefName } }));
       exit(0);
     }
+    if (parts[3] === 'commits' && parts[5] === 'statuses') {
+      // The commit statuses of the head, derived from pr.json.
+      const { commit } = JSON.parse(fs.readFileSync('pr.json')).commits.nodes[0];
+      stdout(JSON.stringify((commit.statusCheckRollup?.contexts.nodes ?? []).filter(node => node.__typename === 'StatusContext').map(({ context, state }) => ({ context, state }))));
+      exit(0);
+    }
+    if (parts[3] === 'commits' && parts.length === 5) {
+      // A merge commit: its first parent is the base before the merge.
+      stdout(JSON.stringify({ parents: [{ sha: 'b'.repeat(40) }] }));
+      exit(0);
+    }
     if (parts[3] === 'commits' && ['check-runs', 'check-suites', 'status'].includes(parts[5])) {
       // The checks of the head, also derived from pr.json.
       const { commit } = JSON.parse(fs.readFileSync('pr.json')).commits.nodes[0];
