@@ -211,7 +211,7 @@ and then work in that directory, their relative paths (changed files given to `a
   To run it without a person, copy [docs/board-sweep.yml](docs/board-sweep.yml) to `.github/workflows/board-sweep.yml`: it runs `sweep` on every push to
   the PR bases (`main`, `release/**`; adjust) and hourly. It needs the secret `BOARD_TOKEN` (a token that may write the Project and issues; `GITHUB_TOKEN` cannot).
   The reset issues then show up in `next` as stale work (below).
-- `next [--session ID]` lists unfinished work before the Ready issues: with a session, your own issues (assigned to the login, in In progress or
+- `next [--session ID]` lists unfinished work before the Ready issues. First **Rückmeldungen**: open issues assigned to you (with a session: whose PR claims it) with a new comment or review on the issue or its PR since your last handoff (`## Übergabe`) or reply (a comment with a line `Agent: claude|codex, Session: ID`), or back in In progress / Automated review after the handoff, and any issue whose comments mention `@login` since then (the last 10 issue comments, 5 PR comments and 5 reviews are read). With a session, `start` of another issue says `finish #N first` while one of your own issues has such feedback. Then, with a session, your own issues (assigned to the login, in In progress or
   Automated review, an open PR whose claim names your session) under "Finish your own work first"; then abandoned work, a "Stale or conflicting" list of issues in
   In progress, Automated review or Human review whose open PR had no activity for `"staleHours"` (project file, default 6; 0 or more) or whose
   Human-review PR has merge conflicts (DIRTY). Activity is the newest update of the issue (comments), its Project item (status) and its open PR

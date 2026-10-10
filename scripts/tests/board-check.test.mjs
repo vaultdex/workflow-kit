@@ -567,7 +567,7 @@ test('check of a new issue is BLOCKED with "finish #N first" while the own sessi
   const blocked = run('check', '1', '--session', 'S1');
   assert.equal(blocked.status, 1, blocked.stdout);
   assert.match(blocked.stdout, /^- finish #5 first/m);
-  assert.ok(queries().some(query => query.includes('search(') && query.includes('closedByPullRequestsReferences(first:10){nodes{state body}}')), 'the search asks for the PR bodies, where the claims stand');
+  assert.ok(queries().some(query => query.includes('search(') && query.includes('closedByPullRequestsReferences(first:10){nodes{state body ')), 'the search asks for the PR bodies, where the claims stand');
   const other = run('check', '1', '--session', 'S2');
   assert.equal(other.status, 0, `the claim of another session is not mine: ${other.stdout}`);
   search(own('Human review'));
@@ -582,6 +582,22 @@ test('check of a new issue is BLOCKED with "finish #N first" while the own sessi
   assert.equal(run('check', '1', '--session', 'S1').status, 4, 'stacking on the own work continues it');
   stack(2);
   assert.equal(run('check', '1', '--session', 'S1').status, 1, 'stacking on other work is a new start');
+});
+
+// workflow-kit #554
+test('check of a new issue is BLOCKED with "finish #N first" by feedback on a handed-off issue of the own session', t => {
+  const { checkout, run, writeIssue } = fixture(t);
+  const comments = ['## Übergabe\n\nHead: abcdef1', 'Please change X'].map((body, index) => ({ createdAt: `2026-10-10T10:0${index}:00Z`, url: `https://example.test/c${index}`, body }));
+  const own = nodes => ({ ...issue('Human review'), number: 5, assignees: { nodes: [{ login: 'worker' }] },
+    closedByPullRequestsReferences: { nodes: [{ state: 'OPEN', body: 'Agent: claude, Session: S1', comments: { nodes } }] } });
+  writeIssue(issue());
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([own(comments)]));
+  const blocked = run('check', '1', '--session', 'S1');
+  assert.equal(blocked.status, 1, blocked.stdout);
+  assert.match(blocked.stdout, /^- finish #5 first: it has feedback .*c1/m);
+  assert.equal(run('check', '1', '--session', 'S2').status, 0, 'the claim of another session is not mine');
+  writeFileSync(join(checkout, 'search.json'), JSON.stringify([own(comments.slice(0, 1))]));
+  assert.equal(run('check', '1', '--session', 'S1').status, 0, 'a handoff without feedback is finished');
 });
 
 
