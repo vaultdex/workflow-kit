@@ -69,8 +69,9 @@ export function claimSlot(dir) {
       const pid = Number(readFileSync(file, 'utf8'));
       let alive = !Number.isInteger(pid); // eine Datei, die gerade geschrieben wird
       try { process.kill(pid, 0); alive = true; } catch (kill) { alive ||= kill.code === 'EPERM'; }
-      if (!alive) rmSync(file, { force: true });
-      slot -= !alive; // ein toter Platz wird gleich noch einmal versucht
+      if (alive) continue;
+      rmSync(file, { force: true });
+      slot--; // der Platz des toten Prozesses wird gleich noch einmal versucht
       continue;
     }
     process.once('exit', () => rmSync(file, { force: true }));

@@ -2293,11 +2293,11 @@ async function merge() {
     }
   }
   // No resident runner: a head without a `local-ci` status (Renovate, pin and human PRs, or the head after a base update) gets its run from here,
-  // once per head and in the background (a run outlasts a tool call); the looks below wait for its pending status.
+  // once per head and in the background (a run outlasts a tool call); the looks below wait for its pending status. A run killed halfway leaves `pending`: start it again by hand.
   const started = new Set();
   const look = () => {
     const result = reviews(stallOption()), sha = result.pr.headRefOid;
-    if (!result.done && gate.localChecks && !started.has(sha)) {
+    if (!result.done && gate.localChecks && !result.pr.isCrossRepository && !started.has(sha)) { // a fork's code never runs on this machine by itself
       started.add(sha);
       if (!rest(`repos/${project.repository}/commits/${sha}/statuses?per_page=100`).some(status => status.context === 'local-ci')) {
         spawn(process.execPath, [localCi, '--cwd', projectDirectory, String(number)], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
