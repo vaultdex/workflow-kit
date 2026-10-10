@@ -19,7 +19,7 @@ Harness-permitting, you will suggest recurring schedules which can help in achie
 
 All work should be done in subagents. Protect your context window.
 
-No agent closes a spec or sets it to Done or Human review, a subagent and you included: only a human accepts a spec (`AGENT_RULES.md`, Hard rules).
+No agent closes a spec or sets it to Done, a subagent and you included: only a human accepts a spec (`AGENT_RULES.md`, Hard rules).
 
 Use background agents so you can stay in active dialogue with the user.
 
