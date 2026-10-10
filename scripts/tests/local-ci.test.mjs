@@ -36,7 +36,8 @@ test('die Sperrdatei lässt nur einen Läufer zu und übernimmt die eines toten 
 });
 
 /** Ein Kind, das mit der nächsten Antwort aus `exits` endet; `kill` beendet es sofort mit Signal. */
-function fakeStarts(exits, starts = []) {
+function fakeStarts(exits) {
+  const starts = [];
   return { starts, start() {
     const child = new EventEmitter();
     child.kill = signal => { starts.push(`kill ${signal}`); child.emit('exit', null, signal); };
@@ -63,6 +64,12 @@ test('SIGTERM im Elternprozess geht ans Kind und beendet die Schleife ohne Neust
   process.emit('SIGTERM', 'SIGTERM');
   await done;
   assert.deepEqual(running.starts, ['start', 'kill SIGTERM']);
+  const waiting = fakeStarts([1]); // das Signal in der Wartezeit vor dem Neustart weckt die Schleife
+  const stopped = supervise(waiting.start, { delayMs: 60_000 });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  process.emit('SIGTERM', 'SIGTERM');
+  assert.equal(await stopped, 0);
+  assert.equal(waiting.starts.filter(entry => entry === 'start').length, 1);
 });
 
 /** Im Arbeitsordner: BASE_SHA und HEAD^1 sind beide genau der aktuelle Stand von origin/main (der Fetch des Läufers hat ihn nachgezogen). */
