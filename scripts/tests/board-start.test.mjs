@@ -102,3 +102,20 @@ test('start names the worktree that holds the branch when it cannot switch to it
   assert.notEqual(result.status, 0, result.stdout);
   assert.ok(result.stderr.replaceAll('\\', '/').includes(other.replaceAll('\\', '/')), result.stderr);
 });
+
+test('start --takeover switches to a branch another worktree holds and catches up with origin', t => {
+  const { checkout, run, writeIssue, git, file, text } = startFixture(t);
+  const body = 'Closes #1\nAgent: claude, Session: OLD\nMehr';
+  writeFileSync(file('pr.json'), JSON.stringify({ ...JSON.parse(text('pr.json')), body }));
+  writeIssue({ ...issue('In progress'), updatedAt: new Date().toISOString(), closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'OPEN', body, updatedAt: new Date().toISOString(), headRefName: 'claude/1-fixture', repository: { nameWithOwner: 'test/example' } }] } });
+  git(checkout, 'worktree', 'add', '-q', '--track', '-b', 'claude/1-fixture', join(dirname(checkout), 'predecessor'), 'origin/claude/1-fixture');
+  // The predecessor pushed from another clone: the local branch is behind origin.
+  const ahead = git(checkout, 'commit-tree', '-p', 'main', '-m', 'ahead', 'main^{tree}');
+  git(checkout, 'push', '-q', 'origin', `${ahead}:refs/heads/claude/1-fixture`);
+  git(checkout, 'fetch', '-q', 'origin');
+
+  const result = run('start', '1', '--session', 'S2', '--takeover');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(git(checkout, 'branch', '--show-current'), 'claude/1-fixture');
+  assert.equal(git(checkout, 'rev-parse', 'HEAD'), ahead);
+});
