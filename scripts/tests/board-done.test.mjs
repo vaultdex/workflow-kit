@@ -9,8 +9,13 @@ import { isolatedGit } from './fixtures.mjs';
 function delivery(t, fixtureOf) {
   const { checkout, run, writeIssue } = fixtureOf(t);
   const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: checkout, encoding: 'utf8', env: isolatedGit(dirname(checkout)) }).trim();
-  git('init', '-q');
+  git('init', '-q', '-b', 'work');
+  git('config', 'user.name', 't'); // board.mjs commits its merge with the checkout's own identity
+  git('config', 'user.email', 't@t');
   git('commit', '--allow-empty', '-q', '-m', 'pushed');
+  git('init', '-q', '--bare', join(dirname(checkout), 'origin.git'));
+  git('remote', 'add', 'origin', join(dirname(checkout), 'origin.git'));
+  git('push', '-q', 'origin', 'work', 'work:release/0.1.1'); // the base of PR 7 is at the head: nothing to merge
   const head = git('rev-parse', 'HEAD');
   const file = name => join(checkout, name);
   const text = name => existsSync(file(name)) ? readFileSync(file(name), 'utf8') : '';
@@ -25,13 +30,35 @@ function delivery(t, fixtureOf) {
   writeFileSync(file('backlink-comments-1.json'), JSON.stringify([{ id: 1, body: 'https://github.com/test/example/pull/7', html_url: 'u' }]));
   writeFileSync(file('result.md'), 'Alles geliefert.\n\n### Retro\n\n- Keine Funde\n');
   writeIssue({ ...issue('In progress'), assignees: { nodes: [{ login: 'worker' }] } });
-  return { run, writeIssue, head, file, text, json };
+  return { run, writeIssue, head, file, text, json, git, checkout };
+}
+
+// What GitHub shows of PR 7: the changes, and a head (also the one of its last commit).
+function showPr(file, json, { headRefOid, ...changes }) {
+  const pr = { ...json('pr.json'), ...changes };
+  if (headRefOid) pr.headRefOid = pr.commits.nodes[0].commit.oid = headRefOid;
+  writeFileSync(file('pr.json'), JSON.stringify(pr));
+}
+
+// The base gets a commit that the branch lacks (files: written in it) and the branch an own commit (files: written in it).
+function moveBase(git, checkout, theirs = {}, mine = {}) {
+  const commit = (files, message) => {
+    for (const [name, content] of Object.entries(files)) { writeFileSync(join(checkout, name), content); git('add', name); }
+    git('commit', '--allow-empty', '-q', '-m', message);
+  };
+  git('checkout', '-q', '-b', 'side');
+  commit(theirs, 'base moved');
+  git('push', '-q', 'origin', 'side:release/0.1.1');
+  git('checkout', '-q', 'work');
+  git('branch', '-q', '-D', 'side');
+  commit(mine, 'own work');
 }
 
 test('done takes the pushed work to Human review: tests, ready, ticked boxes, Automated review, wait, handoff comment', t => {
-  const { run, head, text, json } = delivery(t, handoffFixture);
+  const { run, head, text, json, git } = delivery(t, handoffFixture);
   const result = run('done', '1', 'result.md');
   assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(git('rev-parse', 'HEAD'), head, 'a branch with its base gets no merge commit');
   assert.match(result.stdout, /HANDOFF #1/);
   assert.match(text('affected-tests-calls'), /--run/, 'the targeted tests ran');
   assert.equal(json('pr.json').isDraft, false, 'the PR is ready');
@@ -53,6 +80,37 @@ test('done without a handoff file and without a comment for the head stops befor
   const result = run('done', '1');
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /^blocker: no handoff comment for head /m);
+  assert.equal(text('affected-tests-calls'), '', 'the tests did not run');
+});
+
+test('done merges a base the branch is behind, pushes it and tests the merged head; a second call adds no merge commit', t => {
+  const { run, head, git, checkout, file, text, json } = delivery(t, handoffFixture);
+  moveBase(git, checkout);
+  git('update-ref', 'refs/remotes/origin/release/0.1.1', head); // the last fetch is older than the base: done fetches it itself
+  showPr(file, json, { isDraft: false }); // ready() refuses at once: the PR still shows the old head
+  assert.equal(run('done', '1', 'result.md').status, 1);
+  const merged = git('rev-parse', 'HEAD');
+  assert.notEqual(merged, head);
+  git('merge-base', '--is-ancestor', 'origin/release/0.1.1', merged);
+  assert.match(git('ls-remote', 'origin', 'refs/heads/work'), new RegExp(`^${merged}`), 'the merge is pushed');
+  assert.equal(readFileSync(join(checkout, '.git', 'board-done-tested'), 'utf8'), merged, 'the merged head was tested');
+
+  showPr(file, json, { headRefOid: merged });
+  assert.equal(run('done', '1', 'result.md').status, 0);
+  assert.equal(git('rev-parse', 'HEAD'), merged, 'a branch that has the base gets no merge commit');
+  assert.match(text('affected-tests-calls'), /--run/);
+});
+
+test('done fails on a conflict with the base, names the files and leaves no merge behind', t => {
+  const { run, git, checkout, text } = delivery(t, handoffFixture);
+  moveBase(git, checkout, { 'a.txt': 'theirs' }, { 'a.txt': 'mine' });
+  const own = git('rev-parse', 'HEAD');
+  const result = run('done', '1', 'result.md');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^FAILED\nblocker: .*a\.txt/);
+  assert.ok(!existsSync(join(checkout, '.git', 'MERGE_HEAD')), 'the merge was aborted');
+  assert.equal(git('rev-parse', 'HEAD'), own);
+  assert.equal(git('status', '--porcelain', '--untracked-files=no'), '');
   assert.equal(text('affected-tests-calls'), '', 'the tests did not run');
 });
 

@@ -2674,7 +2674,7 @@ function start() {
 }
 
 /**
- * `done ISSUE [PR] [HANDOFF_FILE]`: everything from the last push to Human review. The targeted tests of the changed files (in the
+ * `done ISSUE [PR] [HANDOFF_FILE]`: everything from the last push to Human review. First the PR base is merged into a branch behind it and pushed (a conflict fails, the merge aborted). The targeted tests of the changed files (in the
  * foreground, once per head), the PR ready for exactly the pushed head, the acceptance boxes ticked, Automated review, the wait for CI and reviewers (`still waiting: call done again`, exit 4, after --max-minutes), the handoff comment from HANDOFF_FILE
  * (result sentence and the `### Retro` list; heading and head line are added here) and the handoff gate with its Sonar issue count. Every call
  * does what is still open, so a repeated call after a push or a wait is the same call. PR: the one open PR that closes the issue.
@@ -2700,6 +2700,19 @@ async function done() {
     return console.log(pull ? `CLOSED PR #${prNumber} (no change); the result is in the comment on #${number}` : `DONE #${number} (no PR); the result is in the comment on #${number}`);
   }
   const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
+  // The tests must see what will be merged (#558): a branch behind its base gets the base merged and pushed first. A conflict is aborted, the branch stays as it was.
+  const base = `origin/${pull.base.ref}`, failure = error => String(error.stderr || error.message).trim();
+  try { git('fetch', 'origin'); } catch (error) { return fail(`cannot fetch the base ${base}: ${failure(error)}`); }
+  let behind = false;
+  try { git('merge-base', '--is-ancestor', base, 'HEAD'); } catch { behind = true; }
+  if (behind) {
+    try { git('merge', '--no-edit', base); } catch (error) {
+      const files = git('diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
+      try { git('merge', '--abort'); } catch { /* no merge was started */ }
+      return fail(`merging ${base} conflicts${files.length ? ` in ${files.join(', ')}` : `: ${failure(error)}`}; merge it yourself, push, then run done again`);
+    }
+    try { git('push', 'origin', 'HEAD'); } catch (error) { return fail(`merged ${base}, but the push failed: ${failure(error)}`); }
+  }
   const sha = localHead();
   // The handoff file is only needed while no comment for this head exists (a repeated call after exit 4 has one): refuse before the tests, not after.
   if (!file && !findHandoffComment(restAll(`repos/${project.repository}/issues/${prNumber}/comments`), issue.viewer, sha)) {
