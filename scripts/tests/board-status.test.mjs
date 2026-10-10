@@ -227,17 +227,16 @@ test('status and priority refuse an unknown flag or extra word, and --help or -h
   }
 });
 
-test('status refuses Done and Human review for a spec, by the label of the project file, and writes nothing', t => {
+test('status refuses Done for a spec, by the label of the project file, and writes nothing', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const labelled = name => writeIssue({ ...issue('In progress'), labels: { nodes: [{ name }] } });
 
   labelled('Spec');
-  for (const status of ['Done', 'Human review']) {
-    const result = run('field', '1', 'Status', status);
-    assert.equal(result.status, 2, result.stdout + result.stderr);
-    assert.match(result.stdout, /^ERROR - BLOCKED: #1 is a spec .*Only a human closes a spec/m, status);
-  }
+  const result = run('field', '1', 'Status', 'Done');
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.match(result.stdout, /^ERROR - BLOCKED: #1 is a spec .*Only a human closes a spec/m);
   assert.equal(existsSync(join(checkout, 'mutations')), false, 'a refused status writes nothing');
+  assert.equal(run('field', '1', 'Status', 'Human review').status, 0, 'a delivered spec goes to Human review');
 
   writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', specLabel: 'Konzept' }));
   assert.equal(run('field', '1', 'Status', 'Done').status, 0, 'the default label means nothing once the project names its own');

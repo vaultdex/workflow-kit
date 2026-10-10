@@ -239,8 +239,8 @@ and then work in that directory, their relative paths (changed files given to `a
 - `field ISSUE NAME VALUE [NAME VALUE ...]`: any single-select fields (Status and Priority too), all read back together after writing.
   Every pair is checked against the field definitions before the first write: one invalid pair writes
   nothing and names the valid options. It reports failures as one `ERROR - reason` line (exit 2, nothing else printed), not a stack trace.
-  Issue read errors name `OWNER/REPO#N`. `Status "In progress"` needs a startable issue assigned to you, `Status Ready` no decision wait, `Done` and
-  `Human review` are refused for a spec. `Status "Automated review" PR [OTHER_ISSUE...]` verifies the backlinks as `done` does. `start` and `done` set the status themselves;
+  Issue read errors name `OWNER/REPO#N`. `Status "In progress"` needs a startable issue assigned to you, `Status Ready` no decision wait, `Done` is
+  refused for a spec. `Status "Automated review" PR [OTHER_ISSUE...]` verifies the backlinks as `done` does. `start` and `done` set the status themselves;
   `field` is metadata maintenance.
 - `body ISSUE FILE BASE_FILE`: replace an issue body with `FILE` only if the current body
   still equals `BASE_FILE` (the body your change is based on; line endings and trailing

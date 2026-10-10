@@ -171,11 +171,11 @@ function loadDeliveries(predecessors) {
 }
 const projectItem = issue => issue.projectItems.nodes.find(item => item.project.id === project.id);
 
-// "specLabel" in the project file (default "spec") marks a spec. Only a human closes a spec or sets it to Done or Human review (AGENT_RULES.md, Hard rules).
+// "specLabel" in the project file (default "spec") marks a spec. Only a human closes a spec or sets it to Done (AGENT_RULES.md, Hard rules).
 const specLabel = project.specLabel === undefined ? 'spec' : project.specLabel;
 assert.ok(typeof specLabel === 'string' && specLabel.trim(), 'specLabel in .github/workflow-project.json must be a label name; omit the field for "spec"');
 const isSpec = issue => Boolean(issue.labels?.nodes?.some(label => label?.name?.toLowerCase() === specLabel.toLowerCase()));
-const specRefusal = (issueNumber, what) => `BLOCKED: #${issueNumber} is a spec (label "${specLabel}"); ${what}. Only a human closes a spec or sets Done or Human review; record the acceptance in a comment on the spec (AGENT_RULES.md, Hard rules).`;
+const specRefusal = (issueNumber, what) => `BLOCKED: #${issueNumber} is a spec (label "${specLabel}"); ${what}. Only a human closes a spec or sets Done; record the acceptance in a comment on the spec (AGENT_RULES.md, Hard rules).`;
 
 // "staleHours" in the project file (default 6): after that long without activity a claim has expired and the work counts as abandoned (#400).
 const staleHours = project.staleHours === undefined ? 6 : project.staleHours;
@@ -818,7 +818,7 @@ function resolveOption(fieldName, optionName) {
 
 /** Guards of a transition; a refusal throws. They print (backlinks), so run them only after every pair is valid. */
 function guardOption(issue, { fieldName, option }) {
-  if (fieldName === 'Status' && ['Done', 'Human review'].includes(option.name) && isSpec(issue)) throw new Error(specRefusal(issue.number, `Status ${option.name} is refused`));
+  if (fieldName === 'Status' && option.name === 'Done' && isSpec(issue)) throw new Error(specRefusal(issue.number, `Status ${option.name} is refused`));
   if (fieldName === 'Status' && option.name === 'Ready') {
     // Ready contradicts an open decision wait: it stays Backlog until the line is removed (#514).
     const decisions = waitReasons(issue.body).blocked.filter(reason => reason.startsWith(decisionWait));
