@@ -2633,6 +2633,11 @@ function start() {
   }
   const issue = readIssue();
   const takeover = process.argv.includes('--takeover');
+  // --takeover without an open PR would claim, branch and open an empty Draft PR (#564): refuse before anything is written.
+  if (takeover && !openPr(issue)) {
+    const merged = issue.closedByPullRequestsReferences?.nodes.find(pr => pr?.state === 'MERGED');
+    assert.fail(`--takeover: no open PR closes #${number}${merged ? ` (PR ${refOf(merged.repository, merged.number)} is already merged)` : ''}`);
+  }
   if (!mayStart(check(issue, { session, takeover }))) return;
   const stacked = stackedOn, login = issue.viewer.login;
   if (!issue.assignees.nodes.some(user => sameLogin(user.login, login))) restPost(`repos/${project.repository}/issues/${number}/assignees`, ['-f', `assignees[]=${login}`]);

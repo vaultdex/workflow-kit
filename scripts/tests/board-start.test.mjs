@@ -105,6 +105,16 @@ test('start --takeover continues the PR branch of another agent, whatever its pr
   assert.equal(existsSync(file('develops')), false, 'no branch of its own');
 });
 
+test('start --takeover without an open PR stops before it writes anything and names a merged PR (#564)', t => {
+  const { run, writeIssue, file } = startFixture(t);
+  writeIssue({ ...issue('Ready'), closedByPullRequestsReferences: { totalCount: 1, nodes: [{ number: 7, state: 'MERGED', repository: { nameWithOwner: 'test/example' } }] } });
+
+  const result = run('start', '1', '--session', 'S2', '--takeover');
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stdout, /--takeover: no open PR closes #1 \(PR #7 is already merged\)/);
+  for (const written of ['develops', 'comment-writes', 'created-pr', 'stored']) assert.equal(existsSync(file(written)), false, written);
+});
+
 test('start names the worktree that holds the branch when it cannot switch to it', t => {
   const { checkout, run, writeIssue, git } = startFixture(t);
   // The predecessor's worktree still has the branch checked out.
