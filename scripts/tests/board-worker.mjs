@@ -31,10 +31,9 @@ function echoingFakeGh(args, options) {
     throw error;
   }
 }
-// local-ci.mjs and affected-tests.mjs have their own tests: their starts (local-ci in the background or for `--push`, the targeted tests of `done`) are only written down in local-ci-calls, without the script path.
-const noteLocalCi = args => appendFileSync('local-ci-calls', `${args.slice(1).join(' ')}\n`);
-childProcess.spawn = (file, args) => { noteLocalCi(args); return { unref() {} }; };
-childProcess.execFileSync = (file, args, options) => file === process.execPath && /(local-ci|affected-tests)\.mjs$/.test(args[0]) ? noteLocalCi(args)
+// affected-tests.mjs has its own tests: the start of the targeted tests of `done` is only written down in affected-tests-calls, without the script path.
+const noteAffectedTests = args => appendFileSync('affected-tests-calls', `${args.slice(1).join(' ')}\n`);
+childProcess.execFileSync = (file, args, options) => file === process.execPath && /affected-tests\.mjs$/.test(args[0]) ? noteAffectedTests(args)
   : /(^|[\\/])gh(\.exe)?$/.test(file) ? echoingFakeGh(args, options)
   : /(^|[\\/])git(\.exe)?$/.test(file) ? realExecFileSync('git', args, { ...options, env: { ...options?.env, PATH: hostPath } })
     : realExecFileSync(file, args, options);

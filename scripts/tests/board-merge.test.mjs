@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fixture, handoffComment, handoffPr, issue, pushedAt, test } from './board-fixture.mjs';
+import { isolatedGit } from './fixtures.mjs';
 
 
 test('merge merges the checked head by its full id only when no review is running, and proves the merge', t => {
@@ -425,32 +427,23 @@ test('merge --stack gates every layer, merges only the top through merge-async a
   }
 });
 
-test('merge without a resident runner: starts local-ci for a head without its status, once, and runs the push commands after the merge', t => {
-  const { checkout, run } = fixture(t);
+test('merge runs the push commands of the project file as of the merge commit, one after the other, and the merge stands when one fails', t => {
+  const { checkout, env, run } = fixture(t);
   const oid = 'abcdef1' + '0'.repeat(33), commit = handoffPr().commits.nodes[0].commit;
-  const calls = () => existsSync(join(checkout, 'local-ci-calls')) ? readFileSync(join(checkout, 'local-ci-calls'), 'utf8').trim().split('\n') : [];
-  const local = { __typename: 'StatusContext', context: 'local-ci', state: 'SUCCESS' };
-  const write = (nodes, changes) => writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'main', headRefOid: oid, ...changes, commits: { nodes: [{ commit: { ...commit, oid,
-    statusCheckRollup: { contexts: { totalCount: nodes.length + 1, nodes: [{ __typename: 'CheckRun', name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }, ...nodes] } } } }] } })));
-  // A project without localChecks: no run, no push commands.
-  write([]);
-  assert.equal(run('merge', '7').status, 0);
-  assert.deepEqual(calls(), []);
-  rmSync(join(checkout, 'merges'));
-  // With localChecks and no status on the head: one start although the merge looks several times, and the merge waits for the status.
-  writeFileSync(join(checkout, 'base-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', localChecks: '.github/local-checks.json' }));
-  write([]);
-  const waiting = run('merge', '7', '--interval', '0', '--max-minutes', '0.02');
-  assert.equal(waiting.status, 4, waiting.stdout + waiting.stderr);
-  assert.deepEqual(calls(), ['--cwd . 7']);
-  assert.equal(existsSync(join(checkout, 'merges')), false);
-  // A fork's head is never started by the merge.
-  rmSync(join(checkout, 'local-ci-calls'));
-  write([], { isCrossRepository: true });
-  run('merge', '7', '--interval', '0', '--max-minutes', '0.01');
-  assert.deepEqual(calls(), []);
-  // With the status the head is not started again; the merge into main runs the push commands with the merge commit and its first parent.
-  write([local]);
-  assert.equal(run('merge', '7').status, 0);
-  assert.deepEqual(calls(), [`--cwd . --push main ${'b'.repeat(40)} ${'f'.repeat(40)}`]);
+  writeFileSync(join(checkout, 'pr.json'), JSON.stringify(handoffPr({ baseRefName: 'main', headRefOid: oid, commits: { nodes: [{ commit: { ...commit, oid } }] } })));
+  // A project checkout whose origin has the merge commit; its file lists three commands, the second one fails.
+  const origin = join(dirname(checkout), 'origin.git'), git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGit(dirname(checkout)) }).trim();
+  env.PUSHED = join(dirname(checkout), 'pushed').replaceAll('\\', '/');
+  git(dirname(checkout), 'init', '-q', '--bare', origin);
+  git(checkout, 'init', '-q', '-b', 'main');
+  git(checkout, 'remote', 'add', 'origin', origin);
+  writeFileSync(join(checkout, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/example', id: 'P1', push: ['echo "$BRANCH" >> "$PUSHED"', 'exit 3', 'echo never >> "$PUSHED"'] }));
+  git(checkout, 'add', '.github');
+  git(checkout, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'merged');
+  git(checkout, 'push', '-q', 'origin', 'main');
+  writeFileSync(join(checkout, 'merge-oid'), git(checkout, 'rev-parse', 'HEAD'));
+  const merged = run('merge', '7');
+  assert.equal(merged.status, 0, merged.stdout + merged.stderr);
+  assert.equal(readFileSync(env.PUSHED, 'utf8').trim(), 'main', 'the first command ran with the branch, the one after the failure did not');
+  assert.match(merged.stdout, /^note: the push commands of main failed/m);
 });

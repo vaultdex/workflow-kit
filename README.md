@@ -179,7 +179,7 @@ and then work in that directory, their relative paths (changed files given to `a
   with the same call. A new start is BLOCKED with `finish #N first` while you have an own unfinished issue (a resume or a stack on its work is not).
 - `done ISSUE [PR] [FILE] [--refs] [--max-minutes N]`: everything from the last push to Human review. PR defaults to the one open PR
   that closes the issue; name it for a partial PR (`Refs #N`, no closing link) or with `--refs` (the PR only names the issue, whether or not another PR closes it: only the PR gate runs, and the issue status, assignment and acceptance boxes stay untouched). In order, each step only if still open, so a repeated call after a push or a wait is the same call:
-  1. The targeted tests of the changed files (`affected-tests.mjs --run`, once per head; a project with `"localChecks"` gets its checks from `local-ci.mjs` instead).
+  1. The targeted tests of the changed files (`affected-tests.mjs --run`, once per head, in the foreground).
   2. The Draft PR ready for exactly the pushed head (the local `HEAD` is compared with the PR head as a prefix; the PR is reread 6 times, 5 s apart,
      because GitHub can show the previous push for a moment; closed PRs, forks and a head that stays different are refused; written once, only a read-back showing that head ready counts).
   3. The acceptance boxes of the issue body ticked (`- [ ]` to `- [x]`; a line that names an issue `#N` or `OWNER/REPO#N` stays open, and code blocks are not touched).
@@ -188,10 +188,9 @@ and then work in that directory, their relative paths (changed files given to `a
      (the GraphQL `addCloseIssueReferences` behind a closing keyword, which acts only on the default branch; read back up to five times, one second
      apart, because GitHub shows it with a delay) and the PR's URL as a comment (a missing comment after the write exits 2). A partial PR gets only
      the backlink comment. It never closes the issue: that happens when the PR merges into the default branch.
-  5. `local-ci.mjs` for the head once, in the background, when the project has `"localChecks"` and the head has no `local-ci` status.
-  6. The wait for CI and every reviewer, as in `wait` below (`--max-minutes`, default 9: `still waiting: call done again`, exit 4). A red check ends `FAILED` (exit 1).
-  7. The [handoff comment](#handoff-comment) from FILE, unless one for this head exists.
-  8. The gate, then Human review (exit 0 verified, 1 blocked, 2 unreadable or changed state, 3 waiting): the issue is assigned and startable, its PR connection is native
+  5. The wait for CI and every reviewer, as in `wait` below (`--max-minutes`, default 9: `still waiting: call done again`, exit 4). A red check ends `FAILED` (exit 1).
+  6. The [handoff comment](#handoff-comment) from FILE, unless one for this head exists.
+  7. The gate, then Human review (exit 0 verified, 1 blocked, 2 unreadable or changed state, 3 waiting): the issue is assigned and startable, its PR connection is native
      (read on every page, including manual links on release branches; text and branch links alone do not count), the PR is open and not a draft, checks and
      reviews are finished, threads and conflicts resolved, and the handoff comment for the current head exists. A partial PR (`--refs`, or beside exactly one
      other open PR that closes the issue) needs no native link and has no issue side (`merge PR` is its gate); two open
@@ -295,7 +294,7 @@ and then work in that directory, their relative paths (changed files given to `a
   the branch is not of this repository, is the default branch or is the base of another open PR (a stack: GitHub would close
   that PR); it prints `branch kept: …` with the reason. A failed or already done delete is a `note:` or `branch gone:` line,
   never an error of the merge. Without `--stack` it does not read the issue, claims or the [handoff comment](#handoff-comment).
-  A head without a `local-ci` status gets its run from `merge` as well ([Lokale CI](#lokale-ci)).
+  After a merge into `main` or a `release/*` branch it runs the project's `push` commands ([Push commands](#push-commands)).
 - `stack-sync TOP`: for the native stack of the top PR TOP, merges from the bottom layer up the base into each layer (`git merge`, no
   rebase, no force-push) and pushes it, in a temporary worktree of this checkout. A real conflict stops it with `blocker:`, the layer and the
   files; the merge stays open in the printed worktree. Run it after a lower layer got conflicts or the base moved.
@@ -391,75 +390,23 @@ and adds the heading and the `Head:` line itself; FILE holds the rest:
 - Eingeschränkte Reviewer: <Reviewer, Ursache, Beleg, oder „keine“>
 ```
 
-## Lokale CI
+## Push commands
 
-For a project without Actions minutes, `scripts/local-ci.mjs` runs the PR checks on this machine and reports them as
-commit statuses (REST only, no GraphQL points). **The status comes from this script, not from an agent's claim**; it runs
-on demand, there is no resident process. The log stays in `<main checkout>-local-ci/logs` (a folder beside the main checkout). Commands go through `bash -c`, on Windows always Git for Windows' `bash.exe` (derived from `git --exec-path`; the run aborts at start if it is missing, not the first `bash` on PATH, which can be WSL). If the checked state has a `.node-version`, setup, checks and push commands run with that Node version through `fnm exec` (after `fnm install`, which does nothing for an installed version). Without the file nothing changes; without `fnm` the Node version of the caller applies and the log says so. Run it only for
-PRs whose code you trust: the checks execute it.
-
-```sh
-node .vendor/workflow-kit/scripts/local-ci.mjs [--cwd PROJECT_DIR] 123    # check PR 123 once (exit 0 green, 1 red)
-```
-
-- `board.mjs done` and `merge` start it themselves, in the background and once per head, when the head has no `local-ci` status (Renovate, pin and
-  human PRs, or the head after the base was merged into the PR), and waits for the status. A status is never renewed by itself:
-  after a push, run it again; a `pending` left by an interrupted run is run again by hand.
-- After a merge into `main` or a `release/*` branch, `board.mjs merge` runs the `push` commands (below) through
-  `local-ci.mjs --push BRANCH BEFORE_SHA AFTER_SHA` and waits for them; a failure there is a note, the merge stands.
-- Runs at the same time take the first free folder `<main checkout>-local-ci/work-N` (a `lock-N` file with the PID of a living process
-  holds it; the file of a dead process is taken over), so drivers never share a folder and the folders stay for the next run.
-  Commands sharing a resource must key it by the worktree folder, as Vaultdex' `gradle-container.mjs` does for its Gradle volume.
-
-`"localChecks"` in `.github/workflow-project.json` names a JSON file of the project (path relative to the repository root, with `/`).
-The script reads both files per PR from `origin/<base of the PR>` after a fresh fetch (`git show`), never from the PR itself,
-which is untrusted, and not from its own checkout either (only the `repository` name is read there):
+There is no local CI: a driver runs the targeted tests itself (`done`, above), and the PR checks are the repository's own CI. What
+remains is the follow-up of a merge. After `board.mjs merge` merged into `main` or a `release/*` branch it runs, in the foreground and
+one after the other (30 minutes each; a failure is a note, the merge stands), the `push` list of `.github/workflow-project.json`
+(for example the board sweep, the release-branch sync or the kit pin):
 
 ```json
-{
-  "setup": ["node scripts/bootstrap.mjs"],
-  "checks": [{ "context": "Backend domain", "paths": ["backend/domain/**", "!**/*.md"], "run": ["./gradlew :domain:test"], "timeoutMinutes": 30 }],
-  "push": ["node scripts/board.mjs sweep"]
-}
+{ "push": ["node .vendor/workflow-kit/scripts/board.mjs sweep"] }
 ```
 
-- `riskPaths` (list, same rules as `paths`, next to `checks` in the `localChecks` file) and `"slow": true` on a check: a slow check
-  selected by its `paths` runs only when a changed file matches `riskPaths`; otherwise it reports `success` with
-  "übersprungen: risikoarm" and does not start. Without `riskPaths` slow checks always run (nothing changes).
-- `baseRecheck` (command, next to `checks` in the `localChecks` file): tells whether a red PR run is the base's fault. The script sets
-  `LOCAL_CI_RED_TESTS` for the checks; a check appends the names of its failed tests to that file, one per line. If the run is red and
-  the file has names, the script resets the worktree to the base commit, runs `setup` and then `baseRecheck` once (timeout: the longest
-  selected check) with `LOCAL_CI_RED_TESTS` (input) and `LOCAL_CI_BASE_RED_TESTS` (output: the command writes the names that are still red there).
-  Tests red on both sides appear as "Basis rot: <tests>" right after the "Basis <sha>" stamp of the `local-ci` description and in a PR comment (once per run). Without `baseRecheck`
-  (or without names) nothing changes; a failing recheck never changes the result. Vaultdex' `scripts/red-tests.mjs` can supply the names.
-- `paths` use GitHub's rules for `*`, `**` and `!` only (no `?` or `[…]`): in order, a later match wins, `!` takes a file
-  back out, `*` stays within a folder, `**` goes below it. A check runs when one changed file of the PR matches.
-- Per PR the script builds the merge state itself in its own worktree (`<main checkout>-local-ci/work-N`; not under `.git`,
-  where Jest finds no tests; the folder is cleaned before every run, ignored files such as `node_modules` included): fresh fetch of `origin/<base>` and
-  `refs/pull/N/head`, then the head is merged into the base (`--no-ff`, fixed identity, no hooks), so `HEAD^1` is the base like in
-  Actions. GitHub's `refs/pull/N/merge` is not used: it stays on the old base after a merge into the target branch. A merge conflict gives a red
-  `local-ci` with "Konflikt mit <base>". The commands get `BASE_SHA`, `BASE_REF`, `HEAD_REF` and
-  `EVENT=pull_request` and run one after the other until one fails; `timeoutMinutes` limits all commands of a check.
-- The final `local-ci` status starts with `Basis <first 12 characters of the base SHA>`: the base it was checked against.
-- Status flow: `local-ci` (all checks of the head) and every selected check go `pending` at once, then `success` or
-  `failure` with duration and host or the first error line. A check no changed file selects gets **no** status;
-  `local-ci` then says so, which is what `board.mjs` needs to stop waiting for the "first CI check".
-- `setup` runs once per PR before the selected checks (not at all when none is selected, 60 minutes at most); a failed setup fails them.
-- Without `.github/workflow-project.json` (or its `localChecks` file) on the base branch, the PR gets a red `local-ci`
-  status that says so.
-- `push` (list, next to `checks`, read from `origin/<branch>` after a merge into `main` or a `release/*` branch) runs with
-  `BRANCH`, `BEFORE_SHA` (the base before the merge), `AFTER_SHA` (the merge commit) and `EVENT=push` (for example to update release branches, run the board sweep or pin the kit).
-  The commands run in a worktree of their own on `AFTER_SHA`, never in the checkout, which may be old: a file that only exists on the new state is there. The commands themselves are
-  read from `AFTER_SHA`, so config and worktree are always one commit. `setup` does not run (no `npm ci`); if that state has the kit gitlink, only
-  `git submodule update --init .vendor/workflow-kit` runs first. The commands run one after the other until one fails (30 minutes each); their output goes to `<main checkout>-local-ci/logs/push-<branch>.log`.
-- `kitPush` (list, next to `push`, read from `origin/main`) runs the same way, on `origin/main` of the project, with `BRANCH=main`,
-  `EVENT=kit` and the kit's SHAs, after `board.mjs merge` merged a kit PR into `main` and was started with `--cwd <project>/.vendor/workflow-kit`.
-  A kit clone outside a project knows no project: nothing runs. Meant for `kit-pin.mjs`, which the project's `push` also runs on every `main`.
-- With `localChecks` configured, `board.mjs wait`, `done` and `merge` require the head's `local-ci` commit
-  status: missing or `pending` waits, `failure` and `error` are red, and only `success` passes.
-  `localChecks`, `awaitApps`, `optionalReviewers` and `updateBranchChecks` are read from `.github/workflow-project.json` on the
-  PR's base branch at each look (GitHub contents API), not from the checkout, so a stale checkout cannot skip `local-ci`;
-  an unreadable file there is an error, never a fallback to the checkout.
+- The list is read from the merge commit. The commands run with `BRANCH` in a throwaway worktree of that commit (never in the checkout, which may be old), without setup;
+  if that state has the kit gitlink, only `git submodule update --init .vendor/workflow-kit` runs first. Bash is Git for Windows' `bash.exe` on Windows (derived from `git --exec-path`, not the WSL one), `/bin/bash` elsewhere.
+- `kitPush` (list, next to `push` in the project's file, read from the project's `origin/main`) runs the same way, with `BRANCH=main`, after `board.mjs merge`
+  merged a kit PR into `main` and was started with `--cwd <project>/.vendor/workflow-kit`. A kit clone outside a project knows no project: nothing runs.
+- `push`, `awaitApps`, `optionalReviewers` and `updateBranchChecks` are read from `.github/workflow-project.json` on the PR's base branch at each look (GitHub contents API),
+  not from the checkout; an unreadable file there is an error, never a fallback to the checkout.
 
 ## Project test map
 

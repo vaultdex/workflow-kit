@@ -3,8 +3,8 @@
 // `--cwd PATH` as the first argument runs it for the project in PATH from any directory: without it the
 // working directory decides the project, and a driver in another project would read and write the wrong board.
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1245,7 +1245,7 @@ function verifyBacklinks(issue) {
 const login = user => user?.login?.replace(/\[bot\]$/, '');
 const isBot = user => user?.type === 'Bot';
 // The review gate (`reviews`, so `wait`, `handoff` and `merge`) takes these settings from the target branch of the PR as it is now, never from
-// the checkout: a stale checkout would apply rules the branch has since changed, and merge a PR without the local-ci the branch demands (#448).
+// the checkout: a stale checkout would apply rules the branch has since changed (#448).
 // ponytail: one REST read per look, no cache; cache by base commit if the REST quota ever gets tight.
 let gate = project;
 let optional; // the optionalReviewers set of `gate`, built on first use and dropped with every new `gate`
@@ -1254,7 +1254,7 @@ function useBaseSettings(pr) {
   const file = rest(`repos/${project.repository}/contents/.github/workflow-project.json?ref=${encodeURIComponent(pr.baseRefName)}`);
   assert.equal(file?.encoding, 'base64', `.github/workflow-project.json on ${pr.baseRefName} is unreadable`);
   const base = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
-  gate = { ...project, ...Object.fromEntries(['localChecks', 'awaitApps', 'optionalReviewers', 'updateBranchChecks'].map(key => [key, base[key]])) };
+  gate = { ...project, ...Object.fromEntries(['push', 'awaitApps', 'optionalReviewers', 'updateBranchChecks'].map(key => [key, base[key]])) };
   optional = undefined;
 }
 // "optionalReviewers" lists bot logins or app slugs whose traces are shown but never awaited, stalled or counted as red
@@ -1274,8 +1274,7 @@ const updateBranchChecks = () => {
   return new Set(list);
 };
 const isOptional = name => (optional ??= optionalReviewers()).has(reviewerKey(name));
-const isLocalCi = check => check.__typename === 'StatusContext' && check.context === 'local-ci';
-const isOptionalCheck = check => !(gate.localChecks && isLocalCi(check)) && isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
+const isOptionalCheck = check => isOptional(check.checkSuite?.app?.slug ?? check.creator?.login);
 const passed = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 const readPr = prNumber => graphql(prQuery, { owner, name, number: prNumber }).repository.pullRequest;
@@ -1401,20 +1400,10 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   }
   const decisiveRun = check => newestExecuted.get(jobKey(check)) ?? newestSkipped.get(jobKey(check));
   const live = contexts.nodes.filter(check => !orderable(check) || runOf(check) === decisiveRun(check));
-  // A check run and a commit status of one name are the same check reported twice (Actions first, local CI later): the newer
-  // kind decides, the older one is only a note. Entries of one kind never replace each other here. No time reads as newest.
-  const labelOf = check => check.name ?? check.context;
-  const stamp = check => Date.parse(check.__typename === 'CheckRun' ? check.completedAt ?? check.startedAt : check.createdAt) || Infinity;
-  const replacedByOtherKind = check => live.some(other => other.__typename !== check.__typename && labelOf(other) === labelOf(check) && stamp(other) > stamp(check));
-  const current = live.filter(check => isOptionalCheck(check) || !replacedByOtherKind(check));
-  for (const check of live.filter(check => !current.includes(check))) {
-    lines.push(`note: ${labelOf(check)} ${check.conclusion ?? check.state} as ${check.__typename === 'CheckRun' ? 'check run' : 'commit status'} is replaced by a newer one of the same name`);
-  }
-  if (gate.localChecks && !current.some(isLocalCi)) waiting.push({ text: 'check local-ci', since: Infinity });
-  for (const check of current.filter(check => orderable(check) && newestSkipped.get(jobKey(check)) > runOf(check))) {
+  for (const check of live.filter(check => orderable(check) && newestSkipped.get(jobKey(check)) > runOf(check))) {
     lines.push(`note: ${check.name} was SKIPPED in a newer run, which proves nothing; run ${runOf(check)} decides`);
   }
-  for (const check of current) {
+  for (const check of live) {
     const label = check.name ?? check.context;
     const pending = check.__typename === 'CheckRun' ? check.status !== 'COMPLETED' : ['PENDING', 'EXPECTED'].includes(check.state);
     // An optional reviewer's check is shown and never decides: not awaited, not red.
@@ -1561,7 +1550,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     else waiting.push({ text, since: Infinity });
   }
   // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final; a skipped check ran no analysis.
-  for (const check of current.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
+  for (const check of live.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
     const { total: open, lines: found } = sonarIssues(check.detailsUrl, pr.number, check.summary);
     if (open === null) {
       lines.push('blocker: the Sonar issue count is unreadable: SONAR_TOKEN is not set and the SonarCloud check summary has no "N New issues"; set SONAR_TOKEN (README, Board commands) and run done again');
@@ -1637,7 +1626,7 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     ...reviewList.filter(review => review.commit_id === pr.headRefOid).map(review => review.user),
     ...reactions.filter(reaction => reaction.content !== 'eyes' && after(reaction.created_at)).map(reaction => reaction.user),
   ].some(user => isBot(user) && login(user) !== 'github-actions' && !isOptional(user.login))
-    || current.some(check => !isOptionalCheck(check) && check.checkSuite?.app?.slug !== 'github-actions' && limitNotice.test(`${check.title ?? ''} ${check.description ?? ''}`));
+    || live.some(check => !isOptionalCheck(check) && check.checkSuite?.app?.slug !== 'github-actions' && limitNotice.test(`${check.title ?? ''} ${check.description ?? ''}`));
   const readyAt = Math.max(...[pr.createdAt, ...(pr.readyEvents?.nodes ?? []).map(event => event.createdAt)].filter(Boolean).map(Date.parse));
   if (graceMinutes > 0 && !answeredBot) {
     const graceFrom = Math.max(readyAt, pushed, headSetAt(pr, pushes()));
@@ -2224,36 +2213,35 @@ function deleteHeadBranch(pr) {
   return `branch deleted: ${branch}`;
 }
 
-const localCi = fileURLToPath(new URL('local-ci.mjs', import.meta.url));
-
 /**
- * No resident runner: a head without a `local-ci` status (a PR of `done`, Renovate, pin and human PRs, or the head after a base update) gets its run from here,
- * once per head and in the background (a run outlasts a tool call); the looks wait for its pending status. A run killed halfway leaves `pending`: start it again by hand.
- */
-function startLocalCi(result, prNumber, started) {
-  const sha = result.pr?.headRefOid;
-  if (!result.done && sha && gate.localChecks && !result.pr.isCrossRepository && !started.has(sha)) { // a fork's code never runs on this machine by itself
-    started.add(sha);
-    if (!rest(`repos/${project.repository}/commits/${sha}/statuses?per_page=100`).some(status => status.context === 'local-ci')) {
-      spawn(process.execPath, [localCi, '--cwd', projectDirectory, String(prNumber)], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-      console.log(`local-ci: no status on ${sha.slice(0, 7)}, started it in the background`);
-    }
-  }
-  return result;
-}
-
-/**
- * There is no resident runner: after a merge into main or a release branch the project's `push` commands run here (sweep, release sync, pin),
- * after a merge in the kit the `kitPush` of the project that holds it as its submodule (`--cwd <project>/.vendor/workflow-kit`; a standalone kit clone knows no project). A merge is never undone by a failure here.
+ * After a merge into main or a release branch the `push` commands of `.github/workflow-project.json` (as on the merge commit) run here, in the
+ * foreground (sweep, release sync, pin); after a merge in the kit (`--cwd <project>/.vendor/workflow-kit`) the `kitPush` commands of the project that
+ * holds it as its submodule, as on its origin/main. They run with BRANCH in a throwaway worktree on that commit, without setup (only the kit submodule is
+ * fetched). A merge is never undone by a failure here.
+ * ponytail: the commands run in bash, on Windows the one of Git for Windows (not WSL's), elsewhere /bin/bash.
  */
 function runPush(branch, merged) {
   if (!merged || (branch !== 'main' && !branch.startsWith('release/'))) return;
+  const here = resolve(projectDirectory), superproject = basename(dirname(here)) === '.vendor' ? dirname(dirname(here)) : ''; // the kit sits in <project>/.vendor/workflow-kit
+  if (superproject ? branch !== 'main' : !gate.push?.length) return; // a project without push commands (as on the base before the merge) needs no fetch
+  const root = superproject || projectDirectory, tool = externalTool('git', process.cwd(), root);
+  const run = (cwd, ...args) => execFileSync(tool.file, ['-C', cwd, ...args], { encoding: 'utf8', env: tool.env, stdio: 'pipe' }).trim();
+  let work;
   try {
-    const here = resolve(projectDirectory), superproject = basename(dirname(here)) === '.vendor' ? dirname(dirname(here)) : ''; // the kit sits in <project>/.vendor/workflow-kit
-    if (superproject ? branch !== 'main' : !gate.localChecks) return;
-    const before = rest(`repos/${project.repository}/commits/${merged}`).parents[0].sha;
-    execFileSync(process.execPath, [localCi, '--cwd', superproject || projectDirectory, '--push', branch, before, merged, ...superproject ? ['kit'] : []], { stdio: 'inherit' });
+    run(root, 'fetch', '--quiet', 'origin', branch);
+    const sha = superproject ? run(root, 'rev-parse', 'FETCH_HEAD') : merged;
+    const commands = JSON.parse(run(root, 'show', `${sha}:.github/workflow-project.json`))[superproject ? 'kitPush' : 'push'] ?? [];
+    if (!commands.length) return;
+    work = mkdtempSync(join(tmpdir(), 'board-push-'));
+    run(root, 'worktree', 'add', '--quiet', '--detach', work, sha);
+    if (run(work, 'ls-files', '--stage', '--', '.vendor/workflow-kit').startsWith('160000')) run(work, 'submodule', 'update', '--init', '.vendor/workflow-kit'); // the scripts need the kit
+    const bash = process.platform === 'win32' ? resolve(run(root, '--exec-path'), '..', '..', '..', 'bin', 'bash.exe') : '/bin/bash';
+    for (const command of commands) execFileSync(bash, ['-c', command], { cwd: work, env: { ...process.env, BRANCH: branch }, stdio: 'inherit', windowsHide: true, timeout: 30 * 60_000 });
   } catch (error) { console.log(`note: the push commands of ${branch} failed (${String(error.message).split('\n')[0]})`); }
+  if (work) {
+    rmSync(work, { recursive: true, force: true });
+    try { run(root, 'worktree', 'prune'); } catch { /* only tidiness */ }
+  }
 }
 
 /**
@@ -2280,8 +2268,7 @@ async function merge() {
       return;
     }
   }
-  const started = new Set();
-  const look = () => startLocalCi(reviews(stallOption()), number, started);
+  const look = () => reviews(stallOption());
   // Like `wait`: look again until CI and the reviewers have finished (or --max-minutes runs out: exit 4); the gate then decides once.
   const polled = await poll(look);
   if (!polled) return;
@@ -2691,9 +2678,8 @@ function start() {
 }
 
 /**
- * `done ISSUE [PR] [FILE]`: everything from the last push to Human review. The targeted tests of the changed files (a project with `localChecks`
- * gets its checks from local-ci instead), the PR ready for exactly the pushed head, the acceptance boxes ticked, Automated review, the local-ci run
- * once per head, the wait for CI and reviewers (`still waiting: call done again`, exit 4, after --max-minutes), the handoff comment from FILE
+ * `done ISSUE [PR] [FILE]`: everything from the last push to Human review. The targeted tests of the changed files (in the
+ * foreground, once per head), the PR ready for exactly the pushed head, the acceptance boxes ticked, Automated review, the wait for CI and reviewers (`still waiting: call done again`, exit 4, after --max-minutes), the handoff comment from FILE
  * (result sentence and the `### Retro` list; heading and head line are added here) and the handoff gate with its Sonar issue count. Every call
  * does what is still open, so a repeated call after a push or a wait is the same call. PR: the one open PR that closes the issue.
  * `--refs`: a PR that only names the issue (a part for another base): its gate runs, the issue status stays.
@@ -2710,7 +2696,7 @@ async function done() {
   const fail = reason => { console.log(`FAILED\nblocker: ${reason}`); process.exitCode = 1; };
   // The tests of this head ran once: a call that only waits does not repeat them.
   const tested = resolve(projectDirectory, git('rev-parse', '--git-path', 'board-done-tested'));
-  if (!project.localChecks && !(existsSync(tested) && readFileSync(tested, 'utf8') === sha)) {
+  if (!(existsSync(tested) && readFileSync(tested, 'utf8') === sha)) {
     try {
       execFileSync(process.execPath, [fileURLToPath(new URL('affected-tests.mjs', import.meta.url)), '--cwd', projectDirectory, '--run', '--base', `origin/${pull.base.ref}`], { stdio: 'inherit' });
     } catch { return fail('the targeted tests of the changed files failed (output above); fix them, push, then run done again'); }
@@ -2724,8 +2710,7 @@ async function done() {
   const status = projectItem(issue)?.status?.name;
   if (partial) postBacklink(number, pull.html_url);
   else if (!['Automated review', 'Human review'].includes(status)) set('Status', 'Automated review');
-  const started = new Set();
-  const result = await poll(() => startLocalCi(reviewsForHead(prNumber), prNumber, started));
+  const result = await poll(() => reviewsForHead(prNumber));
   if (!result) return;
   if (result.failed) {
     process.exitCode = outcome(result)[1];
