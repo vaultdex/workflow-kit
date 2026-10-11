@@ -1595,22 +1595,13 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     }
     lines.push(`sonar: ${open} open issue${open === 1 ? '' : 's'}`, ...found);
     if (open) lines.push(`blocker: ${open} open Sonar issue${open === 1 ? '' : 's'} on this head; fix them or justify each as a false positive`);
-    // A failure notice after the green check contradicts it (#570). The notice names no revision or task: only a person's
-    // "sonar-evidence COMMENT_ID task TASK revision SHA" (read from the Sonar CE) clears it, and only for an older head.
-    // ponytail: matched by time and wording; replace by the task id once Sonar names it in the comment.
+    // A failure notice after the green check contradicts it (#570). It names no revision and is mostly about an older commit
+    // whose analysis Sonar dropped (#2452): shown, never a blocker; the green check of the head decides.
+    // ponytail: matched by time and wording; name the revision once Sonar puts it in the comment.
     const greenAt = Date.parse(check.completedAt);
     for (const notice of check.conclusion === 'SUCCESS' ? comments.filter(comment => isBot(comment.user) && /sonar/i.test(login(comment.user))
       && /analysis has failed/i.test(comment.body ?? '') && after(comment.created_at) && !(Date.parse(comment.created_at) < greenAt)) : []) {
-      const proof = comments.filter(comment => !isBot(comment.user)).map(comment => comment.body?.match(new RegExp(`sonar-evidence ${notice.id} task ([\\w-]+) revision ([0-9a-f]{7,40})\\b`, 'i'))).find(Boolean);
-      if (!proof) {
-        lines.push(`blocker: Sonar failure notice ${notice.html_url} came after the green check of head ${short}; it names no task or revision, so it may be about this head (matched by time only); `
-          + `document the CE task as "sonar-evidence ${notice.id} task TASK revision SHA" in a PR comment`);
-      } else if (pr.headRefOid.startsWith(proof[2].toLowerCase())) {
-        lines.push(`blocker: Sonar task ${proof[1]} failed on this head ${short} (failure notice ${notice.html_url})`);
-      } else {
-        lines.push(`sonar: failure notice ${notice.html_url} is task ${proof[1]} of the older revision ${proof[2].slice(0, 7)}, documented by a person (no ID link); `
-          + `the green check stands for head ${short} (task unknown)`);
-      }
+      lines.push(`sonar: failure notice ${notice.html_url} came after the green check of head ${short}; it names no revision (likely an older commit), the green check stands`);
     }
   }
   const reviewList = restAll(`repos/${project.repository}/pulls/${pr.number}/reviews`);
