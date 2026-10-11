@@ -16,7 +16,10 @@ import { isRateLimited, quotaOf, retryAt, splitResponse, untilText, waitInterval
 const startDirectory = takeCwd();
 let projectDirectory;
 try { projectDirectory = projectRoot(startDirectory); } catch (error) {
-  console.error(`${startDirectory}: ${error.code === 'ENOENT' ? 'is not a directory' : 'is not inside a Git checkout'}`);
+  // Only the two expected misses get a short line; any other failure (EACCES, ELOOP) keeps its own message.
+  const missing = ['ENOENT', 'ENOTDIR'].includes(error.code);
+  if (!missing && error.code !== 'ERR_ASSERTION') throw error;
+  console.error(`${startDirectory}: ${missing ? 'is not a directory' : 'is not inside a Git checkout'}`);
   process.exit(2);
 }
 const [command, ref, typed] = process.argv.slice(2);
