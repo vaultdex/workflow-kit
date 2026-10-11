@@ -1585,6 +1585,8 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     else waiting.push({ text, since: Infinity });
   }
   // The quality gate judges new conditions only, so a green SonarCloud check can sit on open issues. Count them once the analysis is final; a skipped check ran no analysis.
+  const comments = restAll(`repos/${project.repository}/issues/${pr.number}/comments`);
+  const short = pr.headRefOid.slice(0, 7);
   for (const check of live.filter(check => check.checkSuite?.app?.slug === 'sonarqubecloud' && check.status === 'COMPLETED' && check.conclusion !== 'SKIPPED')) {
     const { total: open, lines: found } = sonarIssues(check.detailsUrl, pr.number, check.summary);
     if (open === null) {
@@ -1593,8 +1595,15 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
     }
     lines.push(`sonar: ${open} open issue${open === 1 ? '' : 's'}`, ...found);
     if (open) lines.push(`blocker: ${open} open Sonar issue${open === 1 ? '' : 's'} on this head; fix them or justify each as a false positive`);
+    // A failure notice after the green check contradicts it (#570). It names no revision and is mostly about an older commit
+    // whose analysis Sonar dropped (#2452): shown, never a blocker; the green check of the head decides.
+    // ponytail: matched by time and wording; name the revision once Sonar puts it in the comment.
+    const greenAt = Date.parse(check.completedAt);
+    for (const notice of check.conclusion === 'SUCCESS' ? comments.filter(comment => isBot(comment.user) && /sonar/i.test(login(comment.user))
+      && /analysis has failed/i.test(comment.body ?? '') && after(comment.created_at) && !(Date.parse(comment.created_at) < greenAt)) : []) {
+      lines.push(`sonar: failure notice ${notice.html_url} came after the green check of head ${short}; it names no revision (likely an older commit), the green check stands`);
+    }
   }
-  const comments = restAll(`repos/${project.repository}/issues/${pr.number}/comments`);
   const reviewList = restAll(`repos/${project.repository}/pulls/${pr.number}/reviews`);
   // Bots acknowledge "@bot review" comments with a reaction on that comment, not on the PR.
   const reactions = [...restAll(`repos/${project.repository}/issues/${pr.number}/reactions`),
@@ -1612,7 +1621,6 @@ function reviews(stallMinutes = 20, now = Date.now(), prNumber = number, pr = re
   // The summary's own later edits are no result, so its comment id is skipped.
   const answeredAfter = (author, since, own, kind) => results.some(([who, time, id, resultKind]) =>
     who === author && (id === null || id !== own) && Date.parse(time) > since && (resultKind === 'any' || resultKind === kind));
-  const short = pr.headRefOid.slice(0, 7);
   for (const comment of comments.filter(comment => isBot(comment.user) && !isOptional(comment.user.login) && after(comment.updated_at))) {
     // Summary comments (Codex) name the head in a table row that says Running until the review completes;
     // a result the same bot posts elsewhere ends it too.

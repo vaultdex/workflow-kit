@@ -173,6 +173,15 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
     detailsUrl: 'https://sonarcloud.io/dashboard?id=test_example&pullRequest=7', checkSuite: { app: { slug: 'sonarqubecloud' } } };
   const sonarOnly = look(pr({ contexts: [sonar] }));
   assert.equal(sonarOnly.status, 0, sonarOnly.stdout + sonarOnly.stderr);
+  assert.doesNotMatch(sonarOnly.stdout, /failure notice/, 'The normal green run raises no contradiction');
+  // A failure notice after the green check is shown, never a blocker: it names no revision (#570).
+  const greenAt = { ...sonar, completedAt: minutesAgo(3) };
+  const notice = (minutes, id = 501) => ({ id, user: { login: 'sonarqubecloud[bot]', type: 'Bot' }, html_url: `n${id}`, created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes), body: 'The last analysis has failed.' });
+  const contradicted = look(pr({ contexts: [greenAt] }), { comments: [notice(2)] });
+  assert.match(contradicted.stdout, /^sonar: failure notice n501 came after the green check/m, 'A later notice is shown');
+  assert.equal(contradicted.status, 0, 'A later notice does not block');
+  assert.doesNotMatch(look(pr({ contexts: [greenAt] }), { comments: [notice(4)] }).stdout, /failure notice/, 'A notice before the green check is superseded');
+  assert.doesNotMatch(look(pr({ contexts: [greenAt] }), { comments: [notice(7)] }).stdout, /failure notice/, 'A notice from before the push belongs to an older head');
   assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
