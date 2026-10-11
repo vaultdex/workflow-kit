@@ -309,7 +309,9 @@ and then work in that directory, their relative paths (changed files given to `a
   `blocker:` line for any, after up to 10 `sonar: RULE file:line message` lines (the rest only counted). The read uses `SONAR_TOKEN` from the
   environment (the anonymous API reports 0 for private projects); on a refused read the command ends `ERROR` (exit 2), never green.
   Without the token it reads `N New issues` from the SonarCloud check run's summary instead: only a readable 0 passes, a larger count or an
-  unreadable summary exits 1 with a `blocker:` line that names `SONAR_TOKEN`. Security hotspots stay a manual read. A workflow
+  unreadable summary exits 1 with a `blocker:` line that names `SONAR_TOKEN`. Security hotspots stay a manual read. A Sonar comment
+  "analysis has failed" posted after the green check is a `blocker:` (it names no task or revision, so it may be about this head); it clears
+  only with a PR comment `sonar-evidence COMMENT_ID task TASK revision SHA` (from the Sonar CE) naming an older revision. A workflow
   whose `pull_request` jobs for the head were all skipped before the Ready event (Draft
   guard), with no executed run since Ready, waits (exit 3): the skip proves nothing
   about the Ready head. Push a commit to start one: a workflow without a `ready_for_review` trigger never does otherwise.

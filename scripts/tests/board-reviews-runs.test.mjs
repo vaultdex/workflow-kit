@@ -173,6 +173,22 @@ test('reviews reads Codex rows, blockers and threads, and wait ends with the ver
     detailsUrl: 'https://sonarcloud.io/dashboard?id=test_example&pullRequest=7', checkSuite: { app: { slug: 'sonarqubecloud' } } };
   const sonarOnly = look(pr({ contexts: [sonar] }));
   assert.equal(sonarOnly.status, 0, sonarOnly.stdout + sonarOnly.stderr);
+  assert.doesNotMatch(sonarOnly.stdout, /failure notice/, 'The normal green run raises no contradiction');
+  // A failure notice after the green check contradicts it; only a person's evidence of an older revision clears it (#570).
+  const greenAt = { ...sonar, completedAt: minutesAgo(3) };
+  const notice = (minutes, id = 501) => ({ id, user: { login: 'sonarqubecloud[bot]', type: 'Bot' }, html_url: `n${id}`, created_at: minutesAgo(minutes), updated_at: minutesAgo(minutes), body: 'The last analysis has failed.' });
+  const evidence = (revision, id = 501) => ({ id: 900, user: { login: 'maintainer', type: 'User' }, html_url: 'e', created_at: minutesAgo(1), updated_at: minutesAgo(1),
+    body: `sonar-evidence ${id} task AaEnzq_WqxZKWC9Ksb9D revision ${revision}` });
+  const contradicted = look(pr({ contexts: [greenAt] }), { comments: [notice(2)] });
+  assert.match(contradicted.stdout, /^blocker: Sonar failure notice n501 came after the green check of head abcdef1; it names no task or revision/m, 'An unexplained notice blocks');
+  assert.match(look(pr({ contexts: [{ ...greenAt, completedAt: undefined }] }), { comments: [notice(2)] }).stdout, /^blocker: Sonar failure notice/m, 'An unreadable check time stays open');
+  assert.match(look(pr({ contexts: [greenAt] }), { comments: [notice(2), evidence('abcdef1')] }).stdout, /^blocker: Sonar task AaEnzq_WqxZKWC9Ksb9D failed on this head abcdef1/m, 'Evidence for the current head blocks');
+  const older = look(pr({ contexts: [greenAt] }), { comments: [notice(2), evidence('c106fab3cb0835a247bf9aa88a20fde8f949137d')] }).stdout;
+  assert.match(older, /^sonar: failure notice n501 is task AaEnzq_WqxZKWC9Ksb9D of the older revision c106fab, documented by a person \(no ID link\); the green check stands for head abcdef1 \(task unknown\)$/m);
+  assert.doesNotMatch(older, /^blocker:/m, 'Evidence of an older revision lets the green head through');
+  assert.doesNotMatch(look(pr({ contexts: [greenAt] }), { comments: [notice(2), evidence('c106fab', 502)] }).stdout, /^sonar: failure notice/m, 'Evidence for another notice clears nothing');
+  assert.doesNotMatch(look(pr({ contexts: [greenAt] }), { comments: [notice(4)] }).stdout, /^blocker:/m, 'A notice before the green check is superseded');
+  assert.doesNotMatch(look(pr({ contexts: [greenAt] }), { comments: [notice(7)] }).stdout, /^blocker:/m, 'A notice from before the push belongs to an older head');
   assert.equal(reviews(rabbitReadyHead, oldTraces), 3, 'Precondition: unlisted, the same Draft-skipped run waits');
   const oldHeadReview = { user: codexUser, commit_id: 'previous', state: 'COMMENTED', html_url: 'r', submitted_at: minutesAgo(0) };
   assert.equal(reviews(pr(), { reactions: [reaction('eyes', 0.5)], reviewList: [oldHeadReview] }), 3, 'A review of the previous head answers nothing');
