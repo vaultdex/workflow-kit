@@ -21,6 +21,7 @@ export function fixture(t) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const checkout = join(root, 'checkout'), bin = join(root, 'bin');
   mkdirSync(join(checkout, '.github'), { recursive: true });
+  mkdirSync(join(checkout, '.git')); // board.mjs takes the nearest checkout as its project
   mkdirSync(bin);
   // board.mjs only looks for a `gh` (and `ready --local` for a `git`) on PATH outside the checkout; its gh calls go to fake-gh.mjs (see board-worker.mjs).
   for (const tool of ['gh', 'git']) writeFileSync(join(bin, process.platform === 'win32' ? `${tool}.exe` : tool), '');
