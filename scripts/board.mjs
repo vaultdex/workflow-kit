@@ -473,8 +473,16 @@ function branchWork(issue, branch) {
   return { ahead, idle: Number.isFinite(newest) ? Date.now() - newest : undefined };
 }
 
-/** What the open PRs and branches of an issue hold against a start by SESSION: one rule for `check` and `next`. */
-const startReasons = (issue, session, takeover) => ownPr(issue, session) ? { blocked: [], notes: [] } : workReasons(issue, session, takeover);
+/** Logins on the issue other than the caller: their claim may predate any PR (#572). */
+const foreignAssignees = issue => issue.assignees.nodes.map(user => user.login).filter(login => !sameLogin(login, issue.viewer.login));
+
+/** What the open PRs, branches and assignees of an issue hold against a start by SESSION: one rule for `check` and `next`. */
+function startReasons(issue, session, takeover) {
+  if (ownPr(issue, session)) return { blocked: [], notes: [] };
+  const found = workReasons(issue, session, takeover), others = foreignAssignees(issue);
+  if (others.length && !takeover) found.blocked.push(`assigned to ${others.join(', ')}; pass --takeover to take it over`);
+  return found;
+}
 
 /** Unfinished work of the caller: rows (number, assignees, projectItems, closedByPullRequestsReferences) in In progress or Automated review that are assigned to the login and whose open PR names SESSION. */
 function ownWork(rows, login, session) {
@@ -2667,12 +2675,16 @@ function start() {
   const issue = readIssue();
   const takeover = process.argv.includes('--takeover');
   // --takeover without an open PR would claim, branch and open an empty Draft PR (#564): refuse before anything is written.
-  if (takeover && !openPr(issue)) {
+  // A foreign assignee without a PR yet is what --takeover takes over then (#572).
+  if (takeover && !openPr(issue) && !foreignAssignees(issue).length) {
     const merged = issue.closedByPullRequestsReferences?.nodes.find(pr => pr?.state === 'MERGED');
     assert.fail(`--takeover: no open PR closes #${number}${merged ? ` (PR ${refOf(merged.repository, merged.number)} is already merged)` : ''}`);
   }
   if (!mayStart(check(issue, { session, takeover }))) return;
   const stacked = stackedOn, login = issue.viewer.login;
+  // The check took seconds: whoever claimed the issue meanwhile wins, nothing is written yet (#572).
+  const raced = startReasons(readIssue(), session, takeover).blocked;
+  if (raced.length) assert.fail(`${raced.join('; ')}; changed while starting, nothing was written`);
   if (!issue.assignees.nodes.some(user => sameLogin(user.login, login))) restPost(`repos/${project.repository}/issues/${number}/assignees`, ['-f', `assignees[]=${login}`]);
   set('Status', 'In progress');
   const base = stacked ? (stacked.state === 'MERGED' ? stacked.baseRefName : stacked.headRefName)

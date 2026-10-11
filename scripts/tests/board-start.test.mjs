@@ -140,6 +140,35 @@ test('start --takeover without an open PR stops before it writes anything and na
   for (const written of ['develops', 'comment-writes', 'created-pr', 'stored']) assert.equal(existsSync(file(written)), false, written);
 });
 
+test('start stops for a foreign assignee before it writes anything and names them; --takeover goes on (#572)', t => {
+  const { run, writeIssue, file, text } = startFixture(t);
+  writeIssue({ ...issue('Ready'), assignees: { nodes: [{ login: 'benni' }] } });
+  const written = ['develops', 'comment-writes', 'created-pr', 'stored'];
+
+  let result = run('start', '1', '--session', 'S1');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /assigned to benni; pass --takeover to take it over/);
+  for (const name of written) assert.equal(existsSync(file(name)), false, name);
+  assert.equal(JSON.parse(text('issue.json')).assignees.nodes[0].login, 'benni', 'the assignment is untouched');
+
+  result = run('start', '1', '--session', 'S1', '--takeover');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(text('stored'), 'In progress');
+});
+
+test('start stops without a write when someone is assigned between the check and the first write (#572)', t => {
+  const { run, writeIssue, file, text } = startFixture(t);
+  writeIssue(issue('Ready'));
+  // The fake gh swaps the issue file after the first read: the second read sees the claim.
+  writeFileSync(file('issue-next.json'), JSON.stringify({ ...issue('Ready'), assignees: { nodes: [{ login: 'benni' }] } }));
+
+  const result = run('start', '1', '--session', 'S1');
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stdout, /assigned to benni.*nothing was written/);
+  for (const name of ['develops', 'comment-writes', 'created-pr', 'stored']) assert.equal(existsSync(file(name)), false, name);
+  assert.equal(JSON.parse(text('issue.json')).assignees.nodes[0].login, 'benni', 'the assignment is untouched');
+});
+
 test('start names the worktree that holds the branch when it cannot switch to it', t => {
   const { checkout, run, writeIssue, git } = startFixture(t);
   // The predecessor's worktree still has the branch checked out.
