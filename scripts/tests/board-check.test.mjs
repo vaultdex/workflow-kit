@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fixture, handoffPr, issue, predecessor, test } from './board-fixture.mjs';
 import { isolatedGit } from './fixtures.mjs';
 
@@ -540,6 +541,8 @@ test('--cwd names the project of a command, not the working directory', t => {
   const { checkout, run, writeIssue } = fixture(t);
   const other = join(checkout, '..', 'other-project');
   mkdirSync(join(other, '.github'), { recursive: true });
+  mkdirSync(join(other, '.git'));
+  mkdirSync(join(other, 'sub/deeper'), { recursive: true });
   writeFileSync(join(other, '.github/workflow-project.json'), JSON.stringify({ repository: 'test/other-project', id: 'P2' }));
   // Startable on the board of the other project only: its item is in P2, the working directory's project is P1.
   writeIssue({ ...issue(), projectItems: { nodes: [{ id: 'PI2', project: { id: 'P2' }, status: { name: 'Ready' } }] } });
@@ -551,6 +554,24 @@ test('--cwd names the project of a command, not the working directory', t => {
   assert.match(there.stdout, /^test\/other-project#1 /);
   assert.equal(there.status, 0, there.stdout + there.stderr);
   assert.equal(run('--cwd').status, 2, 'A missing directory is a usage error, not the working directory');
+
+  // #571: a subfolder behaves like the checkout root, with and without --cwd.
+  const nested = run('--cwd', join(other, 'sub/deeper'), 'check', '1');
+  assert.match(nested.stdout, /^test\/other-project#1 /);
+  assert.equal(nested.status, 0, nested.stdout + nested.stderr);
+  // The working directory in a subfolder: a real process, as the fake gh reads its files from the working directory.
+  // An unknown command ends in the usage line, so reaching it proves the project file was found.
+  const sub = join(checkout, 'sub');
+  mkdirSync(sub);
+  const board = () => spawnSync(process.execPath, [fileURLToPath(new URL('../board.mjs', import.meta.url)), 'nosuchcommand'],
+    { cwd: sub, encoding: 'utf8', env: { ...process.env, PATH: join(checkout, '..', 'bin') } });
+  assert.match(board().stderr, /^Usage: board\.mjs/);
+  // Without the project file the command names it and prints no stack.
+  rmSync(join(checkout, '.github/workflow-project.json'));
+  const missing = board();
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /workflow-project\.json is missing/);
+  assert.doesNotMatch(missing.stderr, /\n\s+at /);
 });
 
 

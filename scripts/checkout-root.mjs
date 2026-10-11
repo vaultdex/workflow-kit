@@ -33,10 +33,10 @@ export function enterCwd() {
   }
 }
 
-/** The Git checkout containing the working directory: kit commands act on the project they run in
- * (the working directory, which `--cwd` sets), never on any other path taken from their arguments. */
-export function projectRoot() {
-  for (let directory = realpathSync.native(process.cwd());; directory = dirname(directory)) {
+/** The Git checkout containing `start` (default: the working directory, which `--cwd` sets): kit commands act on the project
+ * they run in, never on any other path taken from their arguments. A submodule's `.git` file ends the search there. */
+export function projectRoot(start = process.cwd()) {
+  for (let directory = realpathSync.native(start);; directory = dirname(directory)) {
     if (existsSync(join(directory, '.git'))) return directory;
     assert.notEqual(dirname(directory), directory, 'Run this command inside a Git checkout');
   }

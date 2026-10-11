@@ -8,13 +8,24 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { externalTool, takeCwd } from './checkout-root.mjs';
+import { externalTool, projectRoot, takeCwd } from './checkout-root.mjs';
 import { isRateLimited, quotaOf, retryAt, splitResponse, untilText, waitInterval } from './quota.mjs';
 
 // Taken off here: the commands below read their arguments by position.
-const projectDirectory = takeCwd();
+// A subfolder of the checkout (or of --cwd) works like its root: the project file is found there.
+const startDirectory = takeCwd();
+let projectDirectory;
+try { projectDirectory = projectRoot(startDirectory); } catch (error) {
+  console.error(`${startDirectory}: ${error.code === 'ENOENT' ? 'is not a directory' : 'is not inside a Git checkout'}`);
+  process.exit(2);
+}
 const [command, ref, typed] = process.argv.slice(2);
-const project = JSON.parse(readFileSync(join(projectDirectory, '.github/workflow-project.json'), 'utf8'));
+const projectFile = join(projectDirectory, '.github/workflow-project.json');
+if (!existsSync(projectFile)) {
+  console.error(`${projectFile} is missing: run board.mjs inside the project, or name it with --cwd PROJECT_DIR`);
+  process.exit(2);
+}
+const project = JSON.parse(readFileSync(projectFile, 'utf8'));
 const [owner, name] = project.repository.split('/');
 // `new` has no issue yet and assigns the number it creates.
 let number = Number(String(ref).replace(/^#/, ''));
