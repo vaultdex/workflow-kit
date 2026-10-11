@@ -474,6 +474,8 @@ function api(argv, input, stdout, stderr, exit) {
     // branches.json: the names the branch filter of the issue query finds.
     const refs = fs.existsSync('branches.json') ? { nodes: JSON.parse(fs.readFileSync('branches.json')).map(name => ({ name })) } : { nodes: [] };
     data = { repository: { issue, refs }, ...query.includes('{viewer{login}') && { viewer: { login: 'worker' } } };
+    // issue-next.json: what the issue looks like from the next read on (someone changed it in between).
+    if (fs.existsSync('issue-next.json')) fs.renameSync('issue-next.json', 'issue.json');
   }
   // A query reports its cost (one point), a mutation none.
   answer(JSON.stringify({ data: data && query.startsWith('query') ? { ...data, rateLimit: { cost: 1 } } : data }));

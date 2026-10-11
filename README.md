@@ -219,6 +219,7 @@ and then work in that directory, their relative paths (changed files given to `a
   Human-review PR has merge conflicts (DIRTY). Activity is the newest update of the issue (comments), its Project item (status) and its open PR
   (push, comments, reviews), including bots. Work without activity for `staleHours` (or on a Human-review issue whose PR has conflicts) has expired: `start ISSUE --session NEW` then
   notes the stale PR instead of BLOCKED (its branch holds nothing either) and writes NEW into its claim line; the assignees stay. `start ISSUE --session NEW --takeover` does the same for a fresh PR (a deliberate phase handover).
+  Another person than the caller on the issue holds it too, before any PR exists: `check`, `start` and `next` stop with "assigned to LOGIN; pass --takeover to take it over", and `start --takeover` goes on. `start` reads the issue again right before its first write and stops without writing if the check now fails.
   `next` lists STACKABLE issues apart, with the base PR; information only.
 - `block ISSUE OWNER/REPO#N`, `sub PARENT CHILD` (native sub-issue, read back; `CHILD` may be
   `OWNER/REPO#N`; an existing link succeeds again; no removing or reordering).
